@@ -7,13 +7,13 @@
     "version": "1.0.0-local",
     "license": "Mozilla Public License Version 2.0",
     "description": "A versatile JavaScript and TypeScript toolchain build system",
-    "homepage": "https://github.com/remotex-lab/xBuild",
+    "homepage": "https://github.com/remotex-labs/xBuild",
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/remotex-lab/xBuild.git"
+        "url": "git+https://github.com/remotex-labs/xBuild.git"
     },
     "bugs": {
-        "url": "https://github.com/remotex-lab/xBuild/issues"
+        "url": "https://github.com/remotex-labs/xBuild/issues"
     },
     "man": [
         "./man/xbuild.1"
@@ -58,20 +58,23 @@
         "ci:clean": "rm -rf ./dist",
         "ci:build": "npm run build"
     },
+    "peerDependencies": {
+        "typescript": "^5.8.3"
+    },
     "devDependencies": {
-        "jest": "^29.7.0",
-        "eslint": "^9.24.0",
-        "typescript": "^5.8.3",
-        "typescript-eslint": "^8.29.0",
+        "jest": "^30.0.3",
+        "eslint": "^9.29.0",
+        "typescript-eslint": "^8.35.0",
         "eslint-plugin-tsdoc": "^0.4.0",
-        "@swc/jest": "^0.2.37",
-        "@types/jest": "^29.5.14",
-        "@types/node": "^22.14.0",
-        "@remotex-labs/xbuild": "1.5.6"
+        "eslint-plugin-perfectionist": "^4.14.0",
+        "@swc/jest": "^0.2.38",
+        "@types/jest": "^30.0.0",
+        "@types/node": "^24.0.5",
+        "@remotex-labs/xbuild": "1.5.8"
     },
     "dependencies": {
-        "yargs": "^17.7.2",
-        "esbuild": "^0.25.2",
-        "@remotex-labs/xmap": "^3.0.4"
+        "yargs": "^18.0.0",
+        "esbuild": "^0.25.5",
+        "@remotex-labs/xmap": "^3.0.5"
     }
 }
