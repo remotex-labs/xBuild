@@ -1,8 +1,9 @@
 {
     "name": "@remotex-labs/xbuild",
     "type": "module",
-    "main": "dist/index.js",
+    "main": "dist/ts-plugin/index.js",
     "types": "dist/index.d.ts",
+    "module": "./dist/index.js",
     "author": "Garefild",
     "version": "1.0.0-local",
     "license": "Mozilla Public License Version 2.0",
