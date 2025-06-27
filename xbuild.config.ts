@@ -39,6 +39,16 @@ const config: xBuildConfig[] = [
                 '.html': 'text'
             }
         }
+    },
+    {
+        declaration: false,
+        esbuild: {
+            format: 'cjs',
+            outdir: 'dist/ts-plugin',
+            entryPoints: {
+                'index': 'src/modules/ts-plugin/index.module.ts'
+            }
+        }
     }
 ];
 

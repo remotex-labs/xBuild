@@ -41,6 +41,9 @@
             ],
             "@configuration/*": [
                 "configuration/*"
+            ],
+            "@ts-plugin/*": [
+                "modules/ts-plugin/*"
             ]
         }
     },
