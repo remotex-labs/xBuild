@@ -73,6 +73,7 @@
     "dependencies": {
         "yargs": "^18.0.0",
         "esbuild": "^0.25.5",
-        "@remotex-labs/xmap": "^3.0.5"
+        "@remotex-labs/xmap": "^3.0.5",
+        "@remotex-labs/xansi": "^1.0.2"
     }
 }
