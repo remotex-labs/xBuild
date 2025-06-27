@@ -4,7 +4,7 @@
 
 import type { Stats } from 'fs';
 import type { IncomingMessage, ServerResponse } from 'http';
-import type { Serve } from '@configuration/interfaces/configuration.interface';
+import type { ServerConfigurationInterface } from './interfaces/server.interface';
 
 /**
  * Imports
@@ -13,28 +13,54 @@ import type { Serve } from '@configuration/interfaces/configuration.interface';
 import * as http from 'http';
 import * as https from 'https';
 import html from './html/server.html';
-import { extname, join, resolve } from 'path';
+import { extname, join, normalize } from 'path';
 import { prefix } from '@components/banner.component';
-import { Colors, setColor } from '@components/colors.component';
-import { existsSync, readdir, readFile, readFileSync, stat } from 'fs';
+import { readdir, readFile, readFileSync, stat } from 'fs';
+import { xterm } from '@remotex-labs/xansi/xterm.component';
 
 /**
  * A mapping of file extensions to their corresponding icon and color.
  *
- * This record associates common file types with a Font Awesome icon class
- * and a color code for display purposes in a file listing UI. Each file type
- * is represented by an icon and a color that visually distinguishes it.
+ * @remarks
+ * This constant provides a standardized way to represent different file types visually in the UI.
+ * Each entry maps a file extension (without the dot) to an object containing:
+ * - `icon`: A Font Awesome icon class name (without the 'fa-' prefix)
+ * - `color`: A hexadecimal color code for the icon
  *
- * Example:
- * - HTML files are represented by a code icon (`fa-file-code`) with a color of `#d1a65f`.
- * - Image files (e.g., PNG, JPG, GIF) share a common image icon (`fa-file-image`) with a color of `#53a8e4`.
+ * File types are grouped by category with consistent visual representation:
+ * - Code files (html, css, js) use code-related icons with language-specific colors
+ * - Data files (json) use structured data icons with distinctive colors
+ * - Image files (png, jpg, jpeg, gif) use the same image icon with a consistent blue color
+ * - Text files (txt) use a text document icon with a neutral gray color
+ * - Folders have a special entry with a folder icon in yellow
  *
+ * The constant is marked with `as const` to ensure type safety when accessing the values.
+ *
+ * @example
+ * ```tsx
+ * // Getting icon information for a file by its extension
+ * function getFileIconInfo(filename: string) {
+ *   const extension = filename.split('.').pop() || '';
+ *   return fileIcons[extension] || { icon: 'fa-file', color: '#8e8e8e' };
+ * }
+ *
+ * // Using the icon information in a component
+ * function FileIcon({ filename }: { filename: string }) {
+ *   const { icon, color } = getFileIconInfo(filename);
+ *   return (
+ *     <i className={`fa ${icon}`} style={{ color }} aria-hidden="true"></i>
+ *   );
+ * }
+ * ```
+ *
+ * @since 1.0.0
  */
 
 const fileIcons: Record<string, { icon: string, color: string }> = {
     html: { icon: 'fa-file-code', color: '#d1a65f' },
     css: { icon: 'fa-file-css', color: '#264de4' },
     js: { icon: 'fa-file-code', color: '#f7df1e' },
+    ts: { icon: 'fa-file-code', color: '#f7df1e' },
     json: { icon: 'fa-file-json', color: '#b41717' },
     png: { icon: 'fa-file-image', color: '#53a8e4' },
     jpg: { icon: 'fa-file-image', color: '#53a8e4' },
@@ -42,101 +68,129 @@ const fileIcons: Record<string, { icon: string, color: string }> = {
     gif: { icon: 'fa-file-image', color: '#53a8e4' },
     txt: { icon: 'fa-file-alt', color: '#8e8e8e' },
     folder: { icon: 'fa-folder', color: '#ffb800' }
-};
+} as const;
 
-
-/**
- * Manages the HTTP or HTTPS server based on the provided configuration.
- *
- * The `ServerProvider` class initializes and starts either an HTTP or HTTPS server based on whether SSL certificates
- * are provided. It handles incoming requests, serves static files, and lists directory contents with appropriate
- * icons and colors.
- *
- * @class
- */
-
-export class ServerProvider {
+export class ServerModule {
     /**
-     * Root dir to serve
+     * The root directory path from which static files will be served.
+     *
+     * @since 1.0.0
      */
+
 
     private readonly rootDir: string;
 
     /**
-     * Indicates whether the server is configured to use HTTPS.
-     */
-
-    private readonly isHttps: boolean;
-
-    /**
-     * The server configuration object, including SSL certificate paths and other settings.
-     */
-
-    private readonly config: Required<Serve>;
-
-    /**
      * Creates an instance of ServerProvider.
      *
-     * @param config - The server configuration object, including port number, SSL certificate paths, and an optional request handler.
-     * @param dir - The root directory from which to serve files.
+     * @param config - The server configuration object that controls server behavior
+     * @param dir - The root directory path from which static files will be served
+     *
+     * @throws Error If the provided directory path does not exist or is not accessible
+     *
+     * @remarks
+     * The constructor initializes a new server provider with the specified configuration and root directory.
+     *
+     * The `config` parameter contains server settings:
+     * - `port`: The TCP port number on which the server will listen
+     * - `host`: The hostname or IP address to bind the server to
+     * - `key`: Optional path to the SSL key file for HTTPS support
+     * - `cert`: Optional path to the SSL certificate file for HTTPS support
+     * - `https`: Optional flag to enable HTTPS server (requires key and cert)
+     * - `verbose`: Optional flag to enable detailed request logging
+     * - `onRequest`: Optional callback function for custom request handling
+     * - `onStart`: Optional callback function that runs before the server starts
+     *
+     * The `dir` parameter is normalized internally to ensure consistent path handling across
+     * different operating systems. The normalized path is stored in the `rootDir` property.
      *
      * @example
      * ```ts
-     * import { ServerProvider } from './server-provider';
+     * // Basic HTTP configuration
+     * const server = new ServerModule({
+     *   port: 8080,
+     *   host: 'localhost'
+     * }, './public');
      *
-     * const serverConfig = {
-     *     port: 8080,
-     *     keyfile: './path/to/keyfile',
-     *     certfile: './path/to/certfile',
-     *     onRequest: (req, res, next) => { /* custom request handling *\/ }
-     * };
-     * const provider = new ServerProvider(serverConfig, './public');
-     * provider.start();
+     * // HTTPS configuration
+     * const secureServer = new ServerModule({
+     *   port: 443,
+     *   host: 'example.com',
+     *   https: true,
+     *   key: './certs/server.key',
+     *   cert: './certs/server.crt'
+     * }, './www');
+     *
+     * // With custom request handler and startup hook
+     * const customServer = new ServerModule({
+     *   port: 3000,
+     *   host: '0.0.0.0',
+     *   verbose: true,
+     *   onRequest: (req, res, next) => {
+     *     console.log(`Request received: ${ req.url }`);
+     *     next();
+     *   },
+     *   onStart: async () => {
+     *     console.log('Server is about to start...');
+     *   }
+     * }, './public');
+     *
+     * // Start the server
+     * server.start();
      * ```
      *
-     * This example shows how to create an instance of `ServerProvider` and start the server.
+     * @since 1.0.0
      */
 
-    constructor(config: Serve, dir: string) {
-        this.rootDir = resolve(dir);
-        this.config = <Required<Serve>> config;
-        this.isHttps = this.config.keyfile && this.config.certfile
-            ? existsSync(this.config.keyfile) && existsSync(this.config.certfile)
-            : false;
+    constructor(private config: ServerConfigurationInterface, dir: string) {
+        this.rootDir = normalize(dir);
     }
 
     /**
      * Starts the server based on the configuration.
-     * If SSL certificates are provided and valid, an HTTPS server is started. Otherwise, an HTTP server is started.
+     *
+     * @throws Error If the HTTPS server fails to start due to invalid certificates or if port binding fails
+     *
+     * @remarks
+     * This method initializes and starts either an HTTP or HTTPS server depending on the configuration.
+     * If the `https` flag is set to true in the configuration, an HTTPS server will be started
+     * using the provided SSL certificate and key files. Otherwise, an HTTP server will be started.
+     *
+     * Before starting the server, this method will execute any `onStart` callback provided
+     * in the configuration. The `onStart` callback is executed synchronously.
      *
      * @example
      * ```ts
-     * provider.start();
+     * // Basic server start
+     * server.start();
+     *
+     * // Start with error handling
+     * try {
+     *   server.start();
+     *   console.log('Server started successfully');
+     * } catch (error) {
+     *   console.error('Failed to start server:', error);
+     * }
      * ```
      *
-     * This example demonstrates how to start the server. It will either start an HTTP or HTTPS server based on the configuration.
+     * @since 1.0.0
      */
 
     start(): void {
         if (this.config.onStart)
             this.config.onStart();
 
-        if (this.isHttps)
+        if (this.config.https)
             return this.startHttpsServer();
 
         this.startHttpServer();
     }
 
     /**
-     * Starts an HTTP server.
-     * This method creates an HTTP server that listens on the configured port and handles incoming requests.
+     * Starts an HTTP server based on the configuration.
+     * @throws Error - If the server fails to bind to the specified host and port
      *
-     * @example
-     * ```ts
-     * provider.startHttpServer();
-     * ```
-     *
-     * This example shows how the `startHttpServer` method is used internally to start an HTTP server.
+     * @since 1.0.0
      */
 
     private startHttpServer(): void {
@@ -145,27 +199,25 @@ export class ServerProvider {
         });
 
         server.listen(this.config.port, this.config.host, () => {
-            console.log(`${ prefix() } HTTP/S server is running at http://${ this.config.host }:${ this.config.port }`);
+            console.log(`${ prefix() } HTTP server is running at ${
+                xterm.canaryYellow(`http://${ this.config.host }:${ this.config.port }`)
+            }`);
         });
     }
 
     /**
-     * Starts an HTTPS server.
+     * Starts an HTTPS server based on the configuration.
      *
-     * This method creates an HTTPS server with SSL/TLS certificates, listens on the configured port, and handles incoming requests.
+     * @throws Error -  If the SSL certificate files cannot be read,
+     * or if the server fails to bind to the specified host and port
      *
-     * @example
-     * ```ts
-     * provider.startHttpsServer();
-     * ```
-     *
-     * This example shows how the `startHttpsServer` method is used internally to start an HTTPS server.
+     * @since 1.0.0
      */
 
     private startHttpsServer(): void {
         const options = {
-            key: readFileSync(this.config.keyfile),
-            cert: readFileSync(this.config.certfile)
+            key: readFileSync(this.config.key ?? './certs/server.key'),
+            cert: readFileSync(this.config.cert ?? './certs/server.crt')
         };
 
         const server = https.createServer(options, (req, res) => {
@@ -173,9 +225,10 @@ export class ServerProvider {
         });
 
         server.listen(this.config.port, this.config.host, () => {
-            const server = setColor(Colors.CanaryYellow, `https://${ this.config.host }:${ this.config.port }`);
             console.log(
-                `${ prefix() } HTTPS server is running at ${ server }`
+                `${ prefix() } HTTPS server is running at ${
+                    xterm.canaryYellow(`https://${ this.config.host }:${ this.config.port }`)
+                }`
             );
         });
     }
@@ -190,14 +243,17 @@ export class ServerProvider {
      * @param res - The response object.
      * @param defaultHandler - The default handler functions to be called if no custom handler is provided.
      *
-     * @example
-     * ```ts
-     * // This method is used internally to handle requests
-     * ```
+     * @since 1.0.0
      */
 
     private handleRequest(req: IncomingMessage, res: ServerResponse, defaultHandler: () => void): void {
         try {
+            if(this.config.verbose) {
+                console.log(
+                    `${ xterm.burntOrange('[server]') } Request ${ xterm.lightCoral(req.url?.toString() ?? '') }`
+                );
+            }
+
             if (this.config.onRequest) {
                 this.config.onRequest(req, res, defaultHandler);
             } else {
@@ -210,17 +266,12 @@ export class ServerProvider {
 
     /**
      * Returns the MIME type for a given file extension.
-     *
      * This method maps file extensions to their corresponding MIME types.
      *
      * @param ext - The file extension.
      * @returns The MIME type associated with the file extension.
      *
-     * @example
-     * ```ts
-     * const mimeType = provider.getContentType('html');
-     * console.log(mimeType); // 'text/html'
-     * ```
+     * @since 1.0.0
      */
 
     private getContentType(ext: string): string {
@@ -251,12 +302,9 @@ export class ServerProvider {
      *
      * @returns A promise that resolves when the response is sent.
      *
-     * @throws  Throws an error if the file or directory cannot be accessed.
+     * @throws Error -throw an error if the file or directory cannot be accessed.
      *
-     * @example
-     * ```ts
-     * // This method is used internally to handle file and directory responses
-     * ```
+     * @since 1.0.0
      */
 
     private async defaultResponse(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -290,17 +338,12 @@ export class ServerProvider {
 
     /**
      * promisifyStat the `fs.stat` method.
-     *
      * Converts the `fs.stat` callback-based method to return a promise.
      *
      * @param path - The file or directory path.
      * @returns A promise that resolves with the file statistics.
      *
-     * @example
-     * ```ts
-     * const stats = await provider.promisifyStat('./path/to/file');
-     * console.log(stats.isFile()); // true or false
-     * ```
+     * @since 1.0.0
      */
 
     private promisifyStat(path: string): Promise<Stats> {
@@ -318,10 +361,7 @@ export class ServerProvider {
      * @param requestPath - The request path for generating relative links.
      * @param res - The response object.
      *
-     * @example
-     * ```ts
-     * // This method is used internally to handle directory listings
-     * ```
+     * @since 1.0.0
      */
 
     private handleDirectory(fullPath: string, requestPath: string, res: ServerResponse): void {
@@ -356,10 +396,7 @@ export class ServerProvider {
      * @param fullPath - The full path to the file.
      * @param res - The response object.
      *
-     * @example
-     * ```ts
-     * // This method is used internally to handle file responses
-     * ```
+     * @since 1.0.0
      */
 
     private handleFile(fullPath: string, res: ServerResponse): void {
@@ -378,15 +415,9 @@ export class ServerProvider {
 
     /**
      * Sends a 404 Not Found response.
-     *
      * @param res - The response object.
      *
-     * @example
-     * ```ts
-     * provider.sendNotFound(response);
-     * ```
-     *
-     * This example demonstrates how to send a 404 response using the `sendNotFound` method.
+     * @since 1.0.0
      */
 
     private sendNotFound(res: ServerResponse): void {
@@ -400,16 +431,11 @@ export class ServerProvider {
      * @param res - The response object.
      * @param error - The error object.
      *
-     * @example
-     * ```ts
-     * provider.sendError(response, new Error('Some error'));
-     * ```
-     *
-     * This example shows how to send an error response using the `sendError` method.
+     * @since 1.0.0
      */
 
     private sendError(res: ServerResponse, error: Error): void {
-        console.error(`${ prefix() }`, error.toString());
+        console.error(prefix(), error.toString());
         res.writeHead(500, { 'Content-Type': 'text/plain' });
         res.end('Internal Server Error');
     }

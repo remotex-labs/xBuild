@@ -42,6 +42,9 @@
             "@configuration/*": [
                 "configuration/*"
             ],
+            "@server/*": [
+                "modules/server/*"
+            ],
             "@ts-plugin/*": [
                 "modules/ts-plugin/*"
             ]

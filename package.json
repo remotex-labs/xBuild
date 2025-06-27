@@ -39,6 +39,7 @@
     "files": [
         "man",
         "dist",
+        "certs",
         "LICENSE",
         "README.md"
     ],
