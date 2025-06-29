@@ -3,9 +3,9 @@
         "strict": true,
         "target": "ESNext",
         "module": "ESNext",
-        "baseUrl": "./src",
         "outDir": "dist",
         "rootDir": ".",
+        "baseUrl": "./src",
         "declaration": true,
         "skipLibCheck": true,
         "importHelpers": true,
@@ -47,6 +47,9 @@
             ],
             "@ts-plugin/*": [
                 "modules/ts-plugin/*"
+            ],
+            "@typescript/*": [
+                "modules/typescript/*"
             ]
         }
     },

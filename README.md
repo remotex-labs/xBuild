@@ -79,7 +79,7 @@ const config: ConfigurationInterface = {
     buildOnError: false,
     noTypeChecker: false,
     esbuild: {
-        entryPoints: ['./src/index.ts'],
+        entryPoints: ['./src/index.module.ts'],
         bundle: true,
         minify: true,
         format: 'esm',
@@ -128,7 +128,7 @@ const config: Array<xBuildConfig> = [
             packages: 'external',
             sourcemap: true,
             sourceRoot: `https://github.com/remotex-lab/xmap/tree/v${ pkg.version }/`,
-            entryPoints: [ 'src/index.ts' ]
+            entryPoints: [ 'src/index.module.ts' ]
         }
     },
     {
@@ -145,21 +145,21 @@ const config: Array<xBuildConfig> = [
 export default config;
 ```
 
-## Using the ifdef Plugin
-The `ifdef` plugin in `xBuild` allows to conditionally include or exclude code based on defined variables. Here’s an example:
+## Using the IFDEF Plugin
+The `IFDEF` plugin in `xBuild` allows to conditionally include or exclude code based on defined variables. Here’s an example:
 ```ts
 // main.ts
 
 console.log("This code always runs");
 
 // If the `DEBUG` flag is set in your build config, this block will be included
-// ifdef DEBUG
+// IFDEF DEBUG
 console.log("Debug mode is enabled");
-// endif
+// ENDIF
 
-// ifdef FEATURE_X
+// IFDEF FEATURE_X
 console.log("Feature X is active");
-// endif
+// ENDIF
 ```
 
 ### Setting Conditions in Configuration
@@ -173,7 +173,7 @@ export default {
         format: 'esm',
         bundle: true,
     },
-    ifdef: {
+    IFDEF: {
         DEBUG: true,        // Enables the DEBUG section
         FEATURE_X: false,    // Excludes the FEATURE_X section
     }
@@ -221,7 +221,7 @@ const config: xBuildConfig = {
     buildOnError: false,
     noTypeChecker: false,
     esbuild: {
-        entryPoints: ['./src/index.ts'],
+        entryPoints: ['./src/index.module.ts'],
         bundle: true,
         minify: true,
         target: 'es2020'
@@ -247,22 +247,22 @@ const config: xBuildConfig = {
 export default config;
 ```
 
-## Using the ifdef and macros
+## Using the IFDEF and macros
 ```ts
 // main.ts
 
 console.log("This code always runs");
 
 // If the `DEBUG` flag is set in your build config, this block will be included
-// ifdef DEBUG
+// IFDEF DEBUG
 export function $$logger(...args: Array<unknown>): void {
     console.log(...args);
 }
-// endif
+// ENDIF
 
-// ifdef FEATURE_X
+// IFDEF FEATURE_X
 console.log("Feature X is active");
-// endif
+// ENDIF
 
 
 $$logger('data'); // will be deleted if $$logger does not exist
