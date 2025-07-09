@@ -1,0 +1,376 @@
+# -- modules
+
+import os
+import shlex
+import json
+import subprocess
+from datetime import datetime
+from uuid import UUID
+from argparse import ArgumentParser
+from typing import List
+
+from pygments import highlight, formatters, lexers
+from pygments.token import (Comment, Error, Generic, Name, Number, Operator, String, Text, Whitespace, Keyword, Literal, Other, Punctuation)
+
+from xonsh.tools import unthreadable
+from xonsh.events import events
+from xonsh.built_ins import XSH
+from xonsh.pyghooks import register_custom_pygments_style
+from xonsh.ansi_colors import register_custom_ansi_style
+
+# -- XONTRIB
+if XSH.env.get('FORMATTER_DICT') is None:
+    XSH.env['FORMATTER_DICT'] = {}
+
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+XSH.builtins.execx('xontrib load zoxide argcomplete coreutils fzf-completions jedi vox')
+
+XSH.env['PROMPT'] = '{env_name}{BOLD_GREEN}{user}@{hostname}{BOLD_BLUE} {cwd}{branch_color}{curr_branch: {}}{RESET} {BOLD_BLUE}{prompt_end}{RESET} '
+
+XSH.env['GIT_EXTERNAL_DIFF'] = 'difft'
+
+XSH.env['fzf_history_binding'] = "c-r"  # Ctrl+R
+XSH.env['fzf_ssh_binding'] = "c-s"      # Ctrl+S
+XSH.env['fzf_file_binding'] = "c-t"      # Ctrl+T
+XSH.env['fzf_dir_binding'] = "c-g"      # Ctrl+G
+
+# The SQLite history backend saves command immediately
+# unlike JSON backend that save the commands at the end of the session.
+XSH.env['XONSH_HISTORY_BACKEND'] = 'sqlite'
+
+# What commands are saved to the history list. By default all commands are saved.
+# * The option ‘ignoredups’ will not save the command if it matches the previous command.
+# * The option `erasedups` will remove all previous commands that matches and updates the command frequency.
+#   The minus of `erasedups` is that the history of every session becomes unrepeatable
+#   because it will have a lack of the command you repeat in another session.
+# Docs: https://xonsh.github.io/envvars.html#histcontrol
+XSH.env['HISTCONTROL'] = 'ignoredups'
+
+
+# Remove front dot in multiline input to make the code copy-pastable.
+XSH.env['MULTILINE_PROMPT'] = ' '
+
+
+# Avoid typing cd just directory path.
+# Docs: https://xonsh.github.io/envvars.html#auto-cd
+XSH.env['AUTO_CD'] = True
+
+
+def _default_json_encoder(obj):
+    if isinstance(obj, bytes):
+        return '<' + obj.hex() + '>'
+    if isinstance(obj, datetime):
+        return str(obj)
+    if isinstance(obj, UUID):
+        return str(obj)
+    raise TypeError()
+
+def _open_github(args):
+    try:
+        import webbrowser
+        from pathlib import Path
+
+        # Ensure we're inside a Git repo
+        root = subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], text=True).strip()
+        os.chdir(root)
+
+        # Get current remote URL
+        remote_url = subprocess.check_output(['git', 'remote', 'get-url', 'origin'], text=True).strip()
+
+        # Get current branch name
+        branch = subprocess.check_output(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], text=True).strip()
+
+        # Parse remote URL
+        if remote_url.startswith('git@'):
+            # git@github.com:user/repo.git
+            _, path = remote_url.split(':', 1)
+            url = f'https://github.com/{path}'
+        elif remote_url.startswith('https://') or remote_url.startswith('http://'):
+            url = remote_url
+        else:
+            print(f"Unsupported remote URL: {remote_url}")
+            return
+
+        url = url.rstrip('.git')
+        url += f'/tree/{branch}'
+        webbrowser.open(url)
+    except subprocess.CalledProcessError:
+        print('Not a git repository or no remote "origin" set.')
+    except Exception as e:
+        print(f'Error: {e}')
+
+def _pretty_json(buf, colored=True, default=_default_json_encoder):
+    formatted_json = json.dumps(buf, sort_keys=True, indent=4, default=default)
+    if colored:
+        return highlight(formatted_json, lexers.JsonLexer(), formatters.TerminalTrueColorFormatter(style='stata-dark'))
+    else:
+        return formatted_json
+
+def _subprocess(args: List[str]) -> None:
+    subprocess.Popen(args, shell=True)
+
+@unthreadable
+def _ggpush(args):
+    XSH.builtins.execx(f'git push origin {XSH.env["PROMPT_FIELDS"]["curr_branch"]()} {shlex.join(args)}')
+
+@events.on_chdir
+def handler_chdir(olddir, newdir, **kw):
+    """
+    Event handler that updates the prompt when the directory changes
+    """
+    print(f'\033]9;9;{newdir}\033\\\033[A', end='')
+
+# -- STYLE
+
+ANSI_STYLE = {
+    'BLACK': '#282828', 'BLUE': '#458588', 'CYAN': '#689D6A', 'DEFAULT': '#D4EB98', 'GREEN': '#98971A', 'ORANGE': '#D65D0E', 'PURPLE': '#b16286', 'RED': '#CC441D', 'WHITE': '#EBDBB2', 'YELLOW': '#D79921',
+    'INTENSE_BLACK': '#665C54', 'INTENSE_BLUE': '#83A598', 'INTENSE_CYAN': '#8EC07C', 'INTENSE_GREEN': '#b8bb26', 'INTENSE_ORANGE': '#fe8019', 'INTENSE_PURPLE': '#D3869B', 'INTENSE_RED': '#fb4934', 'INTENSE_WHITE': '#FBF1F7', 'INTENSE_YELLOW': '#FA8D2F',
+}
+
+BG_COLOR = ANSI_STYLE['BLACK']
+PG_STYLE = {
+    Comment: f'{ANSI_STYLE["INTENSE_CYAN"]} italic',
+
+    Error: f'{ANSI_STYLE["RED"]} bold',
+
+    Generic: f'{ANSI_STYLE["DEFAULT"]}',
+    Generic.Deleted: f'{ANSI_STYLE["INTENSE_BLACK"]}',
+    Generic.Emph: f'{ANSI_STYLE["WHITE"]}',
+    Generic.Error: f'{ANSI_STYLE["RED"]} bold',
+    Generic.Heading: f'{ANSI_STYLE["INTENSE_WHITE"]}',
+    Generic.Inserted: f'{ANSI_STYLE["INTENSE_WHITE"]}',
+    Generic.Output: '#44475A',
+    Generic.Prompt: f'{ANSI_STYLE["WHITE"]}',
+    Generic.Strong: f'{ANSI_STYLE["WHITE"]} bold',
+    Generic.Subheading: f'{ANSI_STYLE["INTENSE_WHITE"]}',
+    Generic.Traceback: f'{ANSI_STYLE["ORANGE"]}',
+
+    Keyword: f'{ANSI_STYLE["INTENSE_RED"]}',
+    Keyword.Content: f'{ANSI_STYLE["INTENSE_RED"]}',
+    Keyword.Declaration: f'{ANSI_STYLE["INTENSE_RED"]}',
+    Keyword.Namespace: f'{ANSI_STYLE["RED"]} bold',
+    Keyword.Pseudo: f'{ANSI_STYLE["INTENSE_RED"]}',
+    Keyword.Reserved: f'{ANSI_STYLE["INTENSE_CYAN"]}',
+    Keyword.Type: f'{ANSI_STYLE["YELLOW"]}',
+
+    Literal: f'{ANSI_STYLE["INTENSE_WHITE"]}',
+    Literal.Date: f'{ANSI_STYLE["INTENSE_WHITE"]}',
+
+    Name: f'{ANSI_STYLE["INTENSE_BLUE"]}',
+    Name.Attribute: f'{ANSI_STYLE["INTENSE_CYAN"]}',
+    Name.Builtin: f'{ANSI_STYLE["INTENSE_YELLOW"]} bold',
+    Name.Builtin.Pseudo: f'{ANSI_STYLE["INTENSE_ORANGE"]}',
+    Name.Class: f'{ANSI_STYLE["INTENSE_ORANGE"]} underline',
+    Name.Constant: f'{ANSI_STYLE["PURPLE"]}',
+    Name.Decorator: f'{ANSI_STYLE["INTENSE_RED"]}',
+    Name.Entity: f'{ANSI_STYLE["INTENSE_WHITE"]}',
+    Name.Exception: f'{ANSI_STYLE["INTENSE_PURPLE"]}',
+    Name.Function: f'{ANSI_STYLE["INTENSE_CYAN"]} bold',
+    Name.Label: f'{ANSI_STYLE["INTENSE_RED"]}',
+    Name.Namespace: f'{ANSI_STYLE["INTENSE_GREEN"]}',
+    Name.Other: f'{ANSI_STYLE["WHITE"]}',
+    Name.Variable: f'{ANSI_STYLE["WHITE"]}',
+    Name.Variable.Class: f'{ANSI_STYLE["BLUE"]} italic',
+    Name.Variable.Global: f'{ANSI_STYLE["BLUE"]} italic',
+    Name.Variable.Instance: f'{ANSI_STYLE["BLUE"]} italic',
+
+    Number: f'{ANSI_STYLE["INTENSE_PURPLE"]}',
+
+    Operator: f'{ANSI_STYLE["WHITE"]}',
+    Operator.Word: f'{ANSI_STYLE["RED"]}',
+
+    Other: ANSI_STYLE['WHITE'],
+    Punctuation: ANSI_STYLE['WHITE'],
+
+    String: f'{ANSI_STYLE["INTENSE_GREEN"]}',
+
+    Text: f'{ANSI_STYLE["WHITE"]}',
+
+    Whitespace: f'{ANSI_STYLE["WHITE"]}',
+}
+
+register_custom_pygments_style('doronz', PG_STYLE, background_color=BG_COLOR)
+register_custom_ansi_style('doronz', ANSI_STYLE)
+
+XSH.env['XONSH_COLOR_STYLE'] = 'doronz'
+
+# -- env
+
+XSH.env['PIP_BREAK_SYSTEM_PACKAGES'] = 1
+XSH.env['WORKSETUP_ROOT'] = '~/dev'
+
+
+for path in (r'C:\Program Files (x86)\GnuWin32\bin', ):
+    if path not in XSH.env['PATH']:
+        XSH.env['PATH'].insert(0, path)
+
+
+# -- ALIAS
+
+def _rcpull(args):
+    parser = ArgumentParser(description='pull latest .xonshrc')
+    args = parser.parse_args(args)
+    cd $WORKSETUP_ROOT/windowssetup
+    ggpull
+    cp .xonshrc ~/
+    cd -
+
+
+def _rcpush(args):
+    parser = ArgumentParser(description='push latest .xonshrc')
+    args = parser.parse_args(args)
+
+    cd $WORKSETUP_ROOT/worksetup
+    cp ~/.xonshrc .
+    ga .xonshrc
+    git commit -m 'update .xonshrc'
+    ggpush
+    cd -
+
+
+def _pycharm(args):
+    if 1 != os.system('where pycharm.rc >nul 2>&1'):
+        _subprocess(['pycharm.rc', *args])
+    elif 1 != os.system('where pycharm >nul 2>&1'):
+        _subprocess(['pycharm', *args])
+
+
+def _webstorm(args):
+    if 1 != os.system('where webstorm >nul 2>&1'):
+        _subprocess(['webstorm', *args])
+
+
+def _clion(args):
+    if 1 != os.system('where clion >nul 2>&1'):
+        _subprocess(['clion', *args])
+
+
+def _datagrip(args):
+    if 1 != os.system('where datagrip >nul 2>&1'):
+        _subprocess(['datagrip', *args])
+
+# -- xonsh
+
+XSH.aliases['open'] = 'explorer'
+XSH.aliases['reload'] = 'source ~/.xonshrc'
+XSH.aliases['globalrc'] = 'code ~/.xonshrc'
+XSH.aliases['rcpull'] = _rcpull
+XSH.aliases['rcpush'] = _rcpush
+
+# -- git
+
+XSH.aliases['github'] = _open_github
+XSH.aliases['ga'] = 'git add'
+XSH.aliases['ggpush'] = _ggpush
+XSH.aliases['gco'] = 'git checkout'
+XSH.aliases['ggpull'] = 'git pull'
+XSH.aliases['glog'] = 'git log --oneline --decorate --graph'
+XSH.aliases['gd'] = 'git diff'
+XSH.aliases['gst'] = 'git status'
+XSH.aliases['gcl'] = 'git clone --recurse-submodules'
+
+# -- apps
+
+XSH.aliases['ws'] = _webstorm
+XSH.aliases['dg'] = _datagrip
+XSH.aliases['clion'] = _clion
+XSH.aliases['charm'] = _pycharm
+
+# -- shell
+
+XSH.aliases['ls'] = 'coreutils ls -FG'
+XSH.aliases['mv'] = 'coreutils mv'
+XSH.aliases['tail'] = 'coreutils tail'
+XSH.aliases['arch'] = 'coreutils arch'
+XSH.aliases['b2sum'] = 'coreutils b2sum'
+XSH.aliases['b3sum'] = 'coreutils b3sum'
+XSH.aliases['base32'] = 'coreutils base32'
+XSH.aliases['base64'] = 'coreutils base64'
+XSH.aliases['basename'] = 'coreutils basename'
+XSH.aliases['basenc'] = 'coreutils basenc'
+XSH.aliases['cat'] = 'coreutils cat'
+XSH.aliases['cksum'] = 'coreutils cksum'
+XSH.aliases['comm'] = 'coreutils comm'
+XSH.aliases['cp'] = 'coreutils cp'
+XSH.aliases['csplit'] = 'coreutils csplit'
+XSH.aliases['cut'] = 'coreutils cut'
+XSH.aliases['date'] = 'coreutils date'
+XSH.aliases['dd'] = 'coreutils dd'
+XSH.aliases['df'] = 'coreutils df'
+XSH.aliases['dircolors'] = 'coreutils dircolors'
+XSH.aliases['dirname'] = 'coreutils dirname'
+XSH.aliases['du'] = 'coreutils du'
+XSH.aliases['echo'] = 'coreutils echo'
+XSH.aliases['env'] = 'coreutils env'
+XSH.aliases['expand'] = 'coreutils expand'
+XSH.aliases['expr'] = 'coreutils expr'
+XSH.aliases['factor'] = 'coreutils factor'
+XSH.aliases['false'] = 'coreutils false'
+XSH.aliases['fmt'] = 'coreutils fmt'
+XSH.aliases['fold'] = 'coreutils fold'
+XSH.aliases['hashsum'] = 'coreutils hashsum'
+XSH.aliases['head'] = 'coreutils head'
+XSH.aliases['hostname'] = 'coreutils hostname'
+XSH.aliases['join'] = 'coreutils join'
+XSH.aliases['link'] = 'coreutils link'
+XSH.aliases['ln'] = 'coreutils ln'
+XSH.aliases['md5sum'] = 'coreutils md5sum'
+XSH.aliases['mkdir'] = 'coreutils mkdir'
+XSH.aliases['mktemp'] = 'coreutils mktemp'
+XSH.aliases['more'] = 'coreutils more'
+XSH.aliases['nl'] = 'coreutils nl'
+XSH.aliases['nproc'] = 'coreutils nproc'
+XSH.aliases['numfmt'] = 'coreutils numfmt'
+XSH.aliases['od'] = 'coreutils od'
+XSH.aliases['paste'] = 'coreutils paste'
+XSH.aliases['pr'] = 'coreutils pr'
+XSH.aliases['printenv'] = 'coreutils printenv'
+XSH.aliases['printf'] = 'coreutils printf'
+XSH.aliases['ptx'] = 'coreutils ptx'
+XSH.aliases['pwd'] = 'coreutils pwd'
+XSH.aliases['readlink'] = 'coreutils readlink'
+XSH.aliases['realpath'] = 'coreutils realpath'
+XSH.aliases['rm'] = 'coreutils rm'
+XSH.aliases['rmdir'] = 'coreutils rmdir'
+XSH.aliases['seq'] = 'coreutils seq'
+XSH.aliases['sha1sum'] = 'coreutils sha1sum'
+XSH.aliases['sha224sum'] = 'coreutils sha224sum'
+XSH.aliases['sha256sum'] = 'coreutils sha256sum'
+XSH.aliases['sha384sum'] = 'coreutils sha384sum'
+XSH.aliases['sha3sum'] = 'coreutils sha3sum'
+XSH.aliases['sha512sum'] = 'coreutils sha512sum'
+XSH.aliases['shake128sum'] = 'coreutils shake128sum'
+XSH.aliases['shake256sum'] = 'coreutils shake256sum'
+XSH.aliases['shred'] = 'coreutils shred'
+XSH.aliases['shuf'] = 'coreutils shuf'
+XSH.aliases['sleep'] = 'coreutils sleep'
+XSH.aliases['sort'] = 'coreutils sort'
+XSH.aliases['split'] = 'coreutils split'
+XSH.aliases['sum'] = 'coreutils sum'
+XSH.aliases['sync'] = 'coreutils sync'
+XSH.aliases['tac'] = 'coreutils tac'
+XSH.aliases['tee'] = 'coreutils tee'
+XSH.aliases['test'] = 'coreutils test'
+XSH.aliases['touch'] = 'coreutils touch'
+XSH.aliases['tr'] = 'coreutils tr'
+XSH.aliases['true'] = 'coreutils true'
+XSH.aliases['truncate'] = 'coreutils truncate'
+XSH.aliases['tsort'] = 'coreutils tsort'
+XSH.aliases['uname'] = 'coreutils uname'
+XSH.aliases['unexpand'] = 'coreutils unexpand'
+XSH.aliases['uniq'] = 'coreutils uniq'
+XSH.aliases['unlink'] = 'coreutils unlink'
+XSH.aliases['vdir'] = 'coreutils vdir'
+XSH.aliases['wc'] = 'coreutils wc'
+XSH.aliases['whoami'] = 'coreutils whoami'
+
+XSH.aliases['t'] = 'tree'
+XSH.aliases['l'] = 'ls -lah'
+XSH.aliases['la'] = 'ls -lAh'
+XSH.aliases['ll'] = 'ls -lh'
+XSH.aliases['lsa'] = 'ls -lah'
+XSH.aliases['grt'] = lambda: os.chdir($(git rev-parse --show-toplevel).strip())
+
+XSH.aliases['start'] = 'cmd /c start'
