@@ -25,12 +25,18 @@ function measureTime(fn: any): void {
 import { TypescriptModule } from '@typescript/typescript.module';
 
 const x = new TypescriptModule('tsconfig.json');
-x.updateFile([ 'src/index.ts' ]);
+// x.updateFile([ 'src/index.ts' ]);
 
-// measureTime(() => {
-//     const u = x.check();
-//     console.log(u.join('\n'));
-// });
+measureTime(() => {
+    const u = x.check();
+    console.log(u.join('\n'));
+});
+
+measureTime(() => {
+    const u = x.check();
+    console.log(u.join('\n'));
+});
+
 
 measureTime(() => {
     x.emitBundleDeclarations([ 'src/index.ts' ]);

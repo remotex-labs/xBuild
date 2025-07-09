@@ -9,8 +9,8 @@ import type { ParsedCommandLine, Diagnostic, LanguageService } from 'typescript'
  */
 
 import ts from 'typescript';
+import { dirname, relative } from 'path';
 import { mkdirSync, writeFileSync } from 'fs';
-import { dirname, join, relative } from 'path';
 import { xterm } from '@remotex-labs/xansi/xterm.component';
 import { formatHost } from '@typescript/constants/typescript.constant';
 import { LanguageHostService } from '@typescript/services/language-host.service';
@@ -151,6 +151,84 @@ export class TypescriptModule {
     }
 
     emitBundleDeclarations(entrypoints: string[]): void {
+        const program = this.languageService.getProgram();
+        if (!program) return;
+
+        const checker = program.getTypeChecker();
+
+        for (const entry of entrypoints) {
+            console.log(entry);
+            const sourceFile = program.getSourceFile(entry);
+            if (!sourceFile) continue;
+
+            const collected = new Set<ts.Node>();
+            const collectedText = new Set<string>();
+
+            const resolveExport = (node: ts.ExportDeclaration): any => {
+                const moduleSpecifier = node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)
+                    ? node.moduleSpecifier.text
+                    : undefined;
+
+                if (!moduleSpecifier) return;
+
+                const resolved = ts.resolveModuleName(moduleSpecifier, entry, this.config.options, ts.sys);
+                const resolvedFileName = resolved.resolvedModule?.resolvedFileName;
+                if (!resolvedFileName) return;
+
+                const importedFile = program.getSourceFile(resolvedFileName);
+                if (!importedFile) return;
+
+                if (!node.exportClause) {
+                    // export * from './x'
+                    for (const stmt of importedFile.statements) {
+                        if (ts.canHaveModifiers(stmt) && ts.getModifiers(stmt)?.some(m => m.kind === ts.SyntaxKind.ExportKeyword)) {
+                            collected.add(stmt);
+                        }
+                    }
+                } else if (ts.isNamedExports(node.exportClause)) {
+                    for (const specifier of node.exportClause.elements) {
+                        const symbol = checker.getExportSpecifierLocalTargetSymbol(specifier);
+                        const decl = symbol?.declarations?.[0];
+                        if (decl) collected.add(decl);
+                    }
+                }
+            };
+
+            const processTopLevel = (): any => {
+                for (const stmt of sourceFile.statements) {
+                    if (ts.isExportDeclaration(stmt)) {
+                        resolveExport(stmt);
+                    } else if (
+                        ts.canHaveModifiers(stmt) &&
+                        ts.getModifiers(stmt)?.some(m => m.kind === ts.SyntaxKind.ExportKeyword)
+                    ) {
+                        collected.add(stmt);
+                    }
+                }
+            };
+
+            const emitDtsText = (): any => {
+                const printer = ts.createPrinter({ newLine: ts.NewLineKind.LineFeed });
+                for (const node of collected) {
+                    const text = printer.printNode(ts.EmitHint.Unspecified, node, node.getSourceFile());
+                    if (!collectedText.has(text)) {
+                        collectedText.add(text);
+                    }
+                }
+
+                return Array.from(collectedText).join('\n\n');
+            };
+
+            processTopLevel();
+            const dtsText = emitDtsText();
+
+            const outDir = this.config.options.outDir;
+            if (!outDir) throw new Error('Compiler option \'outDir\' must be specified.');
+
+
+
+            writeFileSync(`dist/${ entry }.d.ts`, dtsText);
+        }
     }
 
     /**
