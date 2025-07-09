@@ -9,12 +9,11 @@ import type { ParsedCommandLine, Diagnostic, LanguageService } from 'typescript'
  */
 
 import ts from 'typescript';
-import { dirname, relative } from 'path';
 import { mkdirSync, writeFileSync } from 'fs';
+import { dirname, join, relative } from 'path';
 import { xterm } from '@remotex-labs/xansi/xterm.component';
 import { formatHost } from '@typescript/constants/typescript.constant';
 import { LanguageHostService } from '@typescript/services/language-host.service';
-import { getSemanticDiagnostics, getSyntacticDiagnostics } from '@ts-plugin/components/diagnostics.component';
 
 /**
  * Manages TypeScript compilation, type checking, and declaration file generation using TypeScript's
@@ -134,11 +133,6 @@ export class TypescriptModule {
         const program = this.languageService.getProgram();
         if (!program) return;
 
-        const compilerOptions = this.config.options;
-        if (!compilerOptions.outDir) {
-            throw new Error('outDir must be specified in tsconfig to emit declarations.');
-        }
-
         for (const sourceFile of program.getSourceFiles()) {
             const fileName = sourceFile.fileName;
             if (fileName.includes('/node_modules/') || fileName.endsWith('.d.ts')) continue;
@@ -156,8 +150,7 @@ export class TypescriptModule {
         }
     }
 
-    emitBundleDeclarations(): void {
-
+    emitBundleDeclarations(entrypoints: string[]): void {
     }
 
     /**
@@ -184,13 +177,8 @@ export class TypescriptModule {
             }
         );
 
-        if (!config) {
-            throw new Error(`Unable to parse TypeScript configuration: ${ tsconfigPath }`);
-        }
-
-        if (outDir) {
-            config.options.outDir = outDir;
-        }
+        if (!config) throw new Error(`Unable to parse TypeScript configuration: ${ tsconfigPath }`);
+        if (outDir) config.options.outDir = outDir;
 
         return config;
     }
@@ -212,13 +200,14 @@ export class TypescriptModule {
     }
 
     /**
-     * Initializes diagnostic plugins for the language service.
+     * Initializes diagnostic plugins for macro supports
      * @since 2.0.0
      */
 
     private initializeDiagnostics(): void {
-        getSemanticDiagnostics(this.languageService, ts, this.languageServiceHost);
-        getSyntacticDiagnostics(this.languageService, ts, this.languageServiceHost);
+        // todo
+        // getSemanticDiagnostics(this.languageService, ts, this.languageServiceHost);
+        // getSyntacticDiagnostics(this.languageService, ts, this.languageServiceHost);
     }
 
     /**
@@ -244,7 +233,7 @@ export class TypescriptModule {
                     xterm.deepOrange('[TS]'),
                     `${ xterm.cyan(filePath) }:${ xterm.lightYellow(`${ line + 1 }:${ character + 1 }`) }`,
                     '-',
-                    `${ xterm.lightCoral('error') } ${ xterm.gray(`TS${ diagnostic.code }`) }: `,
+                    `${ xterm.lightCoral('error') } ${ xterm.gray(`TS${ diagnostic.code }`) }:`,
                     message
                 ].join(' ');
             }

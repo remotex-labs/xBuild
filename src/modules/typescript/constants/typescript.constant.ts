@@ -27,5 +27,5 @@ import { sys } from 'typescript';
 export const formatHost: FormatDiagnosticsHost = {
     getNewLine: () => sys.newLine,
     getCurrentDirectory: sys.getCurrentDirectory,
-    getCanonicalFileName: (fileName) => fileName
+    getCanonicalFileName: (fileName) => sys.useCaseSensitiveFileNames ? fileName : fileName.toLowerCase()
 } as const;
