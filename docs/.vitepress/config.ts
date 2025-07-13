@@ -49,6 +49,6 @@ export default defineVersionedConfig({
         }
     },
     versioning: {
-        latestVersion: 'v1.5.6'
+        latestVersion: 'v1.5.8'
     }
 }, __dirname) as UserConfig;
