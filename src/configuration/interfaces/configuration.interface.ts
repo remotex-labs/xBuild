@@ -4,7 +4,7 @@
 
 import type { BuildOptions } from 'esbuild';
 import type { IncomingMessage, ServerResponse } from 'http';
-import type { OnEndType, OnLoadType, OnResolveType, OnStartType } from '@providers/interfaces/plugins.interfaces';
+import type { OnEndType, OnLoadType, OnResolveType, OnStartType } from '@providers/interfaces/plugins.interface';
 
 /**
  * Represents the format for specifying entry points in TypeScript declaration generation and esbuild configuration.
@@ -28,16 +28,16 @@ import type { OnEndType, OnLoadType, OnResolveType, OnStartType } from '@provide
  * @example
  * ```ts
  * // Array of file paths
- * const entryPoints1: EntryPoints = ['src/index.ts', 'src/utils.ts'];
+ * const entryPoints1: EntryPointsType = ['src/index.ts', 'src/utils.ts'];
  *
  * // Object with named entry points
- * const entryPoints2: EntryPoints = {
+ * const entryPoints2: EntryPointsType = {
  *   main: 'src/index.ts',
  *   utils: 'src/utils.ts'
  * };
  *
  * // Array of objects with explicit input and output paths
- * const entryPoints3: EntryPoints = [
+ * const entryPoints3: EntryPointsType = [
  *   { in: 'src/index.ts', out: 'dist/index.d.ts' },
  *   { in: 'src/utils.ts', out: 'dist/utils.d.ts' }
  * ];
@@ -47,7 +47,7 @@ import type { OnEndType, OnLoadType, OnResolveType, OnStartType } from '@provide
  * When used for TypeScript declaration generation, it affects how declaration files are generated and organized.
  */
 
-export type EntryPoints = (string | { in: string, out: string })[] | Record<string, string> | undefined;
+export type EntryPointsType = (string | { in: string, out: string })[] | Record<string, string> | undefined;
 
 /**
  * Represents a deeply nested partial version of a given type `T`.
@@ -66,8 +66,8 @@ export type EntryPoints = (string | { in: string, out: string })[] | Record<stri
  *     };
  * }
  *
- * // PartialDeep<User> will allow the following:
- * const partialUser: PartialDeep<User> = {
+ * // PartialDeepType<User> will allow the following:
+ * const partialUser: PartialDeepType<User> = {
  *     name: 'Alice',        // 'name' is optional
  *     address: {
  *         city: 'Wonderland' // 'street' is optional
@@ -81,7 +81,7 @@ export type EntryPoints = (string | { in: string, out: string })[] | Record<stri
  *
  * @example
  * ```
- * type MyPartial = PartialDeep<{ a: number; b: { c: string; d: { e: boolean } } }>;
+ * type MyPartial = PartialDeepType<{ a: number; b: { c: string; d: { e: boolean } } }>;
  * // MyPartial will be equivalent to:
  * // {
  * //   a?: number;
@@ -95,8 +95,8 @@ export type EntryPoints = (string | { in: string, out: string })[] | Record<stri
  * ```
  */
 
-export type PartialDeep<T> = {
-    [P in keyof T]?: T[P] extends object ? PartialDeep<T[P]> : T[P];
+export type PartialDeepType<T> = {
+    [P in keyof T]?: T[P] extends object ? PartialDeepType<T[P]> : T[P];
 };
 
 /**
@@ -161,7 +161,7 @@ export interface ModuleInterface {
  * @public
  */
 
-export interface Serve {
+export interface ServeInterface {
     port: number
     host: string
     active: boolean,
@@ -172,13 +172,13 @@ export interface Serve {
 }
 
 /**
- * Defines the lifecycle hooks used in the plugin system.
+ * Defines the lifecycle HooksInterface used in the plugin system.
  *
- * This interface specifies the types for various hooks that can be registered
+ * This interface specifies the types for various HooksInterface that can be registered
  * to customize the behavior of the build process. Each hook corresponds to a
  * specific stage in the lifecycle of an esbuild operation.
  *
- * @interface hooks
+ * @interface HooksInterface
  *
  * @property onEnd - A hook function that is called after the build process completes.
  *                               This allows for post-processing or cleanup tasks.
@@ -191,7 +191,7 @@ export interface Serve {
  *
  * @example
  * ```ts
- * const myHooks: hooks = {
+ * const myHooks: HooksInterface = {
  *     onEnd: async (result) => {
  *         console.log('Build finished:', result);
  *     },
@@ -217,7 +217,7 @@ export interface Serve {
  * @see OnResolveType
  */
 
-export interface hooks {
+export interface HooksInterface {
     onEnd: OnEndType,
     onLoad: OnLoadType,
     onStart: OnStartType,
@@ -361,17 +361,17 @@ export interface ConfigurationInterface {
      * Option for the serve the build over http/s
      */
 
-    serve: Serve;
+    serve: ServeInterface;
 
     /**
      * lifecycle hooks to customize the build process.
      *
-     * This property allows you to provide implementations for various hooks defined in the `hooks` interface.
-     * Using `Partial<hooks>` means you can specify only the hooks you want to implement,
+     * This property allows you to provide implementations for various HooksInterface defined in the `HooksInterface` interface.
+     * Using `Partial<HooksInterface>` means you can specify only the HooksInterface you want to implement,
      * while the others will default to `undefined`.
      */
 
-    hooks?: Partial<hooks>;
+    hooks?: Partial<HooksInterface>;
 
     /**
      * A dictionary of define options for the build process.
@@ -424,17 +424,17 @@ interface ExportedConfigurationInterface extends ConfigurationInterface {
  * objects where only a subset of properties need to be specified.
  */
 
-export type xBuildConfig = PartialDeep<ExportedConfigurationInterface>;
+export type xBuildConfig = PartialDeepType<ExportedConfigurationInterface>;
 
 /**
  * Represents a partially deep configuration type based on the `ConfigurationInterface`.
  *
  * This type is used to define configurations that may have some properties
- * missing or undefined. It leverages the `PartialDeep` utility type to allow
+ * missing or undefined. It leverages the `PartialDeepType` utility type to allow
  * for flexibility in configuration management.
  */
 
-export type PartialDeepConfigurationsType = PartialDeep<ConfigurationInterface>;
+export type PartialDeepConfigurationsType = PartialDeepType<ConfigurationInterface>;
 
 /**
  * Defines the possible types for configurations.

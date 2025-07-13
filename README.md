@@ -186,9 +186,9 @@ In this example:
 This approach helps to manage feature toggles and debug code efficiently, making it possible to build different versions of your code based on a configuration.
 
 ## Hooks 
-The `hooks` interface provides a structure for lifecycle hooks to customize the build process.
+The `HooksInterface` interface provides a structure for lifecycle hooks to customize the build process.
 ```ts
-export interface hooks {
+export interface HooksInterface {
     onEnd: OnEndType;
     onLoad: OnLoadType;
     onStart: OnStartType;

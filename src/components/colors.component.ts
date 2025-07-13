@@ -64,6 +64,6 @@ export function setColor(color: Colors, msg: string, activeColor: boolean = __AC
     if (!activeColor)
         return msg;
 
-    return `${color}${msg}${Colors.Reset}`;
+    return `${ color }${ msg }${ Colors.Reset }`;
 }
 

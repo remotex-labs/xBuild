@@ -14,9 +14,9 @@
  *
  * @example
  * ```typescript
- * import { transpileFileInterface } from './transpileFileInterface';
+ * import { TranspileFileInterface } from './TranspileFileInterface';
  *
- * const result: transpileFileInterface = {
+ * const result: TranspileFileInterface = {
  *     code: 'console.log("Hello, world!");',
  *     sourceMap: 'version: 3\nfile: out.js\nsources: ["file.ts"]\n'
  * };
@@ -25,14 +25,14 @@
  * console.log(result.sourceMap); // Output: version: 3\nfile: out.js\nsources: ["file.ts"]\n
  * ```
  *
- * In this example, the `transpileFileInterface` is used to represent the result of transpiling a TypeScript file.
+ * In this example, the `TranspileFileInterface` is used to represent the result of transpiling a TypeScript file.
  * The `code` contains the JavaScript code, while the `sourceMap` provides the mapping information for debugging purposes.
  *
  * @public
  * @category Interfaces
  */
 
-export interface transpileFileInterface {
+export interface TranspileFileInterface {
     code: string;
     sourceMap: string;
 }

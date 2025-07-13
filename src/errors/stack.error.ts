@@ -16,8 +16,8 @@ import { fileURLToPath } from 'url';
 import { dirname, join, resolve } from 'path';
 import { SourceService } from '@remotex-labs/xmap';
 import { Colors, setColor } from '@components/colors.component';
-import { highlightCode } from '@remotex-labs/xmap/highlighter.component';
 import { formatErrorCode } from '@remotex-labs/xmap/formatter.component';
+import { highlightCode } from '@remotex-labs/xmap/highlighter.component';
 
 /**
  * Defines
@@ -26,11 +26,11 @@ import { formatErrorCode } from '@remotex-labs/xmap/formatter.component';
 const cliPath = cwd();
 const distPath = dirname(fileURLToPath(import.meta.url));
 const rootPath = dirname(distPath);
-export const xBuildLazy = (() => {
+export const xBuildLazy = ((): { service: SourceService } => {
     let cachedSourceService: SourceService;
 
     return {
-        get service() {
+        get service(): SourceService {
             if (!cachedSourceService) {
                 // Lazy loading the sourceMap
                 const sourceMapData = readFileSync(join(distPath, 'index.js.map'));

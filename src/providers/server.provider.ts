@@ -4,7 +4,7 @@
 
 import type { Stats } from 'fs';
 import type { IncomingMessage, ServerResponse } from 'http';
-import type { Serve } from '@configuration/interfaces/configuration.interface';
+import type { ServeInterface } from '@configuration/interfaces/configuration.interface';
 
 /**
  * Imports
@@ -72,7 +72,7 @@ export class ServerProvider {
      * The server configuration object, including SSL certificate paths and other settings.
      */
 
-    private readonly config: Required<Serve>;
+    private readonly config: Required<ServeInterface>;
 
     /**
      * Creates an instance of ServerProvider.
@@ -97,9 +97,9 @@ export class ServerProvider {
      * This example shows how to create an instance of `ServerProvider` and start the server.
      */
 
-    constructor(config: Serve, dir: string) {
+    constructor(config: ServeInterface, dir: string) {
         this.rootDir = resolve(dir);
-        this.config = <Required<Serve>> config;
+        this.config = <Required<ServeInterface>> config;
         this.isHttps = this.config.keyfile && this.config.certfile
             ? existsSync(this.config.keyfile) && existsSync(this.config.certfile)
             : false;

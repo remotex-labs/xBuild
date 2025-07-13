@@ -13,8 +13,8 @@ import { cwd } from 'process';
 import { existsSync, readFileSync } from 'fs';
 import { BaseError } from '@errors/base.error';
 import { Colors, setColor } from '@components/colors.component';
-import { highlightCode } from '@remotex-labs/xmap/highlighter.component';
 import { formatErrorCode } from '@remotex-labs/xmap/formatter.component';
+import { highlightCode } from '@remotex-labs/xmap/highlighter.component';
 
 /**
  * Represents an error that occurs during the esbuild process.

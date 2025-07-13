@@ -48,7 +48,7 @@ export function resolveAliasPlugin(content: string, sourceFile: string, paths: R
         if (esm) {
             content = content.replace(importExportRegex, (match, p1) =>
                 (p1.startsWith('../') || p1.startsWith('./')) && !p1.endsWith('.js')
-                    ? match.replace(p1, `${p1}.js`)
+                    ? match.replace(p1, `${ p1 }.js`)
                     : match
             );
         }
