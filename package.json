@@ -59,19 +59,19 @@
         "ci:build": "npm run build"
     },
     "devDependencies": {
-        "jest": "^29.7.0",
-        "eslint": "^9.24.0",
+        "jest": "^30.0.4",
+        "eslint": "^9.31.0",
         "typescript": "^5.8.3",
-        "typescript-eslint": "^8.29.0",
+        "typescript-eslint": "^8.36.0",
         "eslint-plugin-tsdoc": "^0.4.0",
-        "@swc/jest": "^0.2.37",
-        "@types/jest": "^29.5.14",
-        "@types/node": "^22.14.0",
-        "@remotex-labs/xbuild": "1.5.6"
+        "@swc/jest": "^0.2.39",
+        "@types/jest": "^30.0.0",
+        "@types/node": "^24.0.13",
+        "@remotex-labs/xbuild": "1.5.8"
     },
     "dependencies": {
         "yargs": "^17.7.2",
-        "esbuild": "^0.25.2",
-        "@remotex-labs/xmap": "^3.0.4"
+        "esbuild": "^0.25.6",
+        "@remotex-labs/xmap": "^3.0.5"
     }
 }
