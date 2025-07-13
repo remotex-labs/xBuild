@@ -64,6 +64,7 @@
         "typescript": "^5.8.3",
         "typescript-eslint": "^8.36.0",
         "eslint-plugin-tsdoc": "^0.4.0",
+        "eslint-plugin-perfectionist": "^4.15.0",
         "@swc/jest": "^0.2.39",
         "@types/jest": "^30.0.0",
         "@types/node": "^24.0.13",
