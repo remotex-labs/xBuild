@@ -7,28 +7,47 @@ import type { IncomingMessage, ServerResponse } from 'http';
 import type { OnEndType, OnLoadType, OnResolveType, OnStartType } from '@providers/interfaces/plugins.interfaces';
 
 /**
- * Represents the format for specifying entry points in TypeScript declaration generation.
+ * Represents the format for specifying entry points in TypeScript declaration generation and esbuild configuration.
  *
  * This type allows for various formats to specify the entry points from which TypeScript declaration files should be generated.
  * The supported formats are:
  * - `Array<string>`: An array of file paths as strings. Each string represents a path to a TypeScript entry point file.
+ *   For example: `['src/index.ts', 'src/utils.ts']`.
+ *
  * - `Record<string, string>`: An object where each key-value pair represents an entry point.
+ *   The key is used as the output file name (without extension), and the value is the file path to the TypeScript entry point.
+ *   For example: `{ main: 'src/index.ts', utils: 'src/utils.ts' }`.
  *
- * The key is a name or identifier, and the value is the file path to the TypeScript entry point.
  * - `Array<{ in: string, out: string }>`: An array of objects, where each object specifies an input file path (`in`)
- * and an output file path (`out`). This format allows for specifying where each entry point file is located and
- * where its corresponding declaration file should be output.
+ *   and an output file path (`out`). This format allows for specifying where each entry point file is located and
+ *   where its corresponding declaration file should be output.
+ *   For example: `[{ in: 'src/index.ts', out: 'dist/index.d.ts' }]`.
  *
- * Example usage:
+ * The chosen format affects how the build system processes your entry points and generates output files.
  *
+ * @example
  * ```ts
+ * // Array of file paths
  * const entryPoints1: EntryPoints = ['src/index.ts', 'src/utils.ts'];
- * const entryPoints2: EntryPoints = { main: 'src/index.ts', utils: 'src/utils.ts' };
- * const entryPoints3: EntryPoints = [{ in: 'src/index.ts', out: 'dist/index.d.ts' }, { in: 'src/utils.ts', out: 'dist/utils.d.ts' }];
+ *
+ * // Object with named entry points
+ * const entryPoints2: EntryPoints = {
+ *   main: 'src/index.ts',
+ *   utils: 'src/utils.ts'
+ * };
+ *
+ * // Array of objects with explicit input and output paths
+ * const entryPoints3: EntryPoints = [
+ *   { in: 'src/index.ts', out: 'dist/index.d.ts' },
+ *   { in: 'src/utils.ts', out: 'dist/utils.d.ts' }
+ * ];
  * ```
+ *
+ * When used with esbuild configuration, the format determines how output files are named and structured.
+ * When used for TypeScript declaration generation, it affects how declaration files are generated and organized.
  */
 
-export type EntryPoints = Array<string> | Record<string, string> | Array<{ in: string, out: string }> | undefined;
+export type EntryPoints = (string | { in: string, out: string })[] | Record<string, string> | undefined;
 
 /**
  * Represents a deeply nested partial version of a given type `T`.
