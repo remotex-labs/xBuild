@@ -10,7 +10,7 @@ import defineVersionedConfig from 'vitepress-versioning-plugin';
 
 export default defineVersionedConfig({
     title: 'xBuild',
-    base: '/xbuild/',
+    base: '/xBuild/',
     description: 'A versatile JavaScript and TypeScript toolchain build system',
     themeConfig: {
         versionSwitcher: false,
