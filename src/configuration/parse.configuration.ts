@@ -49,7 +49,7 @@ function wrapAllFunctions<T extends object>(obj: T, sourceMap: SourceService): T
  * @returns The wrapped function that includes error handling with sourcemap information.
  */
 
-function wrapFunctionWithSourceMap<T extends (...args: unknown[]) => unknown>(
+function wrapFunctionWithSourceMap<T extends(...args: unknown[]) => unknown>(
     fn: T,
     sourceMap: SourceService
 ): T {

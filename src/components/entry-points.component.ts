@@ -2,7 +2,7 @@
  * Import will remove at compile time
  */
 
-import type { EntryPoints } from '@configuration/interfaces/configuration.interface';
+import type { EntryPointsType } from '@configuration/interfaces/configuration.interface';
 
 /**
  * Imports
@@ -46,7 +46,7 @@ export function mapFilePathsToNames(filePaths: Array<string>): Record<string, st
 }
 
 /**
- * Extracts and returns an object mapping output file paths to input file paths from the provided `EntryPoints` object.
+ * Extracts and returns an object mapping output file paths to input file paths from the provided `EntryPointsType` object.
  *
  * This function handles multiple formats of entry points, including:
  * - An array of strings representing file paths.
@@ -84,7 +84,7 @@ export function mapFilePathsToNames(filePaths: Array<string>): Record<string, st
  * ```
  */
 
-export function extractEntryPoints(entryPoints: EntryPoints): Record<string, string> {
+export function extractEntryPoints(entryPoints: EntryPointsType): Record<string, string> {
     if (Array.isArray(entryPoints)) {
         let result: Record<string, string> = {};
 

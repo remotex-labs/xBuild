@@ -3,19 +3,15 @@
  */
 
 import type { BuildOptions } from 'esbuild';
-import { build } from 'esbuild';
 
 /**
  * Imports
  */
+
 import { cwd } from 'process';
+import { build } from 'esbuild';
 import { xBuildLazy } from '@errors/stack.error';
-import {
-    analyzeDependencies,
-    defaultBuildOptions,
-    extractSourceMap,
-    transpileFile
-} from '@services/transpiler.service';
+import { analyzeDependencies, defaultBuildOptions, extractSourceMap, transpileFile } from '@services/transpiler.service';
 
 /**
  * Mocks

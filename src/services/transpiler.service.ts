@@ -3,8 +3,8 @@
  */
 
 import type { BuildOptions, BuildResult, Metafile } from 'esbuild';
-import type { EntryPoints } from '@configuration/interfaces/configuration.interface';
-import type { transpileFileInterface } from '@services/interfaces/transpiler.interface';
+import type { TranspileFileInterface } from '@services/interfaces/transpiler.interface';
+import type { EntryPointsType } from '@configuration/interfaces/configuration.interface';
 
 /**
  * Imports
@@ -50,7 +50,7 @@ export const defaultBuildOptions: BuildOptions = {
  * @public
  */
 
-export function extractSourceMap(dataString: string): transpileFileInterface {
+export function extractSourceMap(dataString: string): TranspileFileInterface {
     const sourceMapRegex = /\/\/# sourceMappingURL=data:application\/json;base64,([^'"\s]+)/;
     const match = dataString.match(sourceMapRegex);
 
@@ -79,7 +79,7 @@ export function extractSourceMap(dataString: string): transpileFileInterface {
  * @category Services
  */
 
-export async function transpileFile(filePath: string, buildOptions: BuildOptions = {}): Promise<transpileFileInterface> {
+export async function transpileFile(filePath: string, buildOptions: BuildOptions = {}): Promise<TranspileFileInterface> {
     const options: BuildOptions = {
         absWorkingDir: cwd(),
         ...defaultBuildOptions,
@@ -127,7 +127,7 @@ export async function transpileFile(filePath: string, buildOptions: BuildOptions
  * @throws Error If the build process fails for any reason.
  */
 
-export async function analyzeDependencies(entryPoint: EntryPoints, platform: BuildOptions['platform'] = 'browser'): Promise<
+export async function analyzeDependencies(entryPoint: EntryPointsType, platform: BuildOptions['platform'] = 'browser'): Promise<
     BuildResult & { metafile: Metafile }
 > {
     return await build({

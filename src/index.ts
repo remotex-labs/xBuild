@@ -11,6 +11,7 @@ export type { BuildResult, OnLoadArgs, OnLoadResult, OnResolveArgs, OnResolveRes
 
 import type { BuildResult } from 'esbuild';
 import type { ArgvInterface } from '@services/interfaces/cli.interface';
+import type { PartialDeepConfigurationsType } from '@configuration/interfaces/configuration.interface';
 
 /**
  * Imports
@@ -23,7 +24,6 @@ import { argvParser } from '@services/cli.service';
 import { BuildService } from '@services/build.service';
 import { parseConfigurationFile } from '@configuration/parse.configuration';
 import { cliConfiguration, configuration } from '@providers/configuration.provider';
-import type { PartialDeepConfigurationsType } from '@configuration/interfaces/configuration.interface';
 
 /**
  * Clean cli
@@ -47,7 +47,7 @@ global.__ACTIVE_COLOR = true;
  * ```
  */
 
-export async function buildWithArgv(argv: Array<string>) {
+export async function buildWithArgv(argv: Array<string>): Promise<void> {
     const cli = argvParser(argv);
     const args = <ArgvInterface> cli.argv;
     const configs = await cliConfiguration(args.config, cli);

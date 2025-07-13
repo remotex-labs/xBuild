@@ -307,15 +307,17 @@ describe('configuration', () => {
         });
 
         const config = await cliConfiguration(mockConfigFilePath, mockArgv);
-        expect(config).toEqual([{
-            ...defaultConfig,
-            esbuild: {
-                ...defaultConfig.esbuild,
-                entryPoints: [ './src/index.ts' ],
-                target: [ `node${ process.version.slice(1) }` ],
-                platform: 'node'
+        expect(config).toEqual([
+            {
+                ...defaultConfig,
+                esbuild: {
+                    ...defaultConfig.esbuild,
+                    entryPoints: [ './src/index.ts' ],
+                    target: [ `node${ process.version.slice(1) }` ],
+                    platform: 'node'
+                }
             }
-        }]);
+        ]);
     });
 
     /**

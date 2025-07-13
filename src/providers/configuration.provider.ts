@@ -142,7 +142,9 @@ export function tsConfiguration(options: BuildOptions): ParsedCommandLine {
  * ```
  */
 
-export async function configuration(userConfig: Array<PartialDeepConfigurationsType> | PartialDeepConfigurationsType, cliConfig: PartialDeepConfigurationsType = {}) {
+export async function configuration(
+    userConfig: Array<PartialDeepConfigurationsType> | PartialDeepConfigurationsType, cliConfig: PartialDeepConfigurationsType = {}
+): Promise<Array<ConfigurationInterface>> {
     // Check if userConfig is an array and handle accordingly
     const userConfigs: Array<PartialDeepConfigurationsType> = Array.isArray(userConfig) ? userConfig : [ userConfig ];
     const defaultUserConfig = userConfigs[0];

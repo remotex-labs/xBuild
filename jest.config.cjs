@@ -1,21 +1,22 @@
 module.exports = {
     transform: {
-        '^.+\\.(t|j)sx?$': [
-            '@swc/jest',
+        "^.+\\.(t|j)sx?$": [
+            "@swc/jest",
             {
                 jsc: {
+                    target: "esnext",
                     transform: {
                         optimizer: {
                             globals: {
                                 vars: {
-                                    "import.meta.dirname": "'dist'",
-                                },
-                            },
-                        },
+                                    "import.meta.dirname": "'dist'"
+                                }
+                            }
+                        }
                     }
                 }
             }
-        ],
+        ]
     },
     collectCoverageFrom: [
         'src/**/*.{ts,tsx,js,jsx}',

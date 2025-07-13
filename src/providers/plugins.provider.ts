@@ -2,23 +2,10 @@
  * Import will remove at compile time
  */
 
-import type {
-    OnEndType,
-    OnLoadType,
-    BuildState,
-    OnStartType,
-    OnResolveType
-} from '@providers/interfaces/plugins.interfaces';
-import type {
-    Message,
-    OnLoadArgs,
-    BuildResult,
-    OnEndResult,
-    PluginBuild,
-    OnLoadResult,
-    OnResolveArgs,
-    OnResolveResult
-} from 'esbuild';
+import type { OnLoadResult, OnResolveArgs, OnResolveResult, Plugin } from 'esbuild';
+import type { Message, OnLoadArgs, BuildResult, OnEndResult, PluginBuild } from 'esbuild';
+import type { OnEndType, OnStartType, OnResolveType } from '@providers/interfaces/plugins.interface';
+import type { OnLoadType, PluginsBuildStateInterface } from '@providers/interfaces/plugins.interface';
 
 /**
  * Imports
@@ -37,7 +24,7 @@ export class PluginsProvider {
      * Holds the build state that hooks can modify.
      */
 
-    private buildState: BuildState = {};
+    private buildState: PluginsBuildStateInterface = {};
 
     /**
      * Holds the registered hooks for the `onEnd` lifecycle event.
@@ -199,10 +186,10 @@ export class PluginsProvider {
      * ```
      */
 
-    setup() {
+    setup(): Plugin {
         return {
             name: 'middleware-plugin',
-            setup: (build: PluginBuild) => {
+            setup: (build: PluginBuild): void => {
                 build.initialOptions.metafile = true;
                 build.onEnd(this.handleOnEnd.bind(this));
                 build.onStart(this.handleOnStart.bind(this, build));

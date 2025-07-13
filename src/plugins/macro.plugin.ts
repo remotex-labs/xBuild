@@ -4,7 +4,7 @@
 
 import type { Loader, Metafile, OnLoadArgs, OnLoadResult } from 'esbuild';
 import type { BuildStateInterface } from '@plugins/interfaces/plugin.interface';
-import type { pluginResultType } from '@providers/interfaces/plugins.interfaces';
+import type { PluginResultType } from '@providers/interfaces/plugins.interface';
 import type { ConfigurationInterface } from '@configuration/interfaces/configuration.interface';
 
 /**
@@ -110,7 +110,7 @@ export function collectFunctionNames(code: string, state: BuildStateInterface['m
  * @returns `void` - The function modifies the `state` directly and does not return a value.
  */
 
-export async function collectDeclaredFunctions(meta: Metafile, config: ConfigurationInterface, state: BuildStateInterface['macros']) {
+export async function collectDeclaredFunctions(meta: Metafile, config: ConfigurationInterface, state: BuildStateInterface['macros']): Promise<void> {
     const files = Object.keys(meta.inputs);
     for (const file of files) {
         const contents = await promises.readFile(file, 'utf8');
@@ -219,7 +219,7 @@ function transformSourceCode(sourceFile: ts.SourceFile, state: BuildStateInterfa
  *     functions to be removed.
  *   - `config`: The configuration object that defines how macros should be handled (e.g., conditions for macro processing).
  *
- * - **Output**: A `Promise` that resolves to an `OnLoadResult`, `pluginResultType`, or `undefined`. If the file is
+ * - **Output**: A `Promise` that resolves to an `OnLoadResult`, `PluginResultType`, or `undefined`. If the file is
  *   of type `.ts` or `.js`, the transformed code is returned in the specified loader format (e.g., `'ts'`). If the file
  *   extension is not recognized, the function returns `undefined`.
  *
@@ -233,13 +233,13 @@ function transformSourceCode(sourceFile: ts.SourceFile, state: BuildStateInterfa
  * @param args - The `OnLoadArgs` containing metadata, including the file path.
  * @param state - The build state that includes `mocks` with the `removeFunctions` set.
  * @param config - The configuration object defining how macros should be handled.
- * @returns A `Promise` that resolves to the transformed code (`OnLoadResult` or `pluginResultType`), or `undefined`
+ * @returns A `Promise` that resolves to the transformed code (`OnLoadResult` or `PluginResultType`), or `undefined`
  *          if the file is not of type `.ts` or `.js`.
  */
 
 export async function parseMacros(
     content: string | Uint8Array, loader: Loader | undefined, args: OnLoadArgs, state: BuildStateInterface, config: ConfigurationInterface
-): Promise<OnLoadResult | pluginResultType | undefined> {
+): Promise<OnLoadResult | PluginResultType | undefined> {
     if (!args.path.endsWith('.ts') && !args.path.endsWith('.js')) return { loader: loader, contents: content };
     if (!state.macros) {
         const macros = {

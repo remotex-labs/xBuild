@@ -74,6 +74,6 @@ export function bannerComponent(activeColor: boolean = true): string {
  * // todo optimize this
  */
 
-export function prefix() {
+export function prefix(): string {
     return setColor(Colors.LightCoral, '[xBuild]');
 }

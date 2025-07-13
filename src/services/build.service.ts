@@ -3,21 +3,11 @@
  */
 
 import type { ChildProcessWithoutNullStreams } from 'child_process';
-import type { BuildState } from '@providers/interfaces/plugins.interfaces';
 import type { BuildStateInterface } from '@plugins/interfaces/plugin.interface';
+import type { PluginBuild, BuildResult, BuildContext, BuildOptions } from 'esbuild';
+import type { PluginsBuildStateInterface } from '@providers/interfaces/plugins.interface';
+import type { Loader, Message, Metafile, SameShape, OnLoadArgs, OnEndResult } from 'esbuild';
 import type { ConfigurationInterface } from '@configuration/interfaces/configuration.interface';
-import type {
-    Loader,
-    Message,
-    Metafile,
-    SameShape,
-    OnLoadArgs,
-    OnEndResult,
-    PluginBuild,
-    BuildResult,
-    BuildContext,
-    BuildOptions
-} from 'esbuild';
 
 /**
  * Imports
@@ -37,8 +27,8 @@ import { parseIfDefConditionals } from '@plugins/ifdef.plugin';
 import { Colors, setColor } from '@components/colors.component';
 import { resolveAliasPlugin } from '@plugins/resolve-alias.plugin';
 import { analyzeDependencies } from '@services/transpiler.service';
-import { TypeScriptProvider } from '@providers/typescript.provider';
 import { tsConfiguration } from '@providers/configuration.provider';
+import { TypeScriptProvider } from '@providers/typescript.provider';
 import { extractEntryPoints } from '@components/entry-points.component';
 import { packageTypeComponent } from '@components/package-type.component';
 
@@ -286,7 +276,7 @@ export class BuildService {
     }
 
     /**
-     * Sets up the plugin's provider and registers the plugin hooks.
+     * Sets up the plugin's provider and registers the plugin HooksInterface.
      */
 
     private setupPlugins(): void {
@@ -300,7 +290,7 @@ export class BuildService {
     }
 
     /**
-     * Registers the plugin hooks for start, end, and load events.
+     * Registers the plugin HooksInterface for start, end, and load events.
      *
      * @param paths - The resolved path aliases.
      * @param rootDir - The root directory for resolving paths.
@@ -549,7 +539,7 @@ export class BuildService {
      * @private
      */
 
-    private spawnDev(meta: Metafile, entryPoint: Array<string>, debug: boolean = false) {
+    private spawnDev(meta: Metafile, entryPoint: Array<string>, debug: boolean = false): void {
         if (!Array.isArray(entryPoint))
             return;
 
@@ -568,7 +558,7 @@ export class BuildService {
      * @private
      */
 
-    private async start(build: PluginBuild, state: BuildState) {
+    private async start(build: PluginBuild, state: PluginsBuildStateInterface): Promise<void> {
         try {
             state.startTime = Date.now();
             console.log(`${ prefix() } StartBuild ${ build.initialOptions.outdir }`);
@@ -599,10 +589,10 @@ export class BuildService {
      * @private
      */
 
-    private async end(result: BuildResult, state: BuildState) {
+    private async end(result: BuildResult, state: PluginsBuildStateInterface): Promise<void> {
         if (result.errors.length > 0) {
             this.handleErrors(result);
-            if(!this.config.serve.active && !this.config.dev && !this.config.watch ) {
+            if(!this.config.serve.active && !this.config.dev && !this.config.watch) {
                 process.exit(1);
             }
 

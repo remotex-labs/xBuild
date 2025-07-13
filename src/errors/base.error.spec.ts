@@ -34,11 +34,9 @@ jest.mock('@remotex-labs/xmap', () => ({
             code: 'const a = 1;'
         })
     })),
-    formatErrorCode: (position: any) => `formatted ${position.code}`,
-    highlightCode: (code: any) => `highlighted ${code}`,
-    parseErrorStack: () => [
-        { file: 'file.js', line: 10, column: 5, at: 'name ' }
-    ]
+    formatErrorCode: (position: any) => `formatted ${ position.code }`,
+    highlightCode: (code: any) => `highlighted ${ code }`,
+    parseErrorStack: () => [{ file: 'file.js', line: 10, column: 5, at: 'name ' }]
 }));
 
 /**

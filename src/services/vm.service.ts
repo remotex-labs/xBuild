@@ -43,7 +43,7 @@ import { Script, createContext } from 'vm';
  * @category Services
  */
 
-export function sandboxExecute(code: string, sandbox: Context = {}) {
+export function sandboxExecute(code: string, sandbox: Context = {}): unknown {
     /**
      * Why instanceof Fails:
      * The instanceof operator relies on the prototype chain
