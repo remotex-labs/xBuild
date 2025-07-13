@@ -7,13 +7,13 @@
     "version": "1.0.0-local",
     "license": "Mozilla Public License Version 2.0",
     "description": "A versatile JavaScript and TypeScript toolchain build system",
-    "homepage": "https://github.com/remotex-lab/xBuild",
+    "homepage": "https://github.com/remotex-labs/xBuild",
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/remotex-lab/xBuild.git"
+        "url": "git+https://github.com/remotex-labs/xBuild.git"
     },
     "bugs": {
-        "url": "https://github.com/remotex-lab/xBuild/issues"
+        "url": "https://github.com/remotex-labs/xBuild/issues"
     },
     "man": [
         "./man/xbuild.1"
