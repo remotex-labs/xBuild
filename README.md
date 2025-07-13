@@ -173,7 +173,7 @@ export default {
         format: 'esm',
         bundle: true,
     },
-    ifdef: {
+    define: {
         DEBUG: true,        // Enables the DEBUG section
         FEATURE_X: false,    // Excludes the FEATURE_X section
     }
