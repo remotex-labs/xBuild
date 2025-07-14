@@ -1,10 +1,4 @@
 /**
- * Import will remove at compile time
- */
-
-import type { UserConfig } from 'vitepress';
-
-/**
  * Imports
  */
 
@@ -19,6 +13,7 @@ export default defineVersionedConfig({
     base: '/xBuild/',
     description: 'A versatile JavaScript and TypeScript toolchain build system',
     themeConfig: {
+        logo: '/xbuild2.png',
         versionSwitcher: false,
 
         nav: [
@@ -51,4 +46,4 @@ export default defineVersionedConfig({
     versioning: {
         latestVersion: 'v1.5.8'
     }
-}, __dirname) as UserConfig;
+}, __dirname);

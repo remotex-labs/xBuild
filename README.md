@@ -1,4 +1,8 @@
-# @remotex-labs/xbuild
+# xBuild
+[![npm version](https://img.shields.io/badge/Documentation-orange?logo=typescript&logoColor=f5f5f5)](https://remotex-labs.github.io/xBuild/)
+[![npm version](https://img.shields.io/npm/v/@remotex-labs/xbuild.svg)](https://www.npmjs.com/package/@remotex-labs/xbuild)
+[![License: MPL 2.0](https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
+[![Node.js CI](https://github.com/remotex-labs/xBuild/actions/workflows/node.js.yml/badge.svg)](https://github.com/remotex-labs/xBuild/actions/workflows/node.js.yml)
 
 `@remotex-labs/xbuild` is a versatile TypeScript toolchain build system
 
@@ -267,3 +271,9 @@ console.log("Feature X is active");
 
 $$logger('data'); // will be deleted if $$logger does not exist
 ```
+
+## Links
+- [Documentation](https://remotex-labs.github.io/xBuild/)
+- [GitHub Repository](https://github.com/remotex-labs/xBuild)
+- [Issue Tracker](https://github.com/remotex-labs/xBuild/issues)
+- [npm Package](https://www.npmjs.com/package/@remotex-labs/xbuild)
