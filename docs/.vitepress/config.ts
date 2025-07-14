@@ -16,6 +16,10 @@ export default defineVersionedConfig({
         logo: '/xbuild2.png',
         versionSwitcher: false,
 
+        search: {
+            provider: 'local'
+        },
+
         nav: [
             { text: 'Home', link: '.' },
             {
