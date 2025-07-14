@@ -2,9 +2,8 @@
  * Import will remove at compile time
  */
 
-import type { Theme } from 'vitepress';
 import type { VNode } from '@vue/runtime-core';
-import type { Awaitable } from 'vitepress/types/shared';
+import type { Awaitable, Theme } from 'vitepress';
 
 /**
  * Styles
@@ -18,7 +17,7 @@ import './style.css';
 
 import { h } from 'vue';
 import DefaultTheme from 'vitepress/theme';
-import VersionSwitcher from 'vitepress-versioning-plugin/src/components/VersionSwitcher.vue';
+import VersionSwitcher from './components/version-switcher.vue';
 
 export default {
     extends: DefaultTheme,

@@ -1,10 +1,4 @@
 /**
- * Import will remove at compile time
- */
-
-import type { UserConfig } from 'vitepress';
-
-/**
  * Imports
  */
 
@@ -51,4 +45,4 @@ export default defineVersionedConfig({
     versioning: {
         latestVersion: 'v1.5.8'
     }
-}, __dirname) as UserConfig;
+}, __dirname);
