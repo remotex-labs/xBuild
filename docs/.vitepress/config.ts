@@ -13,6 +13,7 @@ export default defineVersionedConfig({
     base: '/xBuild/',
     description: 'A versatile JavaScript and TypeScript toolchain build system',
     themeConfig: {
+        logo: '/xbuild2.png',
         versionSwitcher: false,
 
         nav: [
