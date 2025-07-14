@@ -12,6 +12,10 @@ export default defineVersionedConfig({
     title: 'xBuild',
     base: '/xBuild/',
     description: 'A versatile JavaScript and TypeScript toolchain build system',
+    head: [
+        [ 'link', { rel: 'icon', type: 'image/png', href: '/xBuild/xbuild2.png' }],
+        [ 'meta', { name: 'theme-color', content: '#ff7e17' }]
+    ],
     themeConfig: {
         logo: '/xbuild2.png',
         versionSwitcher: false,
