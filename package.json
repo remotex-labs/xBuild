@@ -15,9 +15,6 @@
     "bugs": {
         "url": "https://github.com/remotex-labs/xBuild/issues"
     },
-    "man": [
-        "./man/xbuild.1"
-    ],
     "keywords": [
         "xbuild",
         "xBuild",
