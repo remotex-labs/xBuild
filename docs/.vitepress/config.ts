@@ -14,7 +14,12 @@ export default defineVersionedConfig({
     description: 'A versatile JavaScript and TypeScript toolchain build system',
     head: [
         [ 'link', { rel: 'icon', type: 'image/png', href: '/xBuild/xbuild2.png' }],
-        [ 'meta', { name: 'theme-color', content: '#ff7e17' }]
+        [ 'meta', { name: 'theme-color', content: '#ff7e17' }],
+        [ 'script', { async: '', src: 'https://www.googletagmanager.com/gtag/js?id=G-PXPEYPM3R0' }],
+        [
+            'script', {},
+            'window.dataLayer = window.dataLayer || [];function gtag(){ dataLayer.push(arguments); }gtag(\'js\', new Date());gtag(\'config\', \'G-PXPEYPM3R0\');'
+        ]
     ],
     themeConfig: {
         logo: '/xbuild2.png',
