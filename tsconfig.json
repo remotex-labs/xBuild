@@ -3,9 +3,9 @@
         "strict": true,
         "target": "ESNext",
         "module": "ESNext",
-        "baseUrl": "./src",
+        "baseUrl": ".",
         "outDir": "dist",
-        "rootDir": ".",
+        "rootDir": "src",
         "declaration": true,
         "skipLibCheck": true,
         "importHelpers": true,
@@ -25,25 +25,25 @@
         ],
         "paths": {
             "@errors/*": [
-                "errors/*"
+                "src/errors/*"
             ],
             "@plugins/*": [
-                "plugins/*"
+                "src/plugins/*"
             ],
             "@services/*": [
-                "services/*"
+                "src/services/*"
             ],
             "@typescript/*": [
-                "modules/typescript/*"
+                "src/modules/typescript/*"
             ],
             "@providers/*": [
-                "providers/*"
+                "src/providers/*"
             ],
             "@components/*": [
-                "components/*"
+                "src/components/*"
             ],
             "@configuration/*": [
-                "configuration/*"
+                "src/configuration/*"
             ]
         }
     },
