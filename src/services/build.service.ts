@@ -16,6 +16,7 @@ import type { ConfigurationInterface } from '@configuration/interfaces/configura
 import * as process from 'node:process';
 import { dirname, resolve } from 'path';
 import { build, context } from 'esbuild';
+import { TypesError } from '@errors/types.error';
 import { spawn } from '@services/process.service';
 import { parseMacros } from '@plugins/macro.plugin';
 import { esBuildError } from '@errors/esbuild.error';
@@ -25,10 +26,9 @@ import { ServerProvider } from '@providers/server.provider';
 import { PluginsProvider } from '@providers/plugins.provider';
 import { parseIfDefConditionals } from '@plugins/ifdef.plugin';
 import { Colors, setColor } from '@components/colors.component';
+import { TypescriptModule } from '@typescript/typescript.module';
 import { resolveAliasPlugin } from '@plugins/resolve-alias.plugin';
 import { analyzeDependencies } from '@services/transpiler.service';
-import { tsConfiguration } from '@providers/configuration.provider';
-import { TypeScriptProvider } from '@providers/typescript.provider';
 import { extractEntryPoints } from '@components/entry-points.component';
 import { packageTypeComponent } from '@components/package-type.component';
 
@@ -54,7 +54,7 @@ export class BuildService {
      * Provides TypeScript-related functionality for the build process.
      */
 
-    readonly typeScriptProvider: TypeScriptProvider;
+    readonly typescriptModule: TypescriptModule;
 
     /**
      * Keeps track of active development processes spawned during the build.
@@ -82,6 +82,32 @@ export class BuildService {
     private pluginsProvider: PluginsProvider;
 
     /**
+     * A mapping of output filenames to their corresponding source file paths.
+     *
+     * @remarks
+     * This property stores the entry points configuration for TypeScript compilation.
+     * - Keys represent the output filenames (with or without .d.ts extension)
+     * - Values represent the source file paths to use as entry points
+     *
+     * Used by declaration bundling operations to determine which files to process
+     * and how to name the resulting declaration outputs.
+     *
+     * @example
+     * ```ts
+     * // Example entryPoints structure
+     * {
+     *   'index': 'src/index.ts',
+     *   'components/button': 'src/components/button.ts'
+     * }
+     * ```
+     *
+     * @private
+     * @since 1.5.9
+     */
+
+    private readonly entryPoints: Record<string, string>;
+
+    /**
      * Initializes the build service with the provided configuration.
      *
      * The constructor configures the TypeScript provider, suppresses esbuild logging,
@@ -96,13 +122,14 @@ export class BuildService {
      */
 
     constructor(private config: ConfigurationInterface) {
-        const tsConfig = tsConfiguration(this.config.esbuild);
-
         this.config.esbuild.logLevel = 'silent';
         this.pluginsProvider = new PluginsProvider();
-        this.typeScriptProvider = new TypeScriptProvider(
-            tsConfig, this.config.declarationOutDir ?? tsConfig.options.outDir ?? this.config.esbuild.outdir!
+        this.typescriptModule = new TypescriptModule(
+            this.config.esbuild.tsconfig ?? 'tsconfig.json', this.config.declarationOutDir, this.config.esbuild.outdir!
         );
+
+        this.entryPoints = extractEntryPoints(this.config.esbuild.entryPoints);
+        this.typescriptModule.updateFiles(Object.values(this.entryPoints));
 
         this.configureDevelopmentMode();
         this.setupPlugins();
@@ -142,10 +169,10 @@ export class BuildService {
         return await this.execute(async () => {
             const result = await this.build();
             if (this.config.watch || this.config.dev) {
-                await (<BuildContext> result).watch();
+                await (<BuildContext>result).watch();
             }
 
-            return <BuildResult> result;
+            return <BuildResult>result;
         });
     }
 
@@ -182,8 +209,8 @@ export class BuildService {
         return await this.execute(async () => {
             this.config.dev = false;
             this.config.watch = false;
-            const result = <BuildResult> await this.build();
-            this.spawnDev(<Metafile> result.metafile, entryPoints, true);
+            const result = <BuildResult>await this.build();
+            this.spawnDev(<Metafile>result.metafile, entryPoints, true);
         });
     }
 
@@ -218,7 +245,7 @@ export class BuildService {
         return await this.execute(async () => {
             server.start();
             const result = await this.build();
-            await (<BuildContext> result).watch();
+            await (<BuildContext>result).watch();
         });
     }
 
@@ -280,12 +307,12 @@ export class BuildService {
      */
 
     private setupPlugins(): void {
-        const rootDir = resolve(this.typeScriptProvider.options.baseUrl ?? '');
+        const rootDir = resolve(this.typescriptModule.config.options.baseUrl ?? '');
         const paths = this.generatePathAlias(rootDir);
 
         this.registerPluginHooks(paths, rootDir);
         this.pluginsProvider.registerOnLoad(async (content: string | Uint8Array, loader: Loader | undefined, args: OnLoadArgs, state) => {
-            return await parseMacros(content, loader, args, <BuildStateInterface> state, this.config);
+            return await parseMacros(content, loader, args, <BuildStateInterface>state, this.config);
         });
     }
 
@@ -297,6 +324,10 @@ export class BuildService {
      */
 
     private registerPluginHooks(paths: Record<string, string>, rootDir: string): void {
+        this.pluginsProvider.registerOnLoad((content, loader, args) => {
+            this.typescriptModule.updateFiles(args.path);
+        });
+
         this.pluginsProvider.registerOnEnd(this.end.bind(this));
         this.pluginsProvider.registerOnStart(this.start.bind(this));
 
@@ -348,7 +379,7 @@ export class BuildService {
      */
 
     private generatePathAlias(rootDir: string): Record<string, string> {
-        const paths = this.typeScriptProvider.options.paths;
+        const paths = this.typescriptModule.config.options.paths;
         const alias: Record<string, string> = {};
 
         for (const key in paths) {
@@ -394,7 +425,7 @@ export class BuildService {
         const errors = esbuildError.errors ?? [];
         for (const error of errors) {
             if (!error.detail) {
-                console.error((new esBuildError(<Message> error)).stack);
+                console.error((new esBuildError(<Message>error)).stack);
                 continue;
             }
 
@@ -441,14 +472,14 @@ export class BuildService {
      */
 
     private injects(esbuild: BuildOptions, object: ConfigurationInterface['banner'], name: 'banner' | 'footer'): void {
-        if(!object) return;
-        if(!esbuild[name]) esbuild[name] = {};
+        if (!object) return;
+        if (!esbuild[name]) esbuild[name] = {};
         const accessKey = esbuild[name];
 
         for (const key in object) {
             if (object.hasOwnProperty(key)) {
                 const value = object[key];
-                if(typeof value === 'function') {
+                if (typeof value === 'function') {
                     console.log(`${ prefix() } trigger ${ name } function`);
                     accessKey[key] = value();
 
@@ -563,16 +594,20 @@ export class BuildService {
             state.startTime = Date.now();
             console.log(`${ prefix() } StartBuild ${ build.initialOptions.outdir }`);
 
-            if(this.config.bundleDeclaration)
-                this.typeScriptProvider.generateBundleDeclarations(
-                    extractEntryPoints(this.config.esbuild.entryPoints), this.config.noTypeChecker, this.config.buildOnError
-                );
+            if (!this.config.noTypeChecker) {
+                const errors = this.typescriptModule.check();
+                if (errors.length > 0) {
+                    console.log(this.typescriptModule.formatDiagnostics(errors).join('\n') + '\n');
+
+                    if (!this.config.buildOnError)
+                        throw new TypesError('Type checking failed due to errors.');
+                }
+            }
+
+            if (this.config.bundleDeclaration)
+                this.typescriptModule.emitBundleDeclarations(this.entryPoints);
             else if (this.config.declaration)
-                this.typeScriptProvider.generateDeclarations(
-                    extractEntryPoints(this.config.esbuild.entryPoints), this.config.noTypeChecker, this.config.buildOnError
-                );
-            else if (!this.config.noTypeChecker)
-                this.typeScriptProvider.typeCheck(this.config.buildOnError);
+                this.typescriptModule.emitDeclarations();
         } finally {
             while (this.activePossess.length > 0) {
                 const element = this.activePossess.pop();
@@ -592,14 +627,14 @@ export class BuildService {
     private async end(result: BuildResult, state: PluginsBuildStateInterface): Promise<void> {
         if (result.errors.length > 0) {
             this.handleErrors(result);
-            if(!this.config.serve.active && !this.config.dev && !this.config.watch) {
+            if (!this.config.serve.active && !this.config.dev && !this.config.watch) {
                 process.exit(1);
             }
 
             return;
         }
 
-        const duration = Date.now() - <number> state.startTime;
+        const duration = Date.now() - <number>state.startTime;
         console.log(
             `\n${ prefix() } ${ setColor(Colors.DeepOrange, `Build completed! in ${ duration } ms`) }`
         );
@@ -613,7 +648,7 @@ export class BuildService {
 
         console.log('\n');
         if (this.config.dev) {
-            this.spawnDev(<Metafile> result.metafile, <Array<string>> this.config.dev);
+            this.spawnDev(<Metafile>result.metafile, <Array<string>>this.config.dev);
         }
     }
 
@@ -627,7 +662,7 @@ export class BuildService {
     private async processEntryPoints(): Promise<void> {
         const esbuild = this.config.esbuild;
         const meta = await analyzeDependencies(esbuild.entryPoints, esbuild.platform);
-        const rootDir = resolve(this.typeScriptProvider.options.baseUrl ?? '');
+        const rootDir = resolve(this.typescriptModule.config.options.baseUrl ?? '');
 
         // it pointer and change the esbuild.entryPoints if is object value from configuration !!
         let entryPoints = extractEntryPoints(esbuild.entryPoints);
