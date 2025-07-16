@@ -70,12 +70,12 @@
         "@swc/jest": "^0.2.39",
         "@types/jest": "^30.0.0",
         "@types/node": "^24.0.13",
-        "@remotex-labs/xansi": "^1.0.2",
         "@remotex-labs/xbuild": "1.5.8"
     },
     "dependencies": {
         "yargs": "^17.7.2",
         "esbuild": "^0.25.6",
-        "@remotex-labs/xmap": "^3.0.5"
+        "@remotex-labs/xmap": "^3.0.5",
+        "@remotex-labs/xansi": "^1.0.2"
     }
 }
