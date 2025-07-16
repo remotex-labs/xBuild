@@ -15,9 +15,6 @@
     "bugs": {
         "url": "https://github.com/remotex-labs/xBuild/issues"
     },
-    "man": [
-        "./man/xbuild.1"
-    ],
     "keywords": [
         "xbuild",
         "xBuild",
@@ -73,6 +70,7 @@
         "@swc/jest": "^0.2.39",
         "@types/jest": "^30.0.0",
         "@types/node": "^24.0.13",
+        "@remotex-labs/xansi": "^1.0.2",
         "@remotex-labs/xbuild": "1.5.8"
     },
     "dependencies": {

@@ -3,8 +3,6 @@
  */
 
 import type { Argv } from 'yargs';
-import type { BuildOptions } from 'esbuild';
-import type { ParsedCommandLine } from 'typescript';
 import type { ArgvInterface } from '@services/interfaces/cli.interface';
 import type { ConfigurationInterface, PartialDeepConfigurationsType } from '@configuration/interfaces/configuration.interface';
 
@@ -12,33 +10,10 @@ import type { ConfigurationInterface, PartialDeepConfigurationsType } from '@con
  * Imports
  */
 
-import ts from 'typescript';
-import { dirname } from 'path';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync } from 'fs';
 import { xBuildError } from '@errors/xbuild.error';
 import { defaultConfiguration } from '@configuration/default.configuration';
 import { parseConfigurationFile } from '@configuration/parse.configuration';
-
-/**
- * Default tsconfig if not supplied
- */
-
-const defaultTsConfig = JSON.stringify({
-    'compilerOptions': {
-        'strict': true,
-        'target': 'ESNext',
-        'module': 'ESNext',
-        'outDir': 'dist',
-        'skipLibCheck': true,
-        'isolatedModules': false,
-        'esModuleInterop': false,
-        'moduleDetection': 'force',
-        'moduleResolution': 'node',
-        'resolveJsonModule': true,
-        'allowSyntheticDefaultImports': true,
-        'forceConsistentCasingInFileNames': true
-    }
-});
 
 /**
  * Parses CLI arguments and sets the configuration for the application.
@@ -76,39 +51,6 @@ function parseCliArgs(cli: Argv<ArgvInterface>): PartialDeepConfigurationsType {
         }),
         ...{ esbuild: esbuildConfig }
     };
-}
-
-/**
- * Reads and parses the TypeScript configuration file.
- *
- * @param options - A `BuildOptions` object that may contain a custom `tsconfig` path.
- * @returns A `ParsedCommandLine` object representing the parsed TypeScript configuration.
- * @throws xBuildError - Throws an error if the configuration file contains syntax errors.
- */
-
-export function tsConfiguration(options: BuildOptions): ParsedCommandLine {
-    const tsConfigFile = options.tsconfig ?? 'tsconfig.json';
-    const configFile = existsSync(tsConfigFile) ? readFileSync(tsConfigFile, 'utf8') : JSON.stringify(defaultTsConfig);
-    const parsedConfig = ts.parseConfigFileTextToJson(tsConfigFile, configFile);
-
-    if (parsedConfig.error) {
-        throw new xBuildError(ts.formatDiagnosticsWithColorAndContext([ parsedConfig.error ], {
-            getCurrentDirectory: ts.sys.getCurrentDirectory,
-            getCanonicalFileName: fileName => fileName,
-            getNewLine: () => ts.sys.newLine
-        }));
-    }
-
-    const configParseResult = ts.parseJsonConfigFileContent(parsedConfig.config, ts.sys, dirname(tsConfigFile));
-    if (configParseResult.errors.length > 0) {
-        throw new xBuildError(ts.formatDiagnosticsWithColorAndContext(configParseResult.errors, {
-            getCurrentDirectory: ts.sys.getCurrentDirectory,
-            getCanonicalFileName: fileName => fileName,
-            getNewLine: () => ts.sys.newLine
-        }));
-    }
-
-    return configParseResult;
 }
 
 /**

@@ -34,6 +34,7 @@ module.exports = {
         '^@providers/(.*)$': '<rootDir>/src/providers/$1',
         '^@components/(.*)$': '<rootDir>/src/components/$1',
         '^@configuration/(.*)$': '<rootDir>/src/configuration/$1',
+        '^@typescript/(.*)$': '<rootDir>/src/modules/typescript/$1'
     },
     resetMocks: true,
     resetModules: true,
