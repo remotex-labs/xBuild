@@ -53,8 +53,6 @@ export async function buildWithArgv(argv: Array<string>): Promise<void> {
     const configs = await cliConfiguration(args.config, cli);
     const buildPromises = configs.map(async (config): Promise<void> => {
         const build = new BuildService(config);
-        if (args.typeCheck)
-            return build.typeScriptProvider.typeCheck(true);
 
         if (args.serve || config.serve.active)
             return await build.serve();
