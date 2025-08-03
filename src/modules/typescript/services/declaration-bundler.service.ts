@@ -43,14 +43,6 @@ import { HeaderDeclarationBundle } from '@typescript/constants/typescript.consta
 
 export class DeclarationBundlerService {
     /**
-     * Cache of processed declaration files to avoid redundant processing
-     *
-     * @since 1.5.9
-     */
-
-    private readonly processedFiles = new Map<string, string>();
-
-    /**
      * Creates a new DeclarationBundlerService instance
      *
      * @param config - TypeScript configuration with compiler options
@@ -77,7 +69,6 @@ export class DeclarationBundlerService {
      */
 
     emitBundledDeclarations(entryPoints: Array<string>): Array<string> {
-        this.processedFiles.clear();
         const results: Array<string> = [];
 
         for (const entry of entryPoints) {
@@ -294,9 +285,10 @@ export class DeclarationBundlerService {
      */
 
     private processDeclarationFile(fileName: string, collectedSymbols: Set<string>, externalImports: Set<string>): string | undefined {
-        if (this.processedFiles.has(fileName)) {
-            return this.processedFiles.get(fileName);
-        }
+        // Todo more smart cache system
+        // if (this.processedFiles.has(fileName)) {
+        //     return this.processedFiles.get(fileName);
+        // }
 
         const emitOutput = this.languageService.getEmitOutput(fileName, true);
         if (emitOutput.emitSkipped) {
@@ -338,10 +330,7 @@ export class DeclarationBundlerService {
             }
         }
 
-        const processedContent = filteredLines.join('\n');
-        this.processedFiles.set(fileName, processedContent);
-
-        return processedContent;
+        return filteredLines.join('\n');
     }
 
     /**

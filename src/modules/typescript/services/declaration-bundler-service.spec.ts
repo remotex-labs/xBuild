@@ -104,22 +104,6 @@ describe('DeclarationBundlerService', () => {
             expect((service as any).generateBundledDeclaration).toHaveBeenCalledWith('/src/types.ts');
         });
 
-        test('should clear the processedFiles cache before processing entry points', () => {
-            // Setup
-            const entryPoints = [ '/src/index.ts' ];
-            jest.spyOn(service as any, 'generateBundledDeclaration')
-                .mockReturnValue('bundled content');
-
-            // Add something to the cache
-            (service as any).processedFiles.set('test', 'cached content');
-
-            // Call the method
-            service.emitBundledDeclarations(entryPoints);
-
-            // Verify cache was cleared
-            expect((service as any).processedFiles.size).toBe(0);
-        });
-
         test('should filter out undefined results', () => {
             // Setup
             const entryPoints = [ '/src/index.ts', '/src/types.ts' ];
@@ -191,22 +175,6 @@ describe('DeclarationBundlerService', () => {
     });
 
     describe('processDeclarationFile', () => {
-        test('should return cached result if file was already processed', () => {
-            // Setup
-            (service as any).processedFiles.set('/src/cached.ts', 'cached content');
-
-            // Call the method
-            const result = (service as any).processDeclarationFile(
-                '/src/cached.ts',
-                new Set(),
-                new Set()
-            );
-
-            // Verify
-            expect(result).toBe('cached content');
-            expect(mockLanguageService.getEmitOutput).not.toHaveBeenCalled();
-        });
-
         test('should return undefined if emit was skipped', () => {
             // Setup
             (mockLanguageService.getEmitOutput as any).mockReturnValue({
@@ -294,7 +262,7 @@ const internalVar = 456;
             expect(result).toContain('const foo = 123;');
             expect(result).not.toContain('import { something } from "./local";');
             expect(result).not.toContain('export * from "./other";');
-            expect((service as any).processedFiles.has('/src/index.ts')).toBe(true);
+            // expect((service as any).processedFiles.has('/src/index.ts')).toBe(true);
         });
     });
 
