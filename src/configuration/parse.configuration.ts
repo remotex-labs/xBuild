@@ -113,8 +113,10 @@ export async function parseConfigurationFile(file: string): Promise<Configuratio
 
     try {
         await sandboxExecute(code, {
+            URL,
+            module,
             require,
-            module
+            process
         });
     } catch (error: unknown) {
         throw new VMRuntimeError(<ErrorType> error, source);
