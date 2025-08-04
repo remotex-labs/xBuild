@@ -4,14 +4,19 @@
 
 import type { Argv } from 'yargs';
 import type { ArgvInterface } from '@services/interfaces/cli.interface';
-import type { ConfigurationInterface, PartialDeepConfigurationsType } from '@configuration/interfaces/configuration.interface';
+import type {
+    ConfigurationInterface,
+    PartialDeepConfigurationsType
+} from '@configuration/interfaces/configuration.interface';
 
 /**
  * Imports
  */
 
+import { cwd } from 'process';
 import { existsSync } from 'fs';
 import { xBuildError } from '@errors/xbuild.error';
+import { collectFilesFromDir, isGlob } from '@components/glob.component';
 import { defaultConfiguration } from '@configuration/default.configuration';
 import { parseConfigurationFile } from '@configuration/parse.configuration';
 
@@ -24,7 +29,7 @@ import { parseConfigurationFile } from '@configuration/parse.configuration';
  */
 
 function parseCliArgs(cli: Argv<ArgvInterface>): PartialDeepConfigurationsType {
-    const args = <ArgvInterface> cli.argv;
+    const args = <ArgvInterface>cli.argv;
 
     // Helper function to filter out undefined values
     const pickDefined = <T extends object>(obj: T): PartialDeepConfigurationsType => Object.fromEntries(
@@ -42,7 +47,7 @@ function parseCliArgs(cli: Argv<ArgvInterface>): PartialDeepConfigurationsType {
         format: args.format
     });
 
-    return <PartialDeepConfigurationsType> {
+    return <PartialDeepConfigurationsType>{
         ...pickDefined({
             dev: args.dev,
             watch: args.watch,
@@ -113,6 +118,24 @@ export async function configuration(
 
         if (!mergedConfig.esbuild.entryPoints) {
             throw new xBuildError('entryPoints cannot be undefined.');
+        }
+
+        const entryPoints = mergedConfig.esbuild.entryPoints;
+        if (Array.isArray(entryPoints) && entryPoints.every(
+            (e): e is string => typeof e === 'string'
+        )) {
+            if (entryPoints.some(entryPoint => isGlob(entryPoint))) {
+                mergedConfig.esbuild.entryPoints = collectFilesFromDir(
+                    cwd(),
+                    entryPoints,
+                    [
+                        'node_modules/**',
+                        'dist/**',
+                        'bundle/**',
+                        '**/*.d.ts'
+                    ]
+                );
+            }
         }
 
         return mergedConfig;
