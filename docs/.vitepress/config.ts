@@ -2,7 +2,7 @@
  * Imports
  */
 
-import defineVersionedConfig from 'vitepress-versioning-plugin';
+import { defineVersionedConfig } from '@viteplus/versions';
 
 /**
  * Doc config
@@ -13,7 +13,7 @@ export default defineVersionedConfig({
     base: '/xBuild/',
     description: 'A versatile JavaScript and TypeScript toolchain build system',
     head: [
-        [ 'link', { rel: 'icon', type: 'image/png', href: '/xBuild/xbuild2.png' }],
+        [ 'link', { rel: 'icon', type: 'image/png', href: '/xBuild/logo.png' }],
         [ 'meta', { name: 'theme-color', content: '#ff7e17' }],
         [ 'script', { async: '', src: 'https://www.googletagmanager.com/gtag/js?id=G-PXPEYPM3R0' }],
         [
@@ -21,9 +21,12 @@ export default defineVersionedConfig({
             'window.dataLayer = window.dataLayer || [];function gtag(){ dataLayer.push(arguments); }gtag(\'js\', new Date());gtag(\'config\', \'G-PXPEYPM3R0\');'
         ]
     ],
+    versionsConfig: {
+        current: 'v1.6.x',
+        versionSwitcher: false
+    },
     themeConfig: {
-        logo: '/xbuild2.png',
-        versionSwitcher: false,
+        logo: '/logo.png',
 
         search: {
             provider: 'local'
@@ -31,20 +34,16 @@ export default defineVersionedConfig({
 
         nav: [
             { text: 'Home', link: '.' },
-            {
-                component: 'VersionSwitcher'
-            }
+            { component: 'VersionSwitcher' }
         ],
 
-        sidebar: {
-            '/': [
-                { text: 'Guide', link: '.' },
-                { text: 'Hooks', link: './hooks' },
-                { text: 'serve', link: './serve' },
-                { text: 'Macros', link: './macros' },
-                { text: 'Configuration', link: './configuration' }
-            ]
-        },
+        sidebar: [
+            { text: 'Guide', link: '.' },
+            { text: 'Hooks', link: './hooks' },
+            { text: 'serve', link: './serve' },
+            { text: 'Macros', link: './macros' },
+            { text: 'Configuration', link: './configuration' }
+        ],
 
         socialLinks: [
             { icon: 'github', link: 'https://github.com/remotex-labs/xBuild' },
@@ -54,9 +53,10 @@ export default defineVersionedConfig({
         docFooter: {
             prev: false,
             next: false
+        },
+        footer: {
+            message: 'Released under the Mozilla Public License 2.0',
+            copyright: `Copyright © ${ new Date().getFullYear() } @remotex-labs/xjet Contributors`
         }
-    },
-    versioning: {
-        latestVersion: 'v1.5.9'
     }
-}, __dirname);
+});
