@@ -192,4 +192,4 @@ Alternative to `onEnd`, but only triggered when the build succeeds.
 ## See Also
 
 - [esbuild Options](https://esbuild.github.io/api/)
-- [Hooks Plugin API](./hooks)
+- [Hooks Plugin API](hooks.md)
