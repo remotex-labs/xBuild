@@ -48,7 +48,7 @@
         }
     },
     "include": [
-        "src/cli.ts",
+        "src/bash.ts",
         "src/index.ts",
         "includes/**/*.d.ts"
     ],
