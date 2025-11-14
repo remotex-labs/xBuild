@@ -156,4 +156,4 @@ Hooks can return `null`, `void`, or a `Promise` of either.
 ## See Also
 
 - [`esbuild` plugin hooks](https://esbuild.github.io/plugins/#overview)
-- [`xbuild.config.ts`](./configuration)
+- [`xbuild.config.ts`](configuration.md)
