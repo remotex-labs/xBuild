@@ -32,7 +32,7 @@ const config: xBuildConfig[] = [
             external: [ './index.js' ],
             sourceRoot: `https://github.com/remotex-lab/xBuild/tree/v${ pkg.version }/`,
             entryPoints: {
-                cli: 'src/cli.ts',
+                cli: 'src/bash.ts',
                 index: 'src/index.ts'
             },
             loader: {

@@ -42,8 +42,8 @@
         "README.md"
     ],
     "bin": {
-        "xbuild": "dist/cli.js",
-        "xBuild": "dist/cli.js"
+        "xbuild": "dist/bash.js",
+        "xBuild": "dist/bash.js"
     },
     "scripts": {
         "dev": "xBuild -w",
