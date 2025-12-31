@@ -107,12 +107,12 @@ export default defineConfig([
 
                     groups: [
                         'type',
+                        'style',
                         [
                             'internal', 'parent',
                             'sibling', 'index',
                             'builtin', 'external'
-                        ],
-                        'object'
+                        ]
                     ]
                 }
             ],
