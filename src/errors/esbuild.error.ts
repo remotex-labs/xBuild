@@ -10,9 +10,9 @@ import type { Location, Message } from 'esbuild';
 
 import { join } from 'path';
 import { cwd } from 'process';
+import { xterm } from '@remotex-labs/xansi';
 import { existsSync, readFileSync } from 'fs';
 import { BaseError } from '@errors/base.error';
-import { Colors, setColor } from '@components/colors.component';
 import { formatErrorCode } from '@remotex-labs/xmap/formatter.component';
 import { highlightCode } from '@remotex-labs/xmap/highlighter.component';
 
@@ -63,11 +63,11 @@ export class esBuildError extends BaseError {
 
     private generateFormattedError(message: Message): string {
         const { text, location, notes } = message;
-        let formattedError = this.applyColor(Colors.Reset, `\n${ this.name }: ${ this.applyColor(Colors.Gray, location?.file ?? '') }\n`);
-        formattedError += this.applyColor(Colors.LightCoral, `${ text }\n\n`);
+        let formattedError = `\n${ this.name }: ${ xterm.gray(location?.file ?? '') }\n`;
+        formattedError += xterm.lightCoral(`${ text }\n\n`);
 
         notes.forEach(note => {
-            formattedError += this.applyColor(Colors.Gray, `${ note.text }\n\n`);
+            formattedError += xterm.gray(`${ note.text }\n\n`);
         });
 
         if (location) {
@@ -123,20 +123,7 @@ export class esBuildError extends BaseError {
             generatedLine: -1,
             generatedColumn: -1
         }, {
-            color: global.__ACTIVE_COLOR ? Colors.BrightPink : '',
-            reset: global.__ACTIVE_COLOR ? Colors.Reset : ''
+            color: xterm.brightPink
         });
-    }
-
-    /**
-     * Applies color to a given text if colors are enabled.
-     *
-     * @param color - The color code.
-     * @param text - The text to colorize.
-     * @returns The colorized text if colors are active, otherwise plain text.
-     */
-
-    private applyColor(color: Colors, text: string): string {
-        return global.__ACTIVE_COLOR ? setColor(color, text) : text;
     }
 }

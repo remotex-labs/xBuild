@@ -13,9 +13,9 @@ import type { ServeInterface } from '@configuration/interfaces/configuration.int
 import * as http from 'http';
 import * as https from 'https';
 import html from './html/server.html';
+import { xterm } from '@remotex-labs/xansi';
 import { extname, join, resolve } from 'path';
 import { prefix } from '@components/banner.component';
-import { Colors, setColor } from '@components/colors.component';
 import { existsSync, readdir, readFile, readFileSync, stat } from 'fs';
 
 /**
@@ -173,7 +173,7 @@ export class ServerProvider {
         });
 
         server.listen(this.config.port, this.config.host, () => {
-            const server = setColor(Colors.CanaryYellow, `https://${ this.config.host }:${ this.config.port }`);
+            const server = xterm.canaryYellow(`https://${ this.config.host }:${ this.config.port }`);
             console.log(
                 `${ prefix() } HTTPS server is running at ${ server }`
             );

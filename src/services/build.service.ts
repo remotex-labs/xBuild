@@ -16,6 +16,7 @@ import type { ConfigurationInterface } from '@configuration/interfaces/configura
 import * as process from 'node:process';
 import { dirname, resolve } from 'path';
 import { build, context } from 'esbuild';
+import { xterm } from '@remotex-labs/xansi';
 import { TypesError } from '@errors/types.error';
 import { spawn } from '@services/process.service';
 import { parseMacros } from '@plugins/macro.plugin';
@@ -25,7 +26,6 @@ import { VMRuntimeError } from '@errors/vm-runtime.error';
 import { ServerProvider } from '@providers/server.provider';
 import { PluginsProvider } from '@providers/plugins.provider';
 import { parseIfDefConditionals } from '@plugins/ifdef.plugin';
-import { Colors, setColor } from '@components/colors.component';
 import { TypescriptModule } from '@typescript/typescript.module';
 import { resolveAliasPlugin } from '@plugins/resolve-alias.plugin';
 import { analyzeDependencies } from '@services/transpiler.service';
@@ -636,13 +636,13 @@ export class BuildService {
 
         const duration = Date.now() - <number>state.startTime;
         console.log(
-            `\n${ prefix() } ${ setColor(Colors.DeepOrange, `Build completed! in ${ duration } ms`) }`
+            `\n${ prefix() } ${ xterm.deepOrange(`Build completed! in ${ duration } ms`) }`
         );
         console.log(`${ prefix() } ${ Object.keys(result.metafile!.outputs).length } Modules:`);
         Object.keys(result.metafile!.outputs).forEach((output) => {
             const size = result.metafile!.outputs[output].bytes;
             console.log(
-                `${ prefix() } ${ setColor(Colors.CanaryYellow, output) }: ${ setColor(Colors.BurntOrange, size.toString()) } bytes`
+                `${ prefix() } ${ xterm.canaryYellow(output) }: ${ xterm.burntOrange(size.toString()) } bytes`
             );
         });
 

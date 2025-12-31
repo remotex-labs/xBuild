@@ -13,9 +13,9 @@ import type { ErrorType, FrameDetailsInterface, StackTraceStateInterface } from 
 import { cwd } from 'process';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
+import { xterm } from '@remotex-labs/xansi';
 import { dirname, join, resolve } from 'path';
 import { SourceService } from '@remotex-labs/xmap';
-import { Colors, setColor } from '@components/colors.component';
 import { formatErrorCode } from '@remotex-labs/xmap/formatter.component';
 import { highlightCode } from '@remotex-labs/xmap/highlighter.component';
 
@@ -41,10 +41,6 @@ export const xBuildLazy = ((): { service: SourceService } => {
         }
     };
 })();
-
-if (!global.__ACTIVE_COLOR) {
-    global.__ACTIVE_COLOR = true;
-}
 
 /**
  * Modifies the file path by applying the source root and appending the line number.
@@ -77,9 +73,9 @@ function formatErrorLine(name: string, file: string, line: number, column: numbe
 
     const asyncPrefix = frame.isAsync() ? 'async' : '';
     const formattedName = name ? `${ asyncPrefix } ${ name }` : asyncPrefix;
-    const position = (line >= 0 && column >= 0) ? setColor(Colors.Gray, `[${ line }:${ column }]`) : '';
+    const position = (line >= 0 && column >= 0) ? xterm.gray(`[${ line }:${ column }]`) : '';
 
-    return `at ${ formattedName } ${ setColor(Colors.DarkGray, file) } ${ position }`
+    return `at ${ formattedName } ${ xterm.darkGray(file) } ${ position }`
         .replace(/\s{2,}/g, ' ').trim();
 }
 
@@ -113,14 +109,13 @@ function extractFrameDetails(frame: NodeJS.CallSite): FrameDetailsInterface {
  */
 
 function highlightPositionCode(position: PositionWithCodeInterface, error: ErrorType): string {
-    const highlightedCode = __ACTIVE_COLOR ? highlightCode(position.code) : position.code;
+    const highlightedCode = globalThis.NO_COLOR ? position.code : highlightCode(position.code);
     if (position.name && error.name == 'TypeError') {
         error.message = error.message.replace(/^\S+/, position.name);
     }
 
     return formatErrorCode({ ...position, code: highlightedCode }, {
-        color: __ACTIVE_COLOR ? Colors.BrightPink : '',
-        reset: __ACTIVE_COLOR ? Colors.Reset : ''
+        color: xterm.brightPink
     });
 }
 
@@ -198,11 +193,11 @@ export function formatStackTrace(error: ErrorType & BaseError, stackEntries: Arr
     const state: StackTraceStateInterface = {
         error: error,
         blockCode: null,
-        formattedError: global.__ACTIVE_COLOR ? Colors.Reset : ''
+        formattedError: ''
     };
 
     const stackTrace = formattedStackEntries(state, stackEntries);
-    state.formattedError += `\n${ error.name }: \n${ setColor(Colors.LightCoral, error.message) }\n\n`;
+    state.formattedError += `\n${ error.name }: \n${  xterm.lightCoral(error.message) }\n\n`;
 
     if (state.blockCode)
         state.formattedError += `${ state.blockCode }\n\n`;
