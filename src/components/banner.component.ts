@@ -2,7 +2,7 @@
  * Imports
  */
 
-import { Colors, setColor } from '@components/colors.component';
+import { xterm } from '@remotex-labs/xansi';
 
 /**
  * ASCII Logo and Version Information
@@ -34,8 +34,6 @@ export const cleanScreen = '\x1Bc';
  * The colors used for the ASCII logo and version number can be enabled or disabled based on the `activeColor` parameter.
  * If color formatting is enabled, the ASCII logo will be rendered in burnt orange, and the version number will be in bright pink.
  *
- * @param activeColor - A boolean flag indicating whether ANSI color formatting should be applied. Default is `__ACTIVE_COLOR`.
- *
  * @returns A formatted string containing the ASCII logo, version number, and ANSI color codes if `activeColor` is `true`.
  *
  * @remarks
@@ -60,12 +58,10 @@ export const cleanScreen = '\x1Bc';
  * @public
  */
 
-// Todo \r${ activeColor ? cleanScreen : '' }
-
-export function bannerComponent(activeColor: boolean = true): string {
+export function bannerComponent(): string {
     return `
-        \r${ setColor(Colors.BurntOrange, asciiLogo, activeColor) }
-        \rVersion: ${ setColor(Colors.BrightPink, __VERSION, activeColor) }
+        \r${  xterm.burntOrange(asciiLogo) }
+        \rVersion: ${ xterm.brightPink(__VERSION) }
     \r`;
 }
 
@@ -75,5 +71,5 @@ export function bannerComponent(activeColor: boolean = true): string {
  */
 
 export function prefix(): string {
-    return setColor(Colors.LightCoral, '[xBuild]');
+    return xterm.lightCoral('[xBuild]');
 }

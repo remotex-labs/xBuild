@@ -26,12 +26,6 @@ import { parseConfigurationFile } from '@configuration/parse.configuration';
 import { cliConfiguration, configuration } from '@providers/configuration.provider';
 
 /**
- * Clean cli
- */
-
-global.__ACTIVE_COLOR = true;
-
-/**
  * Main run function that initiates the build process based on CLI arguments.
  *
  * This function parses the CLI arguments, configures the build settings, and executes
