@@ -2,14 +2,13 @@
  * Import will remove at compile time
  */
 
-import type { SourceService } from '@remotex-labs/xmap';
-import type { ErrorType } from '@errors/interfaces/stack.interface';
+import type { StackTraceInterface } from '@providers/interfaces/stack-provider.interface';
 
 /**
  * Imports
  */
 
-import { formatStackTrace } from '@errors/stack.error';
+import { formatStack } from '@providers/stack.provider';
 
 /**
  * A base class for custom errors with enhanced stack trace formatting and source code information.
@@ -19,49 +18,81 @@ import { formatStackTrace } from '@errors/stack.error';
  * or transpiled code by providing clearer information about the source of the error.
  */
 
-export abstract class BaseError extends Error {
-    callStacks: Array<NodeJS.CallSite> = [];
-
+export abstract class xBuildBaseError extends Error {
     /**
-     * Creates a new instance of `BaseError`.
-     *
-     * This constructor initializes a new `BaseError` instance by setting the error message and formatting
-     * the stack trace using the provided source map information. It also ensures the stack trace is maintained
-     * correctly by using `Error.captureStackTrace` (if available). The default source map service is used if
-     * none is provided.
-     *
-     * @param message - A descriptive error message to be associated with the error.
-     * @param sourceMap - (Optional) The `SourceService` instance used to format and resolve the stack trace.
-     *                    If not provided, the default source map service (`defaultSourceService`) is used.
+     * Stores a pre-formatted stack trace for the error.
+     * @since 2.0.0
      */
 
-    protected constructor(message: string, public readonly sourceMap?: SourceService) {
+    protected formattedStack: string | undefined;
+
+    /**
+     * Creates a new instance of the base error class.
+     *
+     * @param message - The error message describing the problem.
+     * @param name - Optional error name; defaults to `'xBuildBaseError'`.
+     *
+     * @remarks
+     * Properly sets up the prototype chain to ensure `instanceof` works for derived classes.
+     * Captures the stack trace if supported by the runtime environment.
+     *
+     * @example
+     * ```ts
+     * class MyError extends xJetBaseError {}
+     * throw new MyError('Something went wrong');
+     * ```
+     *
+     * @since 2.0.0
+     */
+
+    protected constructor(message: string, name: string = 'xBuildBaseError') {
         super(message);
 
-        // Maintain proper stack trace
-        if (Error.captureStackTrace) {
-            Error.captureStackTrace(this, BaseError);
-        }
+        // Ensure a correct prototype chain (important for `instanceof`)
+        Object.setPrototypeOf(this, new.target.prototype);
+        this.name = name;
 
-        // Assign the name of the error
-        this.name = 'xBuildBaseError';
+        if (Error.captureStackTrace) {
+            Error.captureStackTrace(this, this.constructor);
+        }
     }
 
     /**
-     * Reformats the error stack trace using source map information.
+     * Custom inspect behavior for Node.js console output.
      *
-     * This function enhances the original error stack trace by attempting to map each entry
-     * back to its original position in the source file using the provided source map service.
-     * If the source map information is not available, it returns the original stack trace.
+     * @returns The formatted stack trace if available, otherwise the raw stack trace.
      *
-     * @param error - The original error with stack trace of the error.
-     * @returns The reformatted stack trace or the original stack trace if no mapping is available.
+     * @since 1.0.0
      */
 
-    protected reformatStack(error: ErrorType): string {;
-        if (!error.callStacks)
-            return error.stack ?? '';
+    [Symbol.for('nodejs.util.inspect.custom')](): string | undefined {
+        return this.formattedStack || this.stack;
+    }
 
-        return formatStackTrace(this, error.callStacks);
+    /**
+     * Generates a formatted stack trace using provided options and stores it in `formattedStack`.
+     *
+     * @param error - The error object to format.
+     * @param options - Options controlling stack trace formatting.
+     *
+     * @remarks
+     * This method is intended to be called by derived classes or internal code
+     * to prepare a styled or enhanced stack trace for logging or display.
+     *
+     * @example
+     * ```ts
+     * class ValidationError extends xBuildBaseError {
+     *   constructor(message: string) {
+     *     super(message);
+     *     this.reformatStack(this, { withFrameworkFrames: true });
+     *   }
+     * }
+     * ```
+     *
+     * @since 2.0.0
+     */
+
+    protected reformatStack(error: Error, options?: StackTraceInterface): void {
+        this.formattedStack = formatStack(error, options);
     }
 }

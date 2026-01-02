@@ -2,128 +2,93 @@
  * Import will remove at compile time
  */
 
-import type { Location, Message } from 'esbuild';
+import type { ESBuildErrorInterface, ESBuildAggregateErrorInterface } from '@errors/interfaces/esbuild-error.interface';
 
 /**
  * Imports
  */
 
-import { join } from 'path';
-import { cwd } from 'process';
-import { xterm } from '@remotex-labs/xansi';
-import { existsSync, readFileSync } from 'fs';
-import { BaseError } from '@errors/base.error';
-import { formatErrorCode } from '@remotex-labs/xmap/formatter.component';
+import { xBuildBaseError } from '@errors/base.error';
+import { xterm } from '@remotex-labs/xansi/xterm.component';
+import { formatCode } from '@remotex-labs/xmap/formatter.component';
 import { highlightCode } from '@remotex-labs/xmap/highlighter.component';
 
 /**
- * Represents an error that occurs during the esbuild process.
+ * Represents an error produced by ESBuild during the build process.
  *
- * This class extends the base error class to provide specific error handling for esbuild-related issues.
- * It captures the error message and maintains the proper stack trace, allowing for easier debugging
- * and identification of errors that occur during the build process.
+ * Extends {@link xBuildBaseError} and provides formatted output for
+ * individual or aggregated ESBuild errors.
  *
- * @class esBuildError
- * @extends BaseError
+ * @remarks
+ * If the error contains aggregate errors (`aggregateErrors`), each error
+ * is formatted with colorized output, code highlighting, and positional
+ * information. Otherwise, a standard stack trace is generated.
+ *
+ * @example
+ * ```ts
+ * import { esBuildError } from '@errors/esbuild.error';
+ *
+ * try {
+ *   // some ESBuild operation
+ * } catch (error) {
+ *   throw new esBuildError(error as ESBuildErrorInterface);
+ * }
+ * ```
+ *
+ * @see xBuildBaseError
+ * @see ESBuildErrorInterface
+ * @see ESBuildAggregateErrorInterface
+ *
+ * @since 1.0.0
  */
 
-export class esBuildError extends BaseError {
-    originalErrorStack?: string;
-
+export class esBuildError extends xBuildBaseError {
     /**
-     * Creates an instance of the EsbuildError class.
+     * Creates a new `esBuildError` instance.
      *
-     * @param message - An object containing the error message. The `text` property is used to initialize
-     * the base error class with a descriptive message about the error encountered during the esbuild process.
+     * @param error - The ESBuild error object to wrap
+     *
+     * @remarks
+     * The constructor checks if the error contains `aggregateErrors` and
+     * formats each entry with syntax highlighting and positional information.
+     * If not, the error is reformatted using the base error's stack formatting.
+     *
+     * @since 1.0.0
      */
 
-    constructor(message: Message) {
-        super(message.text);
-        this.name = 'esBuildError';
+    constructor(error: ESBuildErrorInterface) {
+        super('esBuildError build failed', 'esBuildError');
 
-        // Maintain proper stack trace
-        if (Error.captureStackTrace) {
-            Error.captureStackTrace(this, esBuildError);
-        }
-
-        if (message.location) {
-            this.stack = this.generateFormattedError(message);
-        } else {
-            this.originalErrorStack = this.stack;
-            this.stack = this.reformatStack(this);
-        }
+        if (error.errors) this.formatAggregateErrors(error.errors);
+        else if (error.aggregateErrors) this.formatAggregateErrors(error.aggregateErrors);
+        else this.reformatStack(error, { withFrameworkFrames: true });
     }
 
     /**
-     * Generates a formatted error message with highlighted code.
+     * Formats a list of ESBuild aggregate errors into a single, colorized stack string.
      *
-     * @param message - An esbuild Message object containing error information.
-     * @returns A formatted string of the error message.
+     * @param errors - Array of ESBuild aggregate errors
+     *
+     * @remarks
+     * Each error is highlighted using {@link highlightCode} and {@link formatCode},
+     * and includes file location, line, and column for easier debugging.
+     *
+     * @since 1.0.0
      */
 
-    private generateFormattedError(message: Message): string {
-        const { text, location, notes } = message;
-        let formattedError = `\n${ this.name }: ${ xterm.gray(location?.file ?? '') }\n`;
-        formattedError += xterm.lightCoral(`${ text }\n\n`);
+    private formatAggregateErrors(errors: Array<ESBuildAggregateErrorInterface>): void {
+        this.formattedStack = '';
 
-        notes.forEach(note => {
-            formattedError += xterm.gray(`${ note.text }\n\n`);
-        });
+        for (const error of errors) {
+            this.formattedStack += `\n${ this.name }: \n${ xterm.lightCoral(`${ error.text }: ${ error.notes.pop()?.text }`) }\n\n`;
+            this.formattedStack += formatCode(highlightCode(error.location.lineText.trim()), {
+                startLine: error.location.line
+            });
 
-        if (location) {
-            const code = this.readCode(location.file);
-            if (code) {
-                formattedError += `${ this.formatCodeSnippet(code, location) }\n`;
-            }
+            this.formattedStack += '\n\n';
+            this.formattedStack += `at ${ xterm.dim(error.location.file) } ${
+                xterm.gray(`[${ error.location.line }:${ error.location.column }]`)
+            }\n\n`;
         }
-
-        return formattedError;
-    }
-
-    /**
-     * Reads code from a file if it exists.
-     *
-     * @param path - The file path to read from.
-     * @returns Array of lines if file exists, otherwise null.
-     */
-
-    private readCode(path: string): string[] | null {
-        try {
-            return existsSync(path) ? readFileSync(join(cwd(), path), 'utf-8').split('\n') : null;
-        } catch {
-            return null;
-        }
-    }
-
-    /**
-     * Formats a code snippet with highlighted errors.
-     *
-     * @param code - Array of code lines.
-     * @param location - The error location within the file.
-     * @returns A formatted and highlighted code snippet string.
-     */
-
-    private formatCodeSnippet(code: string[], location: Location): string {
-        const { line = 1, column = 0, file } = location;
-        const startLine = Math.max(line - 3, 0);
-        const endLine = Math.min(line + 3, code.length);
-
-        const relevantCode = highlightCode(code.slice(startLine, endLine).join('\n'));
-
-        return formatErrorCode({
-            line,
-            name: null,
-            code: relevantCode,
-            source: file,
-            endLine,
-            startLine,
-            column: column + 1,
-            sourceRoot: null,
-            sourceIndex: -1,
-            generatedLine: -1,
-            generatedColumn: -1
-        }, {
-            color: xterm.brightPink
-        });
     }
 }
