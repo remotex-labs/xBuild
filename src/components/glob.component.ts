@@ -2,31 +2,117 @@
  * Imports
  */
 
-import { join, relative } from 'path';
+import { join, relative } from 'path/posix';
 import { existsSync, readdirSync } from 'fs';
+import { inject } from '@symlinks/symlinks.module';
+import { FrameworkService } from '@services/framework.service';
 
 /**
- * Constants
+ * Matches a single-character glob symbol (`?`).
+ *
+ * @remarks
+ * In glob patterns, `?` matches exactly one character.
+ *
+ * @since 1.0.0
  */
 
 const QUESTION_MARK = /\?/g;
+
+/**
+ * Matches brace expansion groups in glob patterns (e.g. `{a,b,c}`).
+ *
+ * @remarks
+ * Brace groups expand into multiple alternatives separated by commas.
+ *
+ * @since 1.0.0
+ */
+
 const BRACE_PATTERN = /\{([^}]+)\}/g;
+
+/**
+ * Matches double asterisks (`**`) used in glob patterns.
+ *
+ * @remarks
+ * `**` typically represents recursive directory matching.
+ *
+ * @since 1.0.0
+ */
+
 const DOUBLE_ASTERISK = /(?:\/|^)\*{2}(?:\/|$)/g;
-const SINGLE_ASTERISK = /\*/g;
+
+/**
+ * Matches a single asterisk (`*`) in glob patterns.
+ *
+ * @remarks
+ * `*` matches zero or more characters within a single directory segment.
+ *
+ * @since 1.0.0
+ */
+
+const SINGLE_ASTERISK = /(?<!\.)\*/g;
+
+/**
+ * Matches escaped character classes in glob patterns (e.g. `[abc]`).
+ *
+ * @remarks
+ * Used to translate character class expressions into regex equivalents.
+ *
+ * @since 1.0.0
+ */
+
 const CHARACTER_CLASS = /\\\[([^\]]+)\\\]/g;
+
+/**
+ * Matches special regex characters that need escaping.
+ *
+ * @remarks
+ * Ensures that characters like `.`, `+`, `$`, `|`, `[]`, `\`
+ * are properly escaped when compiling glob patterns.
+ *
+ * @since 1.0.0
+ */
+
 const REGEX_SPECIAL_CHARS = /[.+$|[\]\\]/g;
 
 /**
- * Compiles a given glob pattern into a regular expression.
+ * Computes the relative path of a file from the project root.
  *
- * @param globPattern - The glob pattern to be converted into a regular expression.
- * @return A regular expression derived from the provided glob pattern.
+ * @param path - The full absolute path of the file.
+ * @returns The file path relative to the root.
  *
- * @remarks This method processes a glob pattern by escaping special regex characters
- * and translating glob syntax such as wildcards (*, ?, **) and braces into equivalent
- * regex components.
+ * @since 1.0.0
+ */
+
+export function getRelativePath(path: string): string {
+    return relative(inject(FrameworkService).rootPath, path);
+}
+
+/**
+ * Compiles a glob pattern into a corresponding regular expression.
  *
- * @since 1.6.0
+ * @param globPattern - The glob pattern string to convert.
+ * @returns A `RegExp` instance that matches the given glob pattern.
+ *
+ * @remarks
+ * This function converts common glob syntax into equivalent
+ * regular expression syntax. It supports:
+ * - `*` to match zero or more characters (excluding `/`)
+ * - `**` to match across directories
+ * - `?` to match exactly one character
+ * - Character classes like `[abc]`
+ * - Brace expansions like `{a,b,c}`
+ *
+ * Escapes regex-special characters before applying glob conversions
+ * to ensure the resulting expression is valid.
+ *
+ * @example
+ * ```ts
+ * const regex = compileGlobPattern("src/**\/*.ts");
+ * console.log(regex.test("src/utils/helpers.ts")); // true
+ * console.log(regex.test("dist/index.js"));        // false
+ * ```
+ *
+ * @since 1.0.0
  */
 
 export function compileGlobPattern(globPattern: string): RegExp {
@@ -35,14 +121,19 @@ export function compileGlobPattern(globPattern: string): RegExp {
 
     const convertGlobToRegex = (pattern: string): string => {
         return pattern
+            .replace('.*', '\.[^\/]+')
+            .replace(QUESTION_MARK, '.')
+            .replace(DOUBLE_ASTERISK, (match) => {
+                if (match.endsWith('/')) {
+                    return '(?:.*\/)?';
+                } else if (match.startsWith('/')) {
+                    return '(?:\/.*)?';
+                } else {
+                    return '.*';
+                }
+            })
+            .replace(SINGLE_ASTERISK, '[^/]+')
             .replace(CHARACTER_CLASS, (_, chars) => `[${ chars }]`)
-            .replace(DOUBLE_ASTERISK, '.*')
-            .replace(SINGLE_ASTERISK, (match, offset, fullString): string => {
-                const context = fullString.slice(Math.max(0, offset - 2), offset);
-                if (context[0] === '\\')  return context[1] === '.' ? '.*' : '[^\\/]*';
-
-                return context[1] === '.' ? '*' : '[^\\/]*';
-            }).replace(QUESTION_MARK, '.')
             .replace(BRACE_PATTERN, (_, choices) =>
                 `(${ choices.split(',').join('|') })`);
     };
@@ -50,20 +141,30 @@ export function compileGlobPattern(globPattern: string): RegExp {
     return new RegExp(`^${ convertGlobToRegex(escapeRegexChars(globPattern)) }$`);
 }
 
-
 /**
  * Determines whether a given string is a glob pattern.
  *
- * A glob pattern typically contains special characters or patterns used for
- * file matching, such as `*`, `?`, `[ ]`, `{ }`, `!`, `@`, `+`, `( )`, and `|`.
- * It also checks for brace expressions like `{a,b}` and extglob patterns like `@(pattern)`.
+ * @param str - The string to test.
+ * @returns `true` if the string contains glob-like syntax, otherwise `false`.
  *
- * @param str - The string to be evaluated.
- * @returns `true` if the input string is a glob pattern, otherwise `false`.
+ * @remarks
+ * This function checks for the presence of common glob syntax
+ * characters (`*`, `?`, `[]`, `{}`, `!`, `@`, `+`, `()`, `|`),
+ * brace expressions (e.g. `{a,b}`), and extglob patterns
+ * (e.g. `@(pattern)`).
  *
- * @remarks This function checks for common globbing patterns and may not cover all edge cases.
+ * It is useful for distinguishing between literal file paths
+ * and glob patterns when working with file matching or build
+ * tools.
  *
- * @since 1.6.0
+ * @example
+ * ```ts
+ * isGlob("src/**\/*.ts");    // true
+ * isGlob("file.txt");       // false
+ * isGlob("lib/@(a|b).js");  // true
+ * ```
+ *
+ * @since 1.0.0
  */
 
 export function isGlob(str: string): boolean {
@@ -100,107 +201,174 @@ export function isGlob(str: string): boolean {
  * @since 1.6.0
  */
 
-export function matchesAny(path: string, patterns: RegExp[]): boolean {
+export function matchesAny(path: string, patterns: Array<RegExp>): boolean {
     return patterns.some(regex => regex.test(path));
 }
 
 /**
- * Converts an array of string patterns and RegExp objects into an array of compiled regular expressions.
- *
- * @param patterns - An array containing string glob patterns and/or RegExp objects to be compiled.
- * @returns An array of RegExp objects compiled from the input patterns.
+ * Compiles an array of string/glob/regex patterns into {@link RegExp} objects.
  *
  * @remarks
- * This function processes each pattern in the input array:
- * - If the pattern is already a RegExp object, it's used as is
- * - If the pattern is a string, it's normalized by:
- *   1. Replacing all backslashes with forward slashes
- *   2. Removing leading negation (!) characters
- *   3. Converting the normalized glob pattern to a RegExp using `compileGlobPattern`
+ * - If an entry is already a `RegExp`, it is returned as-is.
+ * - If an entry is a glob pattern (e.g. `src/**\/*.test.ts`), it is compiled into a regex
+ *   using {@link compileGlobPattern}.
+ * - Otherwise, literal file paths are converted into an exact-match regex,
+ *   with regex metacharacters properly escaped.
+ *
+ * @param patterns - A list of strings (paths, globs) or regular expressions.
+ * @returns An array of {@link RegExp} objects ready for matching.
  *
  * @example
  * ```ts
- * // Compile a mix of glob patterns and RegExp objects
- * const patterns = compilePatterns([
- *   '**\/*.ts',
- *   /\.js$/,
- *   '!node_modules/**'
+ * const regexes = compilePatterns([
+ *   /\.test\.ts$/,             // already a regex
+ *   "src/utils/helper.ts",     // literal file path
+ *   "tests/**\/*.spec.ts"       // glob pattern
  * ]);
  *
- * // Result is an array of RegExp objects
- * console.log(patterns); // [/^.*\.ts$/, /\.js$/, /^node_modules\/.*$/]
+ * matchesAnyRegex("src/utils/helper.ts", regexes); // true
  * ```
  *
- * @since 1.6.0
+ * @since 1.0.0
  */
 
-function compilePatterns(patterns: (string | RegExp)[]): RegExp[] {
-    return patterns.map(pattern =>
-        pattern instanceof RegExp
-            ? pattern
-            : compileGlobPattern(pattern.replace(/\\/g, '/').replace(/^!/, ''))
-    );
+export function compilePatterns(patterns: Array<string | RegExp>): Array<RegExp> {
+    return patterns.map(pattern => {
+        if (pattern instanceof RegExp) {
+            return pattern;
+        }
+
+        // Check if pattern is negated
+        const isNegated = typeof pattern === 'string' && pattern.startsWith('!');
+        const cleanPattern = isNegated ? pattern.slice(1) : pattern;
+
+        let regexPattern: string;
+
+        if (isGlob(cleanPattern)) {
+            const compiled = compileGlobPattern(cleanPattern);
+            // Extract the pattern from the compiled regex (remove ^ and $)
+            regexPattern = compiled.source.slice(1, -1);
+        } else {
+            regexPattern = getRelativePath(cleanPattern).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        }
+
+        // If negated, use negative lookahead to match anything that doesn't match the pattern
+        if (isNegated) {
+            return new RegExp(`^(?!${ regexPattern }$).*$`);
+        }
+
+        return new RegExp(`^${ regexPattern }$`);
+    });
 }
 
 /**
- * Recursively collects files from a directory based on include and exclude patterns.
+ * Collects files from a directory tree that match include/exclude glob patterns.
  *
- * @param baseDir - The base directory to start the file collection from.
- * @param include - An array of glob patterns specifying which files to include.
- *                  Patterns starting with '!' are treated as exclude patterns.
- * @param exclude - An array of glob patterns specifying which files to exclude.
- * @returns An array of file paths relative to the base directory that match the include
- *          patterns and don't match the exclude patterns.
+ * @param baseDir - The base directory to start collecting files from.
+ * @param include - An array of glob patterns or file paths to include. Patterns starting
+ *                  with `!` are treated as exclusions (equivalent to entries in the `exclude` array).
+ * @param exclude - An array of glob patterns or file paths to exclude from the results.
+ * @returns An array of relative file paths (relative to `baseDir`) that match the include
+ *          patterns and do not match any exclude patterns.
  *
  * @remarks
- * This function:
- * - Returns an empty array if the base directory doesn't exist
- * - Processes negative patterns (starting with '!') from both include and exclude arrays
- * - Normalizes all paths to use forward slashes for consistent pattern matching
- * - Uses depth-first traversal to walk through the directory structure
- * - Performs pattern matching against paths relative to the base directory
+ * This function recursively traverses the directory tree starting from `baseDir` and returns
+ * only files that match the criteria. The matching process works as follows:
+ *
+ * - Files matching any exclude pattern are skipped entirely.
+ * - Files matching at least one include pattern are collected.
+ * - If no positive patterns are provided after filtering out negations, an empty array is returned.
+ * - Inaccessible directories (permission errors) are silently skipped.
+ *
+ * **Pattern types supported:**
+ * - **Literal paths**: `src/utils/helper.ts` - exact file path match
+ * - **Glob patterns**: `src/**\/*.ts` - recursive directory and wildcard matching
+ * - **Regular expressions**: `/\.ts$/` - regex-based pattern matching
+ * - **Negation patterns**: `!dist/**` - exclude matching patterns (when prefixed with `!` in include array)
+ *
+ * All patterns are compiled using {@link compilePatterns} into regular expressions before matching.
+ *
+ * **Algorithm**:
+ * 1. Validates that `baseDir` exists; returns empty array if it doesn't.
+ * 2. Separates include patterns into positive and negative patterns (by checking for `!` prefix).
+ * 3. Appends exclude array to negative patterns.
+ * 4. Returns empty array if no positive patterns remain.
+ * 5. Compiles both positive and negative patterns into regex objects.
+ * 6. Recursively walks the directory tree:
+ *    - Checks exclude patterns first; skips matching files/directories.
+ *    - Descends into non-excluded directories.
+ *    - Collects non-excluded files that match include patterns.
+ * 7. Returns collected relative file paths.
+ *
+ * **Performance considerations**:
+ * - Use exclude patterns to prevent traversing large irrelevant directories.
+ * - More specific patterns (e.g., `src/**\/*.test.ts`) are more efficient than broad patterns.
+ * - The function has a linear time complexity relative to the total number of files traversed.
  *
  * @example
  * ```ts
- * // Collect all TypeScript files except tests
- * const files = collectFilesFromDir(
- *   'src',
- *   ['**\/*.ts'],
- *   ['**\/*.spec.ts', '**\/*.test.ts']
+ * // Collect all TypeScript files except tests and build artifacts
+ * const files = collectFilesFromGlob(
+ *   '/project',
+ *   ['src/**\/*.ts'],
+ *   ['**\/*.test.ts', 'dist/**', 'node_modules/**']
  * );
+ * // Returns: ['src/index.ts', 'src/utils/helper.ts', ...]
  *
- * // With negated patterns in include
- * const files2 = collectFilesFromDir(
- *   'src',
- *   ['**\/*.ts', '!**\/*.d.ts'],
- *   ['node_modules/**']
+ * // Using negation patterns in the include array
+ * const files2 = collectFilesFromGlob(
+ *   '/project',
+ *   ['**\/*.ts', '!src/**\/*.spec.ts'],
+ *   []
  * );
+ * // Returns all TypeScript files except spec files
+ *
+ * // Collecting files from a non-existent directory
+ * const files3 = collectFilesFromGlob('/nonexistent', ['*.ts'], []);
+ * // Returns: []
  * ```
  *
- * @since 1.6.0
+ * @see {@link isGlob} for glob pattern detection
+ * @see {@link matchesAny} for pattern matching logic
+ * @see {@link compilePatterns} for pattern compilation details
+ *
+ * @since 1.0.0
  */
 
-export function collectFilesFromDir(baseDir: string, include: Array<string>, exclude: Array<string>): Array<string> {
+export function collectFilesFromGlob(baseDir: string, include: Array<string>, exclude: readonly string[]): Array<string> {
     if (!existsSync(baseDir)) return [];
+    const positivePatterns: Array<string> = [];
+    const negativePatterns: Array<string> = [];
 
-    const positivePatterns = include.filter(p => !p.startsWith('!'));
-    const negativePatterns = [
-        ...exclude,
-        ...include.filter(p => p.startsWith('!'))
-    ];
+    for (const pattern of include) {
+        if (pattern.startsWith('!')) {
+            negativePatterns.push(pattern.slice(1)); // Remove the '!' prefix
+        } else {
+            positivePatterns.push(pattern);
+        }
+    }
 
+    negativePatterns.push(...exclude);
+    if (positivePatterns.length === 0) return [];
     const includeRegex = compilePatterns(positivePatterns);
-    const excludeRegex = compilePatterns(negativePatterns);
-
+    const excludeRegex = negativePatterns.length > 0 ? compilePatterns(negativePatterns) : [];
     const collectedFiles: Array<string> = [];
+    const hasExcludes = excludeRegex.length > 0;
 
     const walk = (dir: string): void => {
-        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        let entries;
+        try {
+            entries = readdirSync(dir, { withFileTypes: true });
+        } catch {
+            return; // Skip inaccessible directories
+        }
+
+        for (let i = 0; i < entries.length; i++) {
+            const entry = entries[i];
             const fullPath = join(dir, entry.name);
-            const relativePath = relative(baseDir, fullPath).replace(/\\/g, '/');
+            const relativePath = relative(baseDir, fullPath);
 
-            if (matchesAny(relativePath, excludeRegex)) continue;
-
+            if (hasExcludes && matchesAny(relativePath, excludeRegex)) continue;
             if (entry.isDirectory()) {
                 walk(fullPath);
             } else if (matchesAny(relativePath, includeRegex)) {
