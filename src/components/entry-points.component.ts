@@ -2,7 +2,7 @@
  * Import will remove at compile time
  */
 
-import type { EntryPointsType } from '@configuration/interfaces/configuration.interface';
+import type { BuildOptions } from 'esbuild';
 
 /**
  * Imports
@@ -30,6 +30,8 @@ import { xBuildError } from '@errors/xbuild.error';
  * //   'src/utils': 'src/utils.ts'
  * // }
  * ```
+ *
+ * @since 1.0.0
  */
 
 export function mapFilePathsToNames(filePaths: Array<string>): Record<string, string> {
@@ -82,9 +84,11 @@ export function mapFilePathsToNames(filePaths: Array<string>): Record<string, st
  * const entryPoints = extractEntryPoints({ index: 'src/index.ts', index2: 'dist/index2.js' });
  * console.log(entryPoints); // { index: 'src/index.ts', index2: 'dist/index2.js' }
  * ```
+ *
+ * @since 1.0.0
  */
 
-export function extractEntryPoints(entryPoints: EntryPointsType): Record<string, string> {
+export function extractEntryPoints(entryPoints: BuildOptions['entryPoints']): Record<string, string> {
     if (Array.isArray(entryPoints)) {
         let result: Record<string, string> = {};
 
