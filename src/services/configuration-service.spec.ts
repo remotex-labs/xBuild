@@ -1,10 +1,4 @@
 /**
- * Import will remove at compile time
- */
-
-import type { ConfigurationInterface } from '@interfaces/configuration.interface';
-
-/**
  * Imports
  */
 
@@ -35,17 +29,17 @@ describe('ConfigurationService', () => {
         });
 
         test('should initialize with custom configuration', () => {
-            const customConfig = { name: 'testApp' } as ConfigurationInterface;
+            const customConfig = { name: 'testApp' } as any;
             const service = new ConfigurationService(customConfig);
-            const config = service.getValue();
+            const config: any = service.getValue();
 
             expect(config.name).toBe('testApp');
         });
 
         test('should deep merge initial configuration with defaults', () => {
-            const customConfig = { name: 'customApp' } as ConfigurationInterface;
+            const customConfig = { name: 'customApp' } as any;
             const service = new ConfigurationService(customConfig);
-            const config = service.getValue();
+            const config: any = service.getValue();
 
             expect(config.name).toBe('customApp');
         });
