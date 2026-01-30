@@ -11,7 +11,7 @@ describe('VMRuntimeError', () => {
     let mockSourceService: SourceService;
 
     beforeEach(() => {
-        jest.clearAllMocks();
+        xJet.clearAllMocks();
         originalError = new Error('Original VM error');
         mockSourceService = new SourceService({
             version: 3,
@@ -22,8 +22,13 @@ describe('VMRuntimeError', () => {
             sourcesContent: [ 'asd' ]
         });
 
-        jest.spyOn(xBuildLazy, 'service', 'get').mockReturnValue(mockSourceService);
-        jest.spyOn(mockSourceService, 'getPositionWithCode').mockReturnValue(<any> {
+        xJet.mock(xBuildLazy).mockReturnValue(<any>{
+            get service() {
+                return mockSourceService;
+            }
+        });
+
+        xJet.spyOn(mockSourceService, 'getPositionWithCode').mockReturnValue(<any> {
             source: 'src/file.ts',
             sourceRoot: 'src/',
             line: 10,

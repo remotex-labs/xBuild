@@ -7,20 +7,6 @@ import { existsSync, readdirSync } from 'fs';
 import { collectFilesFromDir, compileGlobPattern, isGlob, matchesAny } from '@components/glob.component';
 
 /**
- * Mock dependencies
- */
-
-jest.mock('fs', () => ({
-    existsSync: jest.fn(),
-    readdirSync: jest.fn()
-}));
-
-jest.mock('path', () => ({
-    join: jest.fn((dir, file) => `${ dir }/${ file }`),
-    relative: jest.fn((from, to) => to.replace(`${ from }/`, ''))
-}));
-
-/**
  * Tests
  */
 
@@ -161,10 +147,10 @@ describe('matchesAny', () => {
 
 describe('collectFilesFromDir', () => {
     beforeEach(() => {
-        jest.clearAllMocks();
+        xJet.clearAllMocks();
 
         // Set up a safer mock implementation for relative that won't throw errors
-        (relative as jest.Mock).mockImplementation((from, to) => {
+        xJet.mock(relative).mockImplementation((from: any, to: any) => {
             // Safety check to prevent undefined errors
             if (typeof from !== 'string' || typeof to !== 'string') {
                 return '';
@@ -179,15 +165,14 @@ describe('collectFilesFromDir', () => {
         });
 
         // Set up a consistent join implementation
-        (join as jest.Mock).mockImplementation((dir, file) => {
+        xJet.mock(join).mockImplementation((dir, file) => {
             return `${ dir }/${ file }`;
         });
     });
 
 
     test('should return empty array if baseDir does not exist', () => {
-        (existsSync as jest.Mock).mockReturnValue(false);
-
+        xJet.mock(existsSync).mockReturnValue(false);
         const result = collectFilesFromDir('non-existent-dir', [ '**/*.ts' ], []);
 
         expect(result).toEqual([]);
@@ -195,11 +180,9 @@ describe('collectFilesFromDir', () => {
     });
 
     test('should collect matching files and skip excluded ones', () => {
-        // Mock existsSync to return true for our test directory
-        (existsSync as jest.Mock).mockReturnValue(true);
+        xJet.mock(existsSync).mockReturnValue(true);
 
-        // Mock directory structure
-        const mockFiles = [
+        const mockFiles: any = [
             { name: 'file1.ts', isDirectory: () => false },
             { name: 'file2.js', isDirectory: () => false },
             { name: 'file3.ts', isDirectory: () => false },
@@ -207,9 +190,7 @@ describe('collectFilesFromDir', () => {
         ];
 
         const mockNodeModulesFiles = [{ name: 'package.ts', isDirectory: () => false }];
-
-        // Set up readdirSync to return our mock files
-        (readdirSync as jest.Mock).mockImplementation((dir) => {
+        xJet.mock(readdirSync).mockImplementation((dir: any): any => {
             if (dir === 'src') {
                 return mockFiles;
             } else if (dir === 'src/node_modules') {
@@ -220,8 +201,8 @@ describe('collectFilesFromDir', () => {
         });
 
         // Set up the join and relative functions to work with our mocks
-        (join as jest.Mock).mockImplementation((dir, file) => `${ dir }/${ file }`);
-        (relative as jest.Mock).mockImplementation((from, to) => to.replace(`${ from }/`, ''));
+        xJet.mock(join).mockImplementation((dir, file) => `${ dir }/${ file }`);
+        xJet.mock(relative).mockImplementation((from, to) => to.replace(`${ from }/`, ''));
 
         const result = collectFilesFromDir('src', [ '**/*.ts' ], [ '**/node_modules/**' ]);
 
@@ -233,49 +214,39 @@ describe('collectFilesFromDir', () => {
     });
 
     test('should handle negated patterns in include', () => {
-        // Mock existsSync to return true for our test directory
-        (existsSync as jest.Mock).mockReturnValue(true);
+        xJet.mock(existsSync).mockReturnValue(true);
 
-        // Mock directory structure
-        const mockFiles = [
+        const mockFiles: any = [
             { name: 'file1.ts', isDirectory: () => false },
             { name: 'file1.d.ts', isDirectory: () => false },
             { name: 'file2.js', isDirectory: () => false }
         ];
 
-        // Set up readdirSync to return our mock files
-        (readdirSync as jest.Mock).mockReturnValue(mockFiles);
-
+        xJet.mock(readdirSync).mockReturnValue(mockFiles);
         const result = collectFilesFromDir('src', [ '**/*.ts', '!**/*.d.ts' ], []);
 
-        // We expect file1.ts to be included, but not file1.d.ts or file2.js
         expect(result).toContain('file1.ts');
         expect(result).not.toContain('file1.d.ts');
         expect(result).not.toContain('file2.js');
     });
 
     test('should handle both include and exclude patterns', () => {
-        // Mock existsSync to return true for our test directory
-        (existsSync as jest.Mock).mockReturnValue(true);
+        xJet.mock(existsSync).mockReturnValue(true);
 
-        // Mock directory structure
-        const mockFiles = [
+        const mockFiles: any = [
             { name: 'file1.ts', isDirectory: () => false },
             { name: 'file1.test.ts', isDirectory: () => false },
             { name: 'file2.js', isDirectory: () => false },
             { name: 'file2.test.js', isDirectory: () => false }
         ];
 
-        // Set up readdirSync to return our mock files
-        (readdirSync as jest.Mock).mockReturnValue(mockFiles);
-
+        xJet.mock(readdirSync).mockReturnValue(mockFiles);
         const result = collectFilesFromDir(
             'src',
             [ '**/*.ts', '**/*.js' ],
             [ '*.test.*' ]
         );
 
-        // We expect file1.ts and file2.js to be included, but not the test files
         expect(result).toContain('file1.ts');
         expect(result).toContain('file2.js');
         expect(result).not.toContain('file1.test.ts');
