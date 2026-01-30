@@ -3,7 +3,7 @@
         "strict": true,
         "target": "ESNext",
         "module": "ESNext",
-        "baseUrl": ".",
+        "baseUrl": "src",
         "rootDir": ".",
         "outDir": "dist",
         "declaration": true,
@@ -24,26 +24,17 @@
             "node"
         ],
         "paths": {
-            "@errors/*": [
-                "src/errors/*"
-            ],
-            "@plugins/*": [
-                "src/plugins/*"
-            ],
             "@services/*": [
-                "src/services/*"
+                "services/*"
+            ],
+            "@symlinks/*": [
+                "modules/symlinks/*"
+            ],
+            "@observable/*": [
+                "modules/observable/*"
             ],
             "@typescript/*": [
-                "src/modules/typescript/*"
-            ],
-            "@providers/*": [
-                "src/providers/*"
-            ],
-            "@components/*": [
-                "src/components/*"
-            ],
-            "@configuration/*": [
-                "src/configuration/*"
+                "modules/typescript/*"
             ]
         }
     },
