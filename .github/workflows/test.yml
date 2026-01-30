@@ -4,7 +4,9 @@ on:
     pull_request:
         branches: [ '**' ]
         types: [ opened, synchronize, reopened ]
-        workflow_dispatch: {}
+
+    # Allow manual deployment
+    workflow_dispatch:
 
 jobs:
     test:
