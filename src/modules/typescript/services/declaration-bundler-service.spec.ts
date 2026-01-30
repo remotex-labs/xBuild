@@ -6,21 +6,6 @@ import type ts from 'typescript';
 import { HeaderDeclarationBundle  } from '@typescript/constants/typescript.constant';
 import { DeclarationBundlerService } from '@typescript/services/declaration-bundler.service';
 
-/**
- * Mock dependencies
- */
-
-jest.mock('typescript', () => {
-    const originalTs = jest.requireActual('typescript');
-
-    return {
-        ...originalTs,
-        resolveModuleName: jest.fn(),
-        sys: {
-            ...originalTs.sys
-        }
-    };
-});
 
 /**
  * Tests
@@ -38,7 +23,7 @@ describe('DeclarationBundlerService', () => {
 
     beforeEach(() => {
         // Reset all mocks
-        jest.clearAllMocks();
+        xJet.clearAllMocks();
 
         // Setup mock for TS config
         mockConfig = {
@@ -49,30 +34,26 @@ describe('DeclarationBundlerService', () => {
 
         // Setup mock for type checker
         mockTypeChecker = {
-            getSymbolAtLocation: jest.fn(),
-            getExportsOfModule: jest.fn()
+            getSymbolAtLocation: xJet.fn(),
+            getExportsOfModule: xJet.fn()
         } as unknown as ts.TypeChecker;
 
-        // Setup mock for program
         mockProgram = {
-            getTypeChecker: jest.fn().mockReturnValue(mockTypeChecker),
-            getSourceFile: jest.fn(),
-            getCompilerOptions: jest.fn().mockReturnValue({})
+            getTypeChecker: xJet.fn().mockReturnValue(mockTypeChecker),
+            getSourceFile: xJet.fn(),
+            getCompilerOptions: xJet.fn().mockReturnValue({})
         } as unknown as ts.Program;
 
-        // Setup mock for source file
         mockSourceFile = {
             fileName: '/src/index.ts',
             statements: []
         } as unknown as ts.SourceFile;
 
-        // Setup mock for language service
         mockLanguageService = {
-            getProgram: jest.fn().mockReturnValue(mockProgram),
-            getEmitOutput: jest.fn()
+            getProgram: xJet.fn().mockReturnValue(mockProgram),
+            getEmitOutput: xJet.fn()
         } as unknown as ts.LanguageService;
 
-        // Create service instance
         service = new DeclarationBundlerService(mockConfig, mockLanguageService);
     });
 
@@ -85,11 +66,8 @@ describe('DeclarationBundlerService', () => {
         });
 
         test('should process each entry point and return bundled declarations', () => {
-            // Setup mocks
             const entryPoints = [ '/src/index.ts', '/src/types.ts' ];
-
-            // Mock implementation of private method using jest spyOn
-            jest.spyOn(service as any, 'generateBundledDeclaration')
+            xJet.spyOn(service as any, 'generateBundledDeclaration')
                 .mockImplementation((path: any) => {
                     return path === '/src/index.ts' ? 'bundled content 1' : 'bundled content 2';
                 });
@@ -108,8 +86,8 @@ describe('DeclarationBundlerService', () => {
             // Setup
             const entryPoints = [ '/src/index.ts', '/src/types.ts' ];
 
-            jest.spyOn(service as any, 'generateBundledDeclaration')
-                .mockImplementation((path: any) => {
+            xJet.spyOn(service as any, 'generateBundledDeclaration')
+                .mockImplementation((path: any): any => {
                     return path === '/src/index.ts' ? 'bundled content' : undefined;
                 });
 
@@ -148,13 +126,13 @@ describe('DeclarationBundlerService', () => {
             (mockProgram.getSourceFile as any).mockReturnValue(mockSourceFile);
 
             // Mock helper methods
-            jest.spyOn(service as any, 'collectFilesRecursive').mockImplementation();
-            jest.spyOn(service as any, 'collectExportsFromSourceFile').mockImplementation();
-            jest.spyOn(service as any, 'processDeclaredFiles').mockReturnValue({
+            xJet.spyOn(service as any, 'collectFilesRecursive');
+            xJet.spyOn(service as any, 'collectExportsFromSourceFile');
+            xJet.spyOn(service as any, 'processDeclaredFiles').mockReturnValue({
                 bundledContent: [ 'content1', 'content2' ],
                 externalImports: new Set([ 'import { x } from "external"' ])
             });
-            jest.spyOn(service as any, 'createFinalBundleContent').mockReturnValue('final bundled content');
+            xJet.spyOn(service as any, 'createFinalBundleContent').mockReturnValue(<any> 'final bundled content');
 
             // Call the method
             const result = (service as any).generateBundledDeclaration('/src/index.ts');
@@ -229,22 +207,22 @@ const internalVar = 456;
                 outputFiles: [{ name: 'index.d.ts', text: dtsContent }]
             });
 
-            jest.spyOn(service as any, 'isImportOrExportWithFrom')
+            xJet.spyOn(service as any, 'isImportOrExportWithFrom')
                 .mockImplementation((line: any) =>
                     line.includes('import ') || (line.includes('export ') && line.includes(' from '))
                 );
 
-            jest.spyOn(service as any, 'extractModulePath')
+            xJet.spyOn(service as any, 'extractModulePath')
                 .mockImplementation((line: any) => {
                     const match = line.match(/from ["'](.+)["']/);
 
                     return match ? match[1] : undefined;
                 });
 
-            jest.spyOn(service as any, 'isExternalModule')
+            xJet.spyOn(service as any, 'isExternalModule')
                 .mockImplementation((modulePath: any) => modulePath.startsWith('external'));
 
-            jest.spyOn(service as any, 'processExportLine')
+            xJet.spyOn(service as any, 'processExportLine')
                 .mockImplementation((line: any) => line.includes('foo') ? 'const foo = 123;' : line);
 
             const externalImports = new Set<string>();

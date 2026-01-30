@@ -6,29 +6,6 @@ import ts from 'typescript';
 import { resolve } from 'path';
 import { LanguageHostService } from '@typescript/services/language-host.service';
 
-/**
- * Mock dependencies
- */
-
-jest.mock('typescript', () => {
-    const originalTs = jest.requireActual('typescript');
-
-    return {
-        ...originalTs,
-        sys: {
-            fileExists: jest.fn(),
-            readFile: jest.fn(),
-            readDirectory: jest.fn(),
-            getDirectories: jest.fn(),
-            directoryExists: jest.fn(),
-            getCurrentDirectory: jest.fn()
-        },
-        ScriptSnapshot: {
-            fromString: jest.fn()
-        },
-        getDefaultLibFilePath: jest.fn()
-    };
-});
 
 /**
  * Tests
@@ -42,7 +19,7 @@ describe('LanguageHostService', () => {
     };
 
     beforeEach(() => {
-        jest.clearAllMocks();
+        xJet.clearAllMocks();
         languageHostService = new LanguageHostService(mockCompilerOptions);
     });
 
@@ -66,7 +43,7 @@ describe('LanguageHostService', () => {
     describe('fileExists', () => {
         test('should delegate to ts.sys.fileExists', () => {
             const filePath = 'test/file.ts';
-            (ts.sys.fileExists as jest.Mock).mockReturnValue(true);
+            xJet.spyOn(ts.sys, 'fileExists').mockReturnValue(true);
 
             const result = languageHostService.fileExists(filePath);
 
@@ -79,7 +56,7 @@ describe('LanguageHostService', () => {
         test('should delegate to ts.sys.readFile', () => {
             const filePath = 'test/file.ts';
             const fileContent = 'export const test = 123;';
-            (ts.sys.readFile as jest.Mock).mockReturnValue(fileContent);
+            xJet.spyOn(ts.sys, 'readFile').mockReturnValue(fileContent);
 
             const result = languageHostService.readFile(filePath);
 
@@ -124,7 +101,7 @@ describe('LanguageHostService', () => {
     describe('getDefaultLibFileName', () => {
         test('should delegate to ts.getDefaultLibFilePath', () => {
             const expectedPath = 'lib.d.ts';
-            (ts.getDefaultLibFilePath as jest.Mock).mockReturnValue(expectedPath);
+            xJet.spyOn(ts, 'getDefaultLibFilePath').mockReturnValue(expectedPath);
 
             const result = languageHostService.getDefaultLibFileName(mockCompilerOptions);
 
@@ -136,7 +113,7 @@ describe('LanguageHostService', () => {
     describe('getScriptSnapshot', () => {
         test('should return undefined if file does not exist', () => {
             const filePath = 'test/non-existent.ts';
-            (ts.sys.fileExists as jest.Mock).mockReturnValue(false);
+            xJet.spyOn(ts.sys, 'fileExists').mockReturnValue(false);
 
             const result = languageHostService.getScriptSnapshot(filePath);
 
@@ -146,11 +123,11 @@ describe('LanguageHostService', () => {
         test('should return script snapshot if file exists', () => {
             const filePath = 'test/file.ts';
             const fileContent = 'export const test = 123;';
-            const mockSnapshot = { getText: jest.fn() };
+            const mockSnapshot: any = { getText: xJet.fn() };
 
-            (ts.sys.fileExists as jest.Mock).mockReturnValue(true);
-            (ts.sys.readFile as jest.Mock).mockReturnValue(fileContent);
-            (ts.ScriptSnapshot.fromString as jest.Mock).mockReturnValue(mockSnapshot);
+            xJet.spyOn(ts.sys, 'fileExists').mockReturnValue(true);
+            xJet.spyOn(ts.sys, 'readFile').mockReturnValue(fileContent);
+            xJet.spyOn(ts.ScriptSnapshot, 'fromString').mockReturnValue(mockSnapshot);
 
             const result = languageHostService.getScriptSnapshot(filePath);
 
@@ -161,8 +138,8 @@ describe('LanguageHostService', () => {
         test('should return undefined if file exists but content is null', () => {
             const filePath = 'test/file.ts';
 
-            (ts.sys.fileExists as jest.Mock).mockReturnValue(true);
-            (ts.sys.readFile as jest.Mock).mockReturnValue(null);
+            xJet.spyOn(ts.sys, 'fileExists').mockReturnValue(true);
+            xJet.spyOn(ts.sys, 'readFile').mockReturnValue(null as any);
 
             const result = languageHostService.getScriptSnapshot(filePath);
 
@@ -179,7 +156,7 @@ describe('LanguageHostService', () => {
             const depth = 5;
             const expectedResult = [ 'file1.ts', 'file2.ts' ];
 
-            (ts.sys.readDirectory as jest.Mock).mockReturnValue(expectedResult);
+            xJet.spyOn(ts.sys, 'readDirectory').mockReturnValue(expectedResult);
 
             const result = languageHostService.readDirectory(
                 directoryPath,
@@ -203,8 +180,7 @@ describe('LanguageHostService', () => {
             const directoryPath = 'test/';
             const expectedResult = [ 'dir1', 'dir2' ];
 
-            (ts.sys.getDirectories as jest.Mock).mockReturnValue(expectedResult);
-
+            xJet.spyOn(ts.sys, 'getDirectories').mockReturnValue(expectedResult);
             const result = languageHostService.getDirectories(directoryPath);
 
             expect(result).toBe(expectedResult);
@@ -214,8 +190,7 @@ describe('LanguageHostService', () => {
         test('should delegate directoryExists to ts.sys.directoryExists', () => {
             const directoryPath = 'test/';
 
-            (ts.sys.directoryExists as jest.Mock).mockReturnValue(true);
-
+            xJet.spyOn(ts.sys, 'directoryExists').mockReturnValue(true);
             const result = languageHostService.directoryExists(directoryPath);
 
             expect(result).toBe(true);
@@ -223,10 +198,9 @@ describe('LanguageHostService', () => {
         });
 
         test('should delegate getCurrentDirectory to ts.sys.getCurrentDirectory', () => {
-            const expectedDir = '/home/user/project';
+            const expectedDir: any = '/home/user/project';
 
-            (ts.sys.getCurrentDirectory as jest.Mock).mockReturnValue(expectedDir);
-
+            xJet.spyOn(ts.sys, 'getCurrentDirectory').mockReturnValue(expectedDir);
             const result = languageHostService.getCurrentDirectory();
 
             expect(result).toBe(expectedDir);
