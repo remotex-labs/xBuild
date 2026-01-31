@@ -20,7 +20,7 @@ export default {
     build: {
         target: [ `node${ version.slice(1) }` ],
         platform: 'node',
-        packages: 'bundle',
+        packages: 'external',
         external: [ 'typescript', 'esbuild', 'yargs', 'url' ],
         loader: {
             '.html': 'text'
