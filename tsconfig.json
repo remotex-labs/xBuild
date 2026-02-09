@@ -3,8 +3,7 @@
         "strict": true,
         "target": "ESNext",
         "module": "ESNext",
-        "baseUrl": ".",
-        "rootDir": ".",
+        "rootDir": "src",
         "outDir": "dist",
         "declaration": true,
         "skipLibCheck": true,
@@ -25,25 +24,41 @@
         ],
         "paths": {
             "@errors/*": [
-                "src/errors/*"
-            ],
-            "@plugins/*": [
-                "src/plugins/*"
+                "./src/errors/*"
             ],
             "@services/*": [
-                "src/services/*"
-            ],
-            "@typescript/*": [
-                "src/modules/typescript/*"
+                "./src/services/*"
             ],
             "@providers/*": [
-                "src/providers/*"
+                "./src/providers/*"
+            ],
+            "@directives/*": [
+                "./src/directives/*"
+            ],
+            "@constants/*": [
+                "./src/constants/*"
             ],
             "@components/*": [
-                "src/components/*"
+                "./src/components/*"
             ],
-            "@configuration/*": [
-                "src/configuration/*"
+
+            "@interfaces/*": [
+                "./src/interfaces/*"
+            ],
+            "@argv/*": [
+                "./src/modules/argv/*"
+            ],
+            "@server/*": [
+                "./src/modules/server/*"
+            ],
+            "@symlinks/*": [
+                "./src/modules/symlinks/*"
+            ],
+            "@observable/*": [
+                "./src/modules/observable/*"
+            ],
+            "@typescript/*": [
+                "./src/modules/typescript/*"
             ]
         }
     },
