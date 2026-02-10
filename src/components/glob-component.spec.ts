@@ -2,254 +2,322 @@
  * Imports
  */
 
-import { join, relative } from 'path';
-import { existsSync, readdirSync } from 'fs';
-import { collectFilesFromDir, compileGlobPattern, isGlob, matchesAny } from '@components/glob.component';
+import process from 'process';
+import { readdirSync } from 'fs';
+import { isDirectoryExcluded, shouldIncludeFile } from '@components/glob.component';
+import { collectFilesFromGlob, parseGlobs, matchesAny } from '@components/glob.component';
 
 /**
  * Tests
  */
 
-describe('isGlob', () => {
-    test('should return true for basic glob patterns', () => {
-        expect(isGlob('*.js')).toBe(true);
-        expect(isGlob('src/**/*.ts')).toBe(true);
-        expect(isGlob('file-?.txt')).toBe(true);
+describe('parseGlobs', () => {
+    test('should separate include and exclude patterns', () => {
+        const result = parseGlobs([ '**/*.ts', '!**/*.test.ts', '**/*.js', '!node_modules/**' ]);
+
+        expect(result.include).toEqual([ '**/*.ts', '**/*.js' ]);
+        expect(result.exclude).toEqual([ '**/*.test.ts', 'node_modules/**' ]);
     });
 
-    test('should return true for brace patterns', () => {
-        expect(isGlob('{a,b}.js')).toBe(true);
-        expect(isGlob('src/{foo,bar}/*.js')).toBe(true);
+    test('should handle only include patterns', () => {
+        const result = parseGlobs([ '**/*.ts', '**/*.js' ]);
+
+        expect(result.include).toEqual([ '**/*.ts', '**/*.js' ]);
+        expect(result.exclude).toEqual([]);
     });
 
-    test('should return true for character class patterns', () => {
-        expect(isGlob('[abc].js')).toBe(true);
-        expect(isGlob('src/[0-9]*.ts')).toBe(true);
+    test('should handle only exclude patterns', () => {
+        const result = parseGlobs([ '!**/*.test.ts', '!node_modules/**' ]);
+
+        expect(result.include).toEqual([]);
+        expect(result.exclude).toEqual([ '**/*.test.ts', 'node_modules/**' ]);
     });
 
-    test('should return true for extglob patterns', () => {
-        expect(isGlob('@(pattern).js')).toBe(true);
-        expect(isGlob('+(foo|bar).ts')).toBe(true);
-    });
+    test('should handle empty array', () => {
+        const result = parseGlobs([]);
 
-    test('should return false for regular file paths', () => {
-        expect(isGlob('file.js')).toBe(false);
-        expect(isGlob('src/components/Button.tsx')).toBe(false);
-        expect(isGlob('path/to/file.txt')).toBe(false);
-        expect(isGlob('C:\\Users\\admin\\GoogleDrive\\Desktop\\main\\src\\test2.spec.ts')).toBe(false);
-    });
-});
-
-describe('compileGlobPattern', () => {
-    test('should correctly match simple wildcards', () => {
-        const regex = compileGlobPattern('*.js');
-        expect(regex.test('file.js')).toBe(true);
-        expect(regex.test('test.js')).toBe(true);
-        expect(regex.test('file.ts')).toBe(false);
-        expect(regex.test('folder/file.js')).toBe(false);
-    });
-
-    test('should handle double asterisk (recursive matching)', () => {
-        const regex = compileGlobPattern('src/**/test.js');
-        expect(regex.test('src/test.js')).toBe(true);
-        expect(regex.test('src/foo/test.js')).toBe(true);
-        expect(regex.test('src/foo/bar/test.js')).toBe(true);
-        expect(regex.test('src/test.ts')).toBe(false);
-    });
-
-    test('should handle question marks', () => {
-        const regex = compileGlobPattern('file-?.js');
-        expect(regex.test('file-1.js')).toBe(true);
-        expect(regex.test('file-a.js')).toBe(true);
-        expect(regex.test('file-ab.js')).toBe(false);
-    });
-
-    test('should handle brace expansion', () => {
-        const regex = compileGlobPattern('src/{foo,bar}.js');
-        expect(regex.test('src/foo.js')).toBe(true);
-        expect(regex.test('src/bar.js')).toBe(true);
-        expect(regex.test('src/baz.js')).toBe(false);
-    });
-
-    test('should handle character classes', () => {
-        const regex = compileGlobPattern('file-[abc].js');
-        expect(regex.test('file-a.js')).toBe(true);
-        expect(regex.test('file-b.js')).toBe(true);
-        expect(regex.test('file-c.js')).toBe(true);
-        expect(regex.test('file-d.js')).toBe(false);
-    });
-
-    test('should handle complex patterns', () => {
-        const regex = compileGlobPattern('src/**/{test,spec}.[jt]s');
-        expect(regex.test('src/test.js')).toBe(true);
-        expect(regex.test('src/test.ts')).toBe(true);
-        expect(regex.test('src/foo/test.js')).toBe(true);
-        expect(regex.test('src/foo/spec.ts')).toBe(true);
-        expect(regex.test('src/foo/file.js')).toBe(false);
-    });
-
-    test('should escape special regex characters', () => {
-        const regex = compileGlobPattern('file+name.js');
-        expect(regex.test('file+name.js')).toBe(true);
-        expect(regex.test('filename.js')).toBe(false);
-    });
-
-    test('should handle file extensions with dots', () => {
-        const regex = compileGlobPattern('*.min.js');
-        expect(regex.test('file.min.js')).toBe(true);
-        expect(regex.test('file.js')).toBe(false);
+        expect(result.include).toEqual([]);
+        expect(result.exclude).toEqual([]);
     });
 });
 
 describe('matchesAny', () => {
-    test('should return true when path matches one of the patterns', () => {
-        const path = 'src/file.ts';
-        const patterns = [ /\.ts$/, /\.js$/ ];
+    test('should return true when path matches any pattern', () => {
+        const patterns = [ '**/*.ts', '**/*.js' ];
 
-        expect(matchesAny(path, patterns)).toBe(true);
+        expect(matchesAny('src/app.ts', patterns)).toBe(true);
+        expect(matchesAny('lib/utils.js', patterns)).toBe(true);
     });
 
-    test('should return false when path does not match any pattern', () => {
-        const path = 'src/file.css';
-        const patterns = [ /\.ts$/, /\.js$/ ];
+    test('should return false when path matches no patterns', () => {
+        const patterns = [ '**/*.ts', '**/*.js' ];
 
-        expect(matchesAny(path, patterns)).toBe(false);
-    });
-
-    test('should return true when path matches the only pattern', () => {
-        const path = 'src/file.ts';
-        const patterns = [ /\.ts$/ ];
-
-        expect(matchesAny(path, patterns)).toBe(true);
+        expect(matchesAny('src/app.css', patterns)).toBe(false);
+        expect(matchesAny('README.md', patterns)).toBe(false);
     });
 
     test('should return false for empty patterns array', () => {
-        const path = 'src/file.ts';
-        const patterns: RegExp[] = [];
-
-        expect(matchesAny(path, patterns)).toBe(false);
+        expect(matchesAny('src/app.ts', [])).toBe(false);
     });
 
-    test('should match directory paths correctly', () => {
-        const path = 'node_modules/package';
-        const patterns = [ /^node_modules\// ];
+    test('should handle complex glob patterns', () => {
+        const patterns = [ 'src/**/*.ts', 'lib/**/index.js' ];
 
-        expect(matchesAny(path, patterns)).toBe(true);
-    });
-
-    test('should handle complex regex patterns', () => {
-        const path = 'src/components/Button.test.tsx';
-        const patterns = [ /^src\/.*\.test\.(ts|tsx)$/ ];
-
-        expect(matchesAny(path, patterns)).toBe(true);
+        expect(matchesAny('src/components/Button.ts', patterns)).toBe(true);
+        expect(matchesAny('lib/utils/index.js', patterns)).toBe(true);
+        expect(matchesAny('dist/app.ts', patterns)).toBe(false);
     });
 });
 
-describe('collectFilesFromDir', () => {
+describe('isDirectoryExcluded', () => {
+    test('should return true when directory matches exclude pattern', () => {
+        const exclude = [ 'node_modules/**', 'dist/**' ];
+
+        expect(isDirectoryExcluded('node_modules', exclude)).toBe(true);
+        expect(isDirectoryExcluded('dist', exclude)).toBe(true);
+    });
+
+    test('should return true when directory matches with /** pattern', () => {
+        const exclude = [ '**/test/**' ];
+
+        expect(isDirectoryExcluded('src/test', exclude)).toBe(true);
+    });
+
+    test('should return false when directory does not match', () => {
+        const exclude = [ 'node_modules/**', 'dist/**' ];
+
+        expect(isDirectoryExcluded('src', exclude)).toBe(false);
+        expect(isDirectoryExcluded('lib', exclude)).toBe(false);
+    });
+
+    test('should return false for empty exclude array', () => {
+        expect(isDirectoryExcluded('node_modules', [])).toBe(false);
+    });
+
+    test('should handle nested directory paths', () => {
+        const exclude = [ '**/node_modules/**' ];
+
+        expect(isDirectoryExcluded('src/node_modules', exclude)).toBe(true);
+        expect(isDirectoryExcluded('lib/vendor/node_modules', exclude)).toBe(true);
+    });
+});
+
+describe('shouldIncludeFile', () => {
+    test('should return true when file matches include and not exclude', () => {
+        const include = [ '**/*.ts' ];
+        const exclude = [ '**/*.test.ts' ];
+
+        expect(shouldIncludeFile('src/app.ts', include, exclude)).toBe(true);
+    });
+
+    test('should return false when file does not match include', () => {
+        const include = [ '**/*.ts' ];
+        const exclude = [ '**/*.test.ts' ];
+
+        expect(shouldIncludeFile('src/app.js', include, exclude)).toBe(false);
+    });
+
+    test('should return false when file matches exclude', () => {
+        const include = [ '**/*.ts' ];
+        const exclude = [ '**/*.test.ts' ];
+
+        expect(shouldIncludeFile('src/app.test.ts', include, exclude)).toBe(false);
+    });
+
+    test('should return true when no exclude patterns', () => {
+        const include = [ '**/*.ts' ];
+        const exclude: Array<string> = [];
+
+        expect(shouldIncludeFile('src/app.ts', include, exclude)).toBe(true);
+    });
+
+    test('should return false when include is empty', () => {
+        const include: Array<string> = [];
+        const exclude = [ '**/*.test.ts' ];
+
+        expect(shouldIncludeFile('src/app.ts', include, exclude)).toBe(false);
+    });
+
+    test('should handle multiple include patterns', () => {
+        const include = [ '**/*.ts', '**/*.tsx' ];
+        const exclude = [ '**/*.test.*' ];
+
+        expect(shouldIncludeFile('src/Component.tsx', include, exclude)).toBe(true);
+        expect(shouldIncludeFile('src/utils.ts', include, exclude)).toBe(true);
+        expect(shouldIncludeFile('src/app.test.tsx', include, exclude)).toBe(false);
+    });
+});
+
+
+describe('collectFilesFromGlob', () => {
+    const testDir = '/mock/cwd/test/dir';
+
     beforeEach(() => {
-        xJet.clearAllMocks();
-
-        // Set up a safer mock implementation for relative that won't throw errors
-        xJet.mock(relative).mockImplementation((from: any, to: any) => {
-            // Safety check to prevent undefined errors
-            if (typeof from !== 'string' || typeof to !== 'string') {
-                return '';
-            }
-
-            // Handle string paths safely
-            if (to.startsWith(`${ from }/`)) {
-                return to.substring(from.length + 1);
-            }
-
-            return to;
-        });
-
-        // Set up a consistent join implementation
-        xJet.mock(join).mockImplementation((dir, file) => {
-            return `${ dir }/${ file }`;
-        });
+        xJet.restoreAllMocks();
+        xJet.spyOn(process, 'cwd').mockReturnValue('/mock/cwd');
     });
 
+    test('should return empty object when directory cannot be read', () => {
+        xJet.mock(readdirSync).mockImplementation(() => {
+            throw new Error('ENOENT');
+        });
 
-    test('should return empty array if baseDir does not exist', () => {
-        xJet.mock(existsSync).mockReturnValue(false);
-        const result = collectFilesFromDir('non-existent-dir', [ '**/*.ts' ], []);
-
-        expect(result).toEqual([]);
-        expect(existsSync).toHaveBeenCalledWith('non-existent-dir');
+        const result = collectFilesFromGlob('/bad/path', [ '**/*' ]);
+        expect(result).toEqual({});
     });
 
-    test('should collect matching files and skip excluded ones', () => {
-        xJet.mock(existsSync).mockReturnValue(true);
+    test('should return empty object when no include patterns provided', () => {
+        const result = collectFilesFromGlob(testDir, []);
+        expect(result).toEqual({});
+    });
 
-        const mockFiles: any = [
-            { name: 'file1.ts', isDirectory: () => false },
-            { name: 'file2.js', isDirectory: () => false },
-            { name: 'file3.ts', isDirectory: () => false },
+    test('should collect files matching include patterns', () => {
+        xJet.mock(readdirSync).mockReturnValue(<any>[
+            { name: 'index.ts', isDirectory: () => false },
+            { name: 'index.js', isDirectory: () => false },
+            { name: 'README.md', isDirectory: () => false }
+        ]);
+
+        const result = collectFilesFromGlob(testDir, [ '**/*.ts' ]);
+
+        expect(result['index']).toBeDefined();
+        expect(result['index']).toContain('.ts');
+        expect(result['index.js']).toBeUndefined();
+        expect(result['README']).toBeUndefined();
+    });
+
+    test('should recursively walk directories', () => {
+        const readdirMock = xJet.mock(readdirSync);
+
+        // root
+        readdirMock.mockReturnValueOnce(<any>[
+            { name: 'index.ts', isDirectory: () => false },
+            { name: 'src', isDirectory: () => true }
+        ]);
+
+        // src
+        readdirMock.mockReturnValueOnce(<any>[{ name: 'app.ts', isDirectory: () => false }]);
+
+        const result = collectFilesFromGlob(testDir, [ '**/*.ts' ]);
+
+        expect(result['index']).toBeDefined();
+        expect(result['src/app']).toBeDefined();
+        expect(readdirMock).toHaveBeenCalledTimes(2);
+    });
+
+    test('should exclude files matching exclude patterns', () => {
+        xJet.mock(readdirSync).mockReturnValue(<any>[
+            { name: 'app.ts', isDirectory: () => false },
+            { name: 'app.test.ts', isDirectory: () => false }
+        ]);
+
+        const result = collectFilesFromGlob(testDir, [ '**/*.ts', '!**/*.test.ts' ]);
+
+        expect(result['app']).toBeDefined();
+        expect(result['app.test']).toBeUndefined();
+    });
+
+    test('should skip excluded directories without walking them', () => {
+        const readdirMock = xJet.mock(readdirSync);
+
+        // root
+        readdirMock.mockReturnValueOnce(<any>[
+            { name: 'src', isDirectory: () => true },
             { name: 'node_modules', isDirectory: () => true }
-        ];
+        ]);
 
-        const mockNodeModulesFiles = [{ name: 'package.ts', isDirectory: () => false }];
-        xJet.mock(readdirSync).mockImplementation((dir: any): any => {
-            if (dir === 'src') {
-                return mockFiles;
-            } else if (dir === 'src/node_modules') {
-                return mockNodeModulesFiles;
-            }
+        // src
+        readdirMock.mockReturnValueOnce(<any>[{ name: 'app.ts', isDirectory: () => false }]);
+        const result = collectFilesFromGlob(testDir, [ '**/*', '!node_modules/**' ]);
 
-            return [];
-        });
-
-        // Set up the join and relative functions to work with our mocks
-        xJet.mock(join).mockImplementation((dir, file) => `${ dir }/${ file }`);
-        xJet.mock(relative).mockImplementation((from, to) => to.replace(`${ from }/`, ''));
-
-        const result = collectFilesFromDir('src', [ '**/*.ts' ], [ '**/node_modules/**' ]);
-
-        // We expect file1.ts and file3.ts to be included, but not file2.js or node_modules/package.ts
-        expect(result).toContain('file1.ts');
-        expect(result).toContain('file3.ts');
-        expect(result).not.toContain('file2.js');
-        expect(result).not.toContain('node_modules/package.ts');
+        expect(result['src/app']).toBeDefined();
+        expect(readdirMock).toHaveBeenCalledTimes(2);
     });
 
-    test('should handle negated patterns in include', () => {
-        xJet.mock(existsSync).mockReturnValue(true);
+    test('should handle deeply nested directory structures', () => {
+        const readdirMock = xJet.mock(readdirSync);
 
-        const mockFiles: any = [
-            { name: 'file1.ts', isDirectory: () => false },
-            { name: 'file1.d.ts', isDirectory: () => false },
-            { name: 'file2.js', isDirectory: () => false }
-        ];
+        readdirMock.mockReturnValueOnce(<any>[{ name: 'src', isDirectory: () => true }]);
+        readdirMock.mockReturnValueOnce(<any>[{ name: 'components', isDirectory: () => true }]);
+        readdirMock.mockReturnValueOnce(<any>[{ name: 'Button.tsx', isDirectory: () => false }]);
 
-        xJet.mock(readdirSync).mockReturnValue(mockFiles);
-        const result = collectFilesFromDir('src', [ '**/*.ts', '!**/*.d.ts' ], []);
+        const result = collectFilesFromGlob(testDir, [ '**/*.tsx' ]);
 
-        expect(result).toContain('file1.ts');
-        expect(result).not.toContain('file1.d.ts');
-        expect(result).not.toContain('file2.js');
+        expect(result['src/components/Button']).toBeDefined();
+        expect(readdirMock).toHaveBeenCalledTimes(3);
     });
 
-    test('should handle both include and exclude patterns', () => {
-        xJet.mock(existsSync).mockReturnValue(true);
+    test('should return record with keys as paths without extension and values with extension', () => {
+        xJet.mock(readdirSync).mockReturnValue(<any>[{ name: 'file.ts', isDirectory: () => false }]);
 
-        const mockFiles: any = [
-            { name: 'file1.ts', isDirectory: () => false },
-            { name: 'file1.test.ts', isDirectory: () => false },
-            { name: 'file2.js', isDirectory: () => false },
-            { name: 'file2.test.js', isDirectory: () => false }
-        ];
+        const result = collectFilesFromGlob(testDir, [ '**/*' ]);
 
-        xJet.mock(readdirSync).mockReturnValue(mockFiles);
-        const result = collectFilesFromDir(
-            'src',
-            [ '**/*.ts', '**/*.js' ],
-            [ '*.test.*' ]
-        );
+        expect(result['file']).toBeDefined();
+        expect(result['file']).toMatch(/file\.ts$/);
+    });
 
-        expect(result).toContain('file1.ts');
-        expect(result).toContain('file2.js');
-        expect(result).not.toContain('file1.test.ts');
-        expect(result).not.toContain('file2.test.js');
+    test('should return empty object if only negation patterns provided', () => {
+        const result = collectFilesFromGlob(testDir, [ '!**/*.test.ts' ]);
+        expect(result).toEqual({});
+    });
+
+    test('should handle multiple include and exclude patterns', () => {
+        xJet.mock(readdirSync).mockReturnValue(<any>[
+            { name: 'app.ts', isDirectory: () => false },
+            { name: 'app.test.ts', isDirectory: () => false },
+            { name: 'utils.js', isDirectory: () => false },
+            { name: 'utils.test.js', isDirectory: () => false },
+            { name: 'README.md', isDirectory: () => false }
+        ]);
+
+        const result = collectFilesFromGlob(testDir, [ '**/*.ts', '**/*.js', '!**/*.test.*' ]);
+
+        expect(result['app']).toBeDefined();
+        expect(result['utils']).toBeDefined();
+        expect(result['app.test']).toBeUndefined();
+        expect(result['utils.test']).toBeUndefined();
+        expect(result['README']).toBeUndefined();
+    });
+
+    test('should handle mixed directory and file exclusions', () => {
+        const readdirMock = xJet.mock(readdirSync);
+
+        // root
+        readdirMock.mockReturnValueOnce(<any>[
+            { name: 'src', isDirectory: () => true },
+            { name: 'dist', isDirectory: () => true }
+        ]);
+
+        // src
+        readdirMock.mockReturnValueOnce(<any>[
+            { name: 'app.ts', isDirectory: () => false },
+            { name: 'temp.ts', isDirectory: () => false }
+        ]);
+
+        const result = collectFilesFromGlob(testDir, [ '**/*.ts', '!dist/**', '!**/temp.ts' ]);
+
+        expect(result['src/app']).toBeDefined();
+        expect(result['src/temp']).toBeUndefined();
+        expect(readdirMock).toHaveBeenCalledTimes(2); // Should not walk into dist
+    });
+
+    test('should store value as path relative to cwd with extension', () => {
+        xJet.mock(readdirSync).mockReturnValue(<any>[{ name: 'app.ts', isDirectory: () => false }]);
+
+        const result = collectFilesFromGlob(testDir, [ '**/*.ts' ]);
+
+        // Key is without extension, value is with extension relative to cwd
+        expect(result['app']).toBeDefined();
+        expect(result['app']).toMatch(/\.ts$/);
+        expect(result['app']).toContain('dir');
+    });
+
+    test('should handle files without extension', () => {
+        xJet.mock(readdirSync).mockReturnValue(<any>[{ name: 'README', isDirectory: () => false }]);
+
+        const result = collectFilesFromGlob(testDir, [ '**/*' ]);
+
+        expect(result['README']).toBeDefined();
+        expect(result['README']).toMatch(/README$/);
     });
 });
