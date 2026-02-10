@@ -2,128 +2,131 @@
  * Import will remove at compile time
  */
 
-import type { Location, Message } from 'esbuild';
+import type { Message } from 'esbuild';
 
 /**
  * Imports
  */
 
-import { join } from 'path';
-import { cwd } from 'process';
-import { xterm } from '@remotex-labs/xansi';
-import { existsSync, readFileSync } from 'fs';
-import { BaseError } from '@errors/base.error';
-import { formatErrorCode } from '@remotex-labs/xmap/formatter.component';
-import { highlightCode } from '@remotex-labs/xmap/highlighter.component';
+import { xBuildBaseError } from '@errors/base.error';
+import { getErrorMetadata, formatStack } from '@providers/stack.provider';
 
 /**
- * Represents an error that occurs during the esbuild process.
+ * Custom error class for esbuild compilation errors with enhanced formatting and source code context.
  *
- * This class extends the base error class to provide specific error handling for esbuild-related issues.
- * It captures the error message and maintains the proper stack trace, allowing for easier debugging
- * and identification of errors that occur during the build process.
+ * @remarks
+ * The `esBuildError` class extends {@link xBuildBaseError} to provide specialized handling for esbuild
+ * {@link Message} objects. It automatically:
+ * - Extracts and formats source code snippets from the error location
+ * - Applies syntax highlighting to code context
+ * - Displays helpful notes and suggestions from esbuild
+ * - Generates enhanced stack traces with file locations
+ * - Stores structured metadata in {@link StackInterface} format
  *
- * @class esBuildError
- * @extends BaseError
+ * This class is designed to transform esbuild's error messages into human-readable, visually enhanced
+ * output suitable for terminal display, making it easier to identify and fix build errors.
+ *
+ * **Key features:**
+ * - Automatic source code reading from file system
+ * - Contextual code display (3 lines before and after error)
+ * - Syntax highlighting with color-coded error indicators
+ * - Integration with esbuild's location and notes system
+ * - Structured error metadata for programmatic access
+ *
+ * @example
+ * ```ts
+ * import { build } from 'esbuild';
+ * import { esBuildError } from './esbuild.error';
+ *
+ * try {
+ *   await build({
+ *     entryPoints: ['src/index.ts'],
+ *     bundle: true,
+ *     outdir: 'dist'
+ *   });
+ * } catch (buildError) {
+ *   if (buildError.errors) {
+ *     for (const message of buildError.errors) {
+ *       throw new esBuildError(message);
+ *     }
+ *   }
+ * }
+ * ```
+ *
+ * @example
+ * ```ts
+ * // Error with location information
+ * const message: Message = {
+ *   text: "Cannot find module 'lodash'",
+ *   location: {
+ *     file: 'src/app.ts',
+ *     line: 5,
+ *     column: 19
+ *   },
+ *   notes: [
+ *     { text: 'You can mark the path "lodash" as external to exclude it' }
+ *   ]
+ * };
+ *
+ * const error = new esBuildError(message);
+ * console.error(error); // Displays formatted error with code context
+ * ```
+ *
+ * @see {@link StackInterface} for metadata structure
+ * @see {@link xBuildBaseError} for base error functionality
+ * @see {@link https://esbuild.github.io/api/#message-object | esbuild Message documentation}
+ *
+ * @since 2.0.0
  */
 
-export class esBuildError extends BaseError {
-    originalErrorStack?: string;
-
+export class esBuildError extends xBuildBaseError {
     /**
-     * Creates an instance of the EsbuildError class.
+     * Creates a new esbuild error with formatted output and metadata.
      *
-     * @param message - An object containing the error message. The `text` property is used to initialize
-     * the base error class with a descriptive message about the error encountered during the esbuild process.
+     * @param message - The esbuild {@link Message} object containing error details
+     *
+     * @remarks
+     * The constructor processes the esbuild message to:
+     * 1. Extract the error text for the base Error message
+     * 2. Read source code from the file system if a location is provided
+     * 3. Generate syntax-highlighted code snippets with context
+     * 4. Format any additional notes from esbuild
+     * 5. Create an enhanced stack trace
+     * 6. Store structured metadata in {@link errorMetadata}
+     *
+     * The error name is always set to `'esBuildError'` and the stack is replaced
+     * with a custom formatted version that includes:
+     * - Error name and message with color coding
+     * - Any diagnostic notes from esbuild
+     * - Highlighted code snippet showing the error location
+     * - Enhanced stack trace with file path and position
+     *
+     * @example
+     * ```ts
+     * const message: Message = {
+     *   text: "Expected ';' but found '}'",
+     *   location: {
+     *     file: 'src/utils.ts',
+     *     line: 42,
+     *     column: 5
+     *   }
+     * };
+     *
+     * const error = new esBuildError(message);
+     * // error.stack contains formatted output with code context
+     * // error.metadata contains structured location data
+     * ```
+     *
+     * @see {@link Message} for esbuild message structure
+     * @see {@link getErrorMetadata} for formatting logic
+     *
+     * @since 2.0.0
      */
 
     constructor(message: Message) {
-        super(message.text);
-        this.name = 'esBuildError';
+        super(message.text, 'esBuildError');
 
-        // Maintain proper stack trace
-        if (Error.captureStackTrace) {
-            Error.captureStackTrace(this, esBuildError);
-        }
-
-        if (message.location) {
-            this.stack = this.generateFormattedError(message);
-        } else {
-            this.originalErrorStack = this.stack;
-            this.stack = this.reformatStack(this);
-        }
-    }
-
-    /**
-     * Generates a formatted error message with highlighted code.
-     *
-     * @param message - An esbuild Message object containing error information.
-     * @returns A formatted string of the error message.
-     */
-
-    private generateFormattedError(message: Message): string {
-        const { text, location, notes } = message;
-        let formattedError = `\n${ this.name }: ${ xterm.gray(location?.file ?? '') }\n`;
-        formattedError += xterm.lightCoral(`${ text }\n\n`);
-
-        notes.forEach(note => {
-            formattedError += xterm.gray(`${ note.text }\n\n`);
-        });
-
-        if (location) {
-            const code = this.readCode(location.file);
-            if (code) {
-                formattedError += `${ this.formatCodeSnippet(code, location) }\n`;
-            }
-        }
-
-        return formattedError;
-    }
-
-    /**
-     * Reads code from a file if it exists.
-     *
-     * @param path - The file path to read from.
-     * @returns Array of lines if file exists, otherwise null.
-     */
-
-    private readCode(path: string): string[] | null {
-        try {
-            return existsSync(path) ? readFileSync(join(cwd(), path), 'utf-8').split('\n') : null;
-        } catch {
-            return null;
-        }
-    }
-
-    /**
-     * Formats a code snippet with highlighted errors.
-     *
-     * @param code - Array of code lines.
-     * @param location - The error location within the file.
-     * @returns A formatted and highlighted code snippet string.
-     */
-
-    private formatCodeSnippet(code: string[], location: Location): string {
-        const { line = 1, column = 0, file } = location;
-        const startLine = Math.max(line - 3, 0);
-        const endLine = Math.min(line + 3, code.length);
-
-        const relevantCode = highlightCode(code.slice(startLine, endLine).join('\n'));
-
-        return formatErrorCode({
-            line,
-            name: null,
-            code: relevantCode,
-            source: file,
-            endLine,
-            startLine,
-            column: column + 1,
-            sourceRoot: null,
-            sourceIndex: -1,
-            generatedLine: -1,
-            generatedColumn: -1
-        }, {
-            color: xterm.brightPink
-        });
+        this.errorMetadata = getErrorMetadata(message, { withFrameworkFrames: true });
+        this.stack = formatStack(this.errorMetadata, this.name, this.message, message.notes);
     }
 }
