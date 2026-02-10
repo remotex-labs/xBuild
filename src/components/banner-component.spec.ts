@@ -4,6 +4,10 @@
 
 import { bannerComponent } from './banner.component';
 
+/**
+ * Mock global variables
+ */
+
 (<any> globalThis).__VERSION = '1.0.0';
 
 /**
