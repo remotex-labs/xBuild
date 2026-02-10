@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8"/>
+        <meta name="viewport" content="width=device-width,initial-scale=1"/>
+        <title>Dark File Browser — FTP-like</title>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.1/css/all.min.css"
+              integrity="sha512-2SwdPD6INVrV/lHTZbO2nodKhrnDdJK9/kg2XD1r9uGqPo1cUbujc+IYdlYdEErWNu69gVcYgdxlmVmzTWnetw=="
+              crossorigin="anonymous"
+              referrerpolicy="no-referrer"
+        />
+        <style>
+            :root {
+                --bg: #0b0f14;
+                --panel: #0f1720;
+                --muted: #9aa4b2;
+                --accent: #E5C07B;
+                --glass: rgba(255, 255, 255, 0.03);
+                --card: #0c1116;
+                --radius: 12px;
+                --gap: 12px;
+                --shadow: 0 6px 18px rgba(0,0,0,0.4);
+                --file-icon-size: 40px;
+                font-family: Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+            }
+
+            * {
+                box-sizing: border-box;
+                font-style: normal !important;
+            }
+
+            html, body {
+                height: 100%;
+                margin: 0;
+                font-size: 14px;
+                color: #dce7ef;
+                -webkit-font-smoothing: antialiased;
+                -moz-osx-font-smoothing: grayscale;
+                background: radial-gradient(1200px 600px at 10% 10%, rgba(110, 231, 183, 0.04), transparent 8%),
+                linear-gradient(180deg, rgba(255, 255, 255, 0.01), transparent 20%), var(--bg);
+                padding: 28px;
+                display: flex;
+                gap: 20px;
+                align-items: flex-start;
+                justify-content: center;
+            }
+
+            .app {
+                width: 1100px;
+                max-width: 98vw;
+                display: flex;
+                gap: 18px;
+                padding: 18px;
+                border-radius: 16px;
+                box-shadow: var(--shadow);
+                border: 1px solid rgba(255, 255, 255, 0.03);
+                background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0));
+                overflow: hidden;
+            }
+
+            /* Sidebar */
+            .sidebar {
+                width: 260px;
+                background: linear-gradient(180deg, rgba(255, 255, 255, 0.01), transparent);
+                border-radius: var(--radius);
+                padding: 14px;
+            }
+
+            .brand {
+                display: flex;
+                gap: 12px;
+                align-items: center;
+                margin-bottom: 10px;
+            }
+
+            .logo {
+                width: 46px;
+                height: 46px;
+                border-radius: 10px;
+                background: linear-gradient(135deg, #b65b9f 0%, #804b8f 100%);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-weight: 700;
+            }
+
+            .brand h1 {
+                font-size: 16px;
+                margin: 0;
+            }
+
+            .muted {
+                color: var(--muted);
+                font-size: 13px;
+            }
+
+            .search {
+                margin: 12px 0;
+            }
+
+            .search input {
+                width: 100%;
+                padding: 10px 12px;
+                border-radius: 10px;
+                border: 1px solid rgba(255, 255, 255, 0.03);
+                background: var(--glass);
+                color: inherit;
+            }
+
+            .quick-list {
+                margin-top: 12px;
+            }
+
+            .quick-list a {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                padding: 8px 10px;
+                border-radius: 8px;
+                background: transparent;
+                color: var(--muted);
+                text-decoration: none;
+                cursor: pointer;
+                transition: color 0.15s ease;
+            }
+
+            .quick-list a:hover {
+                color: var(--accent);
+            }
+
+            /* Main area */
+            .main {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+            }
+
+            .topbar {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                padding-bottom: 12px;
+            }
+
+            .breadcrumbs {
+                list-style: none;
+                display: flex;
+                gap: 8px;
+                align-items: center;
+                background: var(--glass);
+                padding: 8px 12px;
+                border-radius: var(--radius);
+                margin: 0;
+            }
+
+            .breadcrumbs li {
+                display: flex;
+                align-items: center;
+            }
+
+            .breadcrumbs li:not(:last-child)::after {
+                content: '>';
+                margin-left: 8px;
+                color: var(--muted);
+            }
+
+            .breadcrumbs a {
+                color: var(--muted);
+                text-decoration: none;
+                transition: color 0.15s ease;
+            }
+
+            .breadcrumbs a:hover {
+                color: var(--accent);
+            }
+
+            .list {
+                margin-top: 14px;
+                display: grid;
+                grid-template-columns: 1fr;
+                gap: 10px;
+            }
+
+            .list a {
+                display: flex;
+                text-decoration: none;
+                color: inherit;
+            }
+
+            .folder-row, .file-row {
+                display: flex;
+                gap: 12px;
+                align-items: center;
+                padding: 10px;
+                border-radius: 10px;
+                background: linear-gradient(180deg, rgba(255, 255, 255, 0.01), transparent);
+                border: 1px solid rgba(255, 255, 255, 0.02);
+                transition: color 0.25s ease;
+            }
+
+            .icon {
+                width: var(--file-icon-size);
+                height: var(--file-icon-size);
+                border-radius: 10px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: rgba(255, 255, 255, 0.02);
+                flex-shrink: 0;
+                transition: background 0.25s ease, color 0.25s ease;
+            }
+
+            .folder-row:hover, .file-row:hover {
+                color: var(--accent);
+            }
+
+            .folder-row:hover .icon {
+                background: rgba(152, 195, 121, 0.2);
+            }
+
+            .file-row:hover .icon {
+                background: rgba(224, 108, 117, 0.2);
+            }
+
+            .folder-row:hover .icon i {
+                color: #98C379;
+            }
+
+            .file-row:hover .icon i {
+                color: #e09c6c;
+            }
+
+            .meta {
+                display: flex;
+                flex-direction: column;
+            }
+
+            .name {
+                font-weight: 600;
+            }
+
+            .sub {
+                color: var(--muted);
+                font-size: 13px;
+            }
+
+            .empty {
+                padding: 40px;
+                text-align: center;
+                color: var(--muted);
+            }
+
+            /* Responsive */
+            @media (max-width: 880px) {
+                .app {
+                    flex-direction: column;
+                    padding: 12px;
+                }
+
+                .sidebar, .main {
+                    width: 100%;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="app">
+            <aside class="sidebar">
+                <div class="brand">
+                    <div class="logo">F</div>
+                    <div>
+                        <h1>xBuildFTP</h1>
+                        <div class="muted">Browse & serve files</div>
+                    </div>
+                </div>
+                <div class="search">
+                    <input placeholder="Search files & folders..."/>
+                </div>
+                <div class="quick-list">
+                    <a href="/">🏠 Home</a>
+                    <a href="${ up }">⬆️ Up</a>
+                </div>
+            </aside>
+            <main class="main">
+                <div class="topbar">
+                    <div class="topbar">
+                        <ul class="breadcrumbs">
+                            ${ paths }
+                        </ul>
+                    </div>
+                </div>
+                ${ fileList }
+            </main>
+        </div>
+    </body>
+    <script>
+        const searchInput = document.querySelector('.search input');
+        const listItems = document.querySelectorAll('.list > .folder-row, .list > .file-row');
+        const emptyMessage = document.querySelector('.empty');
+
+        searchInput.addEventListener('input', () => {
+            const query = searchInput.value.toLowerCase();
+            let anyVisible = false;
+
+            listItems.forEach(item => {
+                const name = item.querySelector('.name').textContent.toLowerCase();
+                if (name.includes(query)) {
+                    item.style.display = 'flex';
+                    anyVisible = true;
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+
+            emptyMessage.style.display = anyVisible ? 'none' : 'block';
+        });
+    </script>
+</html>
