@@ -128,7 +128,7 @@ export async function isVariableStatement(node: VariableStatement, replacements:
 
         const argsCount = fnName == MACRO_FUNCTIONS[2] ? 1 : 2;
         if(!MACRO_FUNCTIONS.includes(fnName)) return;
-        if (init.arguments.length < argsCount) {
+        if (init.arguments.length < argsCount || init.arguments.length > argsCount) {
             throw new Error(`Invalid macro call: ${ fnName } with ${ init.arguments.length } arguments`);
 
             // replacements.add({
@@ -221,7 +221,7 @@ export async function isCallExpression(
     const fnName = callExpr.expression.text;
     const argsCount = fnName == MACRO_FUNCTIONS[2] ? 1 : 2;
     if(!MACRO_FUNCTIONS.includes(fnName)) return;
-    if (callExpr.arguments.length < argsCount) {
+    if (callExpr.arguments.length < argsCount || callExpr.arguments.length > argsCount) {
         throw new Error(`Invalid macro call: ${ fnName } with ${ callExpr.arguments.length } arguments`);
         // replacements.add({
         //     replacement: 'undefined',

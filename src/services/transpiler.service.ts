@@ -169,7 +169,7 @@ export async function buildFromString(source: string, path: string, buildOptions
         ...defaultBuildOptions,
         ...buildOptions,
         stdin: {
-            loader: 'js',
+            loader: 'ts',
             contents: source,
             resolveDir: cwd(),
             sourcefile: path
