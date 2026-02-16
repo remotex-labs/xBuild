@@ -66,11 +66,11 @@
         "typescript-eslint": "^8.54.0",
         "eslint-plugin-tsdoc": "^0.5.0",
         "eslint-plugin-perfectionist": "^5.4.0",
-        "@types/node": "^25.2.0",
+        "@types/node": "^25.2.3",
         "@types/yargs": "^17.0.35",
         "@remotex-labs/xjet": "^1.5.0",
         "@viteplus/versions": "^2.0.6",
-        "@remotex-labs/xbuild": "1.5.12"
+        "@remotex-labs/xbuild": "2.0.1"
     },
     "dependencies": {
         "yargs": "^18.0.0",
