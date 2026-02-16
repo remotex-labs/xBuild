@@ -1,4 +1,3 @@
-
 /**
  * Import will remove at compile time
  */
@@ -141,10 +140,9 @@ const $$active = $$ifdef("ACTIVE");`;
         beforeEach(() => {
             xJet.resetAllMocks();
 
-            // Setup FilesModel mock
+            // Setup FilesModel mock (analyzeMacroMetadata now uses getOrTouchFile)
             filesModel = {
-                getSnapshot: xJet.fn(),
-                touchFile: xJet.fn(),
+                getOrTouchFile: xJet.fn(),
                 resolve: xJet.fn((path: string) => path)
             };
 
@@ -189,7 +187,7 @@ const $$active = $$ifdef("ACTIVE");`;
                 'src/config.ts': 'src/config.ts'
             };
 
-            filesModel.getSnapshot.mockReturnValue({
+            filesModel.getOrTouchFile.mockReturnValue({
                 contentSnapshot: { text: content }
             });
 
@@ -205,7 +203,7 @@ const $$active = $$ifdef("ACTIVE");`;
                 'src/config.ts': 'src/config.ts'
             };
 
-            filesModel.getSnapshot.mockReturnValue({
+            filesModel.getOrTouchFile.mockReturnValue({
                 contentSnapshot: { text: content }
             });
 
@@ -223,7 +221,7 @@ const $$active = $$ifdef("ACTIVE");`;
                 'src/utils.ts': 'src/utils.ts'
             };
 
-            filesModel.getSnapshot.mockImplementation((file: string) => {
+            filesModel.getOrTouchFile.mockImplementation((file: string) => {
                 if (file === 'src/feature.ts') {
                     return { contentSnapshot: { text: content } };
                 }
@@ -244,7 +242,7 @@ const $$active = $$ifdef("ACTIVE");`;
                 'src/feature.ts': 'src/feature.ts'
             };
 
-            filesModel.getSnapshot.mockReturnValue({
+            filesModel.getOrTouchFile.mockReturnValue({
                 contentSnapshot: { text: content }
             });
 
@@ -262,7 +260,7 @@ const $$active = $$ifdef("ACTIVE");`;
                 'src/test.ts': 'src/test.ts'
             };
 
-            filesModel.getSnapshot.mockReturnValue({
+            filesModel.getOrTouchFile.mockReturnValue({
                 contentSnapshot: { text: content }
             });
 
@@ -279,7 +277,7 @@ const $$active = $$ifdef("ACTIVE");`;
                 'src/test.ts': 'src/test.ts'
             };
 
-            filesModel.getSnapshot.mockReturnValue({
+            filesModel.getOrTouchFile.mockReturnValue({
                 contentSnapshot: { text: content }
             });
 
@@ -293,8 +291,7 @@ const $$active = $$ifdef("ACTIVE");`;
                 'src/missing.ts': 'src/missing.ts'
             };
 
-            filesModel.getSnapshot.mockReturnValue(null);
-            filesModel.touchFile.mockReturnValue(null);
+            filesModel.getOrTouchFile.mockReturnValue(null);
 
             const result = await analyzeMacroMetadata(variant, context);
 
@@ -310,7 +307,7 @@ const $$active = $$ifdef("ACTIVE");`;
                 'src/test.ts': 'src/test.ts'
             };
 
-            filesModel.getSnapshot.mockReturnValue({
+            filesModel.getOrTouchFile.mockReturnValue({
                 contentSnapshot: { text: content }
             });
 
@@ -327,7 +324,7 @@ const $$active = $$ifdef("ACTIVE");`;
                 'src/api.ts': 'src/api.ts'
             };
 
-            filesModel.getSnapshot.mockReturnValue({
+            filesModel.getOrTouchFile.mockReturnValue({
                 contentSnapshot: { text: content }
             });
 
@@ -350,7 +347,7 @@ const $$noTest = $$ifndef("TEST");
                 'src/multi.ts': 'src/multi.ts'
             };
 
-            filesModel.getSnapshot.mockReturnValue({
+            filesModel.getOrTouchFile.mockReturnValue({
                 contentSnapshot: { text: content }
             });
 
@@ -370,7 +367,7 @@ const $$noTest = $$ifndef("TEST");
                 'relative/path.ts': 'relative/path.ts'
             };
 
-            filesModel.getSnapshot.mockReturnValue({
+            filesModel.getOrTouchFile.mockReturnValue({
                 contentSnapshot: { text: content }
             });
 
@@ -389,7 +386,7 @@ const $$noTest = $$ifndef("TEST");
                 'src/test.ts': 'src/test.ts'
             };
 
-            filesModel.getSnapshot.mockReturnValue({
+            filesModel.getOrTouchFile.mockReturnValue({
                 contentSnapshot: { text: content }
             });
 
@@ -407,7 +404,7 @@ const $$noTest = $$ifndef("TEST");
                 'src/test.ts': 'src/test.ts'
             };
 
-            filesModel.getSnapshot.mockReturnValue({
+            filesModel.getOrTouchFile.mockReturnValue({
                 contentSnapshot: { text: content }
             });
 

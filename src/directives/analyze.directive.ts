@@ -230,7 +230,7 @@ export async function analyzeMacroMetadata(variant: VariantService, context: Bui
     const files = Object.keys(variant.dependencies);
     if(!files) return Promise.resolve({ warnings });
     for (const file of files) {
-        const snapshot = filesModel.getSnapshot(file) ?? filesModel.touchFile(file);
+        const snapshot = filesModel.getOrTouchFile(file);
         const content = snapshot?.contentSnapshot?.text;
         if (!content) continue;
 
