@@ -412,6 +412,38 @@ declare global {
      */
 
     function $$inline(callback: unknown): string;
+
+    /**
+     * Pre-configuration CLI arguments snapshot (bootstrap argv).
+     *
+     * @remarks
+     * A globally accessible object used during early CLI bootstrap to store the result of
+     * the *minimal* argument parse (typically just enough to locate the config file).
+     *
+     * This is useful when later stages need access to the initial argv values before the
+     * full, enhanced parse (with user extensions) is performed.
+     *
+     * **Intended usage:**
+     * - Set once at startup (e.g., right after parsing `--config`)
+     * - Read later by services/modules that need bootstrap context
+     *
+     * **Shape:**
+     * Uses `Record<string, unknown>` because the exact keys depend on the CLI parser and
+     * configuration-defined options.
+     *
+     * @example
+     * ```ts
+     * // After minimal parsing
+     * globalThis.$argv = { config: 'xbuild.config.ts', _: [], $0: 'xbuild' };
+     *
+     * // Later
+     * const configPath = String($argv.config);
+     * ```
+     *
+     * @since 2.0.0
+     */
+
+    var $argv: Record<string, unknown>;
 }
 
 /**
