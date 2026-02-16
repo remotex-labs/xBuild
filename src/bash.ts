@@ -21,8 +21,8 @@ import { inject } from '@symlinks/symlinks.module';
 import { init } from '@components/interactive.component';
 import { collectFilesFromGlob } from '@components/glob.component';
 import { configFileProvider } from '@providers/config-file.provider';
-import { keywordColor, pathColor } from '@components/color.component';
 import { bannerComponent, prefix } from '@components/banner.component';
+import { keywordColor, mutedColor, pathColor } from '@components/color.component';
 import { logBuildStart, createActionPrefix } from '@components/printer.component';
 import { BuildService, overwriteConfig, ServerModule, WatchService } from './index';
 import { logError, logTypeDiagnostics, logBuildEnd } from '@components/printer.component';
@@ -568,7 +568,7 @@ async function startWatchMode(
             buildService.reload(config);
         }
 
-        console.log(`\n${ prefix() } Rebuilding: files (${ changedFiles.length })`);
+        console.log(`\n${ prefix() } ${ mutedColor('Rebuilding') }: files (${ changedFiles.length })\n`);
         await executeBuild(buildService, args);
     });
 
