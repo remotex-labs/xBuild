@@ -227,7 +227,7 @@ export async function analyzeMacroMetadata(variant: VariantService, context: Bui
     const filesModel = inject(FilesModel);
     const defines = variant.config.define ?? {};
 
-    const files = Object.keys(variant.dependencies);
+    const files = Object.values(variant.dependencies ?? {});
     if(!files) return Promise.resolve({ warnings });
     for (const file of files) {
         const snapshot = filesModel.getOrTouchFile(file);
