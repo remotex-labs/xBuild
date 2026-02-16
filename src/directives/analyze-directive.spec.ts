@@ -11,7 +11,6 @@ import type { BuildContextInterface } from '@providers/interfaces/lifecycle-prov
  */
 
 import { inject } from '@symlinks/symlinks.module';
-import { analyzeDependencies } from '@services/transpiler.service';
 import { getLineAndColumn, isCommentLine, analyzeMacroMetadata } from './analyze.directive';
 
 /**
@@ -138,30 +137,9 @@ const $$active = $$ifdef("ACTIVE");`;
         let filesModel: any;
 
         const injectMock = xJet.mock(inject);
-        const analyzeDependenciesMock = xJet.mock(analyzeDependencies);
 
         beforeEach(() => {
             xJet.resetAllMocks();
-
-            // Setup variant mock
-            variant = {
-                config: {
-                    define: {
-                        DEBUG: true,
-                        PRODUCTION: false
-                    }
-                }
-            };
-
-            // Setup context mock
-            context = {
-                build: {
-                    initialOptions: {
-                        entryPoints: [ 'src/index.ts' ]
-                    }
-                },
-                stage: {}
-            } as any;
 
             // Setup FilesModel mock
             filesModel = {
@@ -173,12 +151,26 @@ const $$active = $$ifdef("ACTIVE");`;
             // Setup inject mock
             injectMock.mockReturnValue(filesModel);
 
-            // Setup analyzeDependencies mock
-            analyzeDependenciesMock.mockResolvedValue({
-                metafile: {
-                    inputs: {}
-                }
-            } as any);
+            // Setup variant mock with dependencies
+            variant = {
+                config: {
+                    define: {
+                        DEBUG: true,
+                        PRODUCTION: false
+                    }
+                },
+                dependencies: {}
+            };
+
+            // Setup context mock
+            context = {
+                build: {
+                    initialOptions: {
+                        entryPoints: [ 'src/index.ts' ]
+                    }
+                },
+                stage: {}
+            } as any;
         });
 
         test('initializes metadata with empty sets', async () => {
@@ -193,13 +185,9 @@ const $$active = $$ifdef("ACTIVE");`;
         test('disables macros for ifdef when define is false', async () => {
             const content = 'const $$hasDebug = $$ifdef("DEBUG", () => {});\nconst $$hasProd = $$ifdef("PRODUCTION", () => {});';
 
-            analyzeDependenciesMock.mockResolvedValue({
-                metafile: {
-                    inputs: {
-                        'src/config.ts': {}
-                    }
-                }
-            } as any);
+            variant.dependencies = {
+                'src/config.ts': 'src/config.ts'
+            };
 
             filesModel.getSnapshot.mockReturnValue({
                 contentSnapshot: { text: content }
@@ -213,13 +201,9 @@ const $$active = $$ifdef("ACTIVE");`;
         test('disables macros for ifndef when define is true', async () => {
             const content = 'const $$noDebug = $$ifndef("DEBUG");\nconst $$noProd = $$ifndef("PRODUCTION");';
 
-            analyzeDependenciesMock.mockResolvedValue({
-                metafile: {
-                    inputs: {
-                        'src/config.ts': {}
-                    }
-                }
-            } as any);
+            variant.dependencies = {
+                'src/config.ts': 'src/config.ts'
+            };
 
             filesModel.getSnapshot.mockReturnValue({
                 contentSnapshot: { text: content }
@@ -234,14 +218,10 @@ const $$active = $$ifdef("ACTIVE");`;
         test('tracks files with macros', async () => {
             const content = 'const $$feature = $$ifdef("FEATURE");';
 
-            analyzeDependenciesMock.mockResolvedValue({
-                metafile: {
-                    inputs: {
-                        'src/feature.ts': {},
-                        'src/utils.ts': {}
-                    }
-                }
-            } as any);
+            variant.dependencies = {
+                'src/feature.ts': 'src/feature.ts',
+                'src/utils.ts': 'src/utils.ts'
+            };
 
             filesModel.getSnapshot.mockImplementation((file: string) => {
                 if (file === 'src/feature.ts') {
@@ -260,13 +240,9 @@ const $$active = $$ifdef("ACTIVE");`;
         test('generates warnings for macros without $$ prefix', async () => {
             const content = 'const myMacro = $$ifdef("FEATURE");';
 
-            analyzeDependenciesMock.mockResolvedValue({
-                metafile: {
-                    inputs: {
-                        'src/feature.ts': {}
-                    }
-                }
-            } as any);
+            variant.dependencies = {
+                'src/feature.ts': 'src/feature.ts'
+            };
 
             filesModel.getSnapshot.mockReturnValue({
                 contentSnapshot: { text: content }
@@ -282,13 +258,9 @@ const $$active = $$ifdef("ACTIVE");`;
         test('skips macros in single-line comments', async () => {
             const content = '// const $$commented = $$ifdef("DEBUG");\nconst $$real = $$ifdef("DEBUG");';
 
-            analyzeDependenciesMock.mockResolvedValue({
-                metafile: {
-                    inputs: {
-                        'src/test.ts': {}
-                    }
-                }
-            } as any);
+            variant.dependencies = {
+                'src/test.ts': 'src/test.ts'
+            };
 
             filesModel.getSnapshot.mockReturnValue({
                 contentSnapshot: { text: content }
@@ -303,13 +275,9 @@ const $$active = $$ifdef("ACTIVE");`;
         test('skips macros in multi-line comments', async () => {
             const content = '/* const $$commented = $$ifdef("DEBUG"); */\nconst $$real = $$ifdef("DEBUG");';
 
-            analyzeDependenciesMock.mockResolvedValue({
-                metafile: {
-                    inputs: {
-                        'src/test.ts': {}
-                    }
-                }
-            } as any);
+            variant.dependencies = {
+                'src/test.ts': 'src/test.ts'
+            };
 
             filesModel.getSnapshot.mockReturnValue({
                 contentSnapshot: { text: content }
@@ -321,13 +289,9 @@ const $$active = $$ifdef("ACTIVE");`;
         });
 
         test('handles files with no snapshot content', async () => {
-            analyzeDependenciesMock.mockResolvedValue({
-                metafile: {
-                    inputs: {
-                        'src/missing.ts': {}
-                    }
-                }
-            } as any);
+            variant.dependencies = {
+                'src/missing.ts': 'src/missing.ts'
+            };
 
             filesModel.getSnapshot.mockReturnValue(null);
             filesModel.touchFile.mockReturnValue(null);
@@ -342,13 +306,9 @@ const $$active = $$ifdef("ACTIVE");`;
             variant.config.define = undefined;
             const content = 'const $$feature = $$ifdef("FEATURE");';
 
-            analyzeDependenciesMock.mockResolvedValue({
-                metafile: {
-                    inputs: {
-                        'src/test.ts': {}
-                    }
-                }
-            } as any);
+            variant.dependencies = {
+                'src/test.ts': 'src/test.ts'
+            };
 
             filesModel.getSnapshot.mockReturnValue({
                 contentSnapshot: { text: content }
@@ -363,13 +323,9 @@ const $$active = $$ifdef("ACTIVE");`;
         test('supports export declarations with macros', async () => {
             const content = 'export const $$publicApi = $$ifdef("PUBLIC_API");';
 
-            analyzeDependenciesMock.mockResolvedValue({
-                metafile: {
-                    inputs: {
-                        'src/api.ts': {}
-                    }
-                }
-            } as any);
+            variant.dependencies = {
+                'src/api.ts': 'src/api.ts'
+            };
 
             filesModel.getSnapshot.mockReturnValue({
                 contentSnapshot: { text: content }
@@ -390,13 +346,9 @@ const $$prod = $$ifdef("PRODUCTION");
 const $$noTest = $$ifndef("TEST");
 `;
 
-            analyzeDependenciesMock.mockResolvedValue({
-                metafile: {
-                    inputs: {
-                        'src/multi.ts': {}
-                    }
-                }
-            } as any);
+            variant.dependencies = {
+                'src/multi.ts': 'src/multi.ts'
+            };
 
             filesModel.getSnapshot.mockReturnValue({
                 contentSnapshot: { text: content }
@@ -414,13 +366,9 @@ const $$noTest = $$ifndef("TEST");
         test('correctly resolves file paths', async () => {
             const content = 'const $$test = $$ifdef("TEST");';
 
-            analyzeDependenciesMock.mockResolvedValue({
-                metafile: {
-                    inputs: {
-                        'relative/path.ts': {}
-                    }
-                }
-            } as any);
+            variant.dependencies = {
+                'relative/path.ts': 'relative/path.ts'
+            };
 
             filesModel.getSnapshot.mockReturnValue({
                 contentSnapshot: { text: content }
@@ -437,13 +385,9 @@ const $$noTest = $$ifndef("TEST");
         test('handles missing define as falsy value', async () => {
             const content = 'const $$feature = $$ifdef("UNDEFINED_FEATURE");';
 
-            analyzeDependenciesMock.mockResolvedValue({
-                metafile: {
-                    inputs: {
-                        'src/test.ts': {}
-                    }
-                }
-            } as any);
+            variant.dependencies = {
+                'src/test.ts': 'src/test.ts'
+            };
 
             filesModel.getSnapshot.mockReturnValue({
                 contentSnapshot: { text: content }
@@ -456,19 +400,12 @@ const $$noTest = $$ifndef("TEST");
         });
 
         test('handles falsy define values correctly', async () => {
-            const content = `
-const $$hasZero = $$ifdef("ZERO");
-const $$hasEmpty = $$ifdef("EMPTY_STRING");
-const $$hasFalse = $$ifdef("FALSE_VAL");
-`;
+            const content = '\nconst $$hasZero = $$ifdef("ZERO");\nconst $$hasEmpty = $$ifdef("EMPTY_STRING");' +
+                '\nconst $$hasFalse = $$ifdef("FALSE_VAL");';
 
-            analyzeDependenciesMock.mockResolvedValue({
-                metafile: {
-                    inputs: {
-                        'src/test.ts': {}
-                    }
-                }
-            } as any);
+            variant.dependencies = {
+                'src/test.ts': 'src/test.ts'
+            };
 
             filesModel.getSnapshot.mockReturnValue({
                 contentSnapshot: { text: content }

@@ -13,7 +13,6 @@ import type { MacrosMetadataInterface } from '@directives/interfaces/analyze-dir
 
 import { inject } from '@symlinks/symlinks.module';
 import { FilesModel } from '@typescript/models/files.model';
-import { analyzeDependencies } from '@services/transpiler.service';
 
 /**
  * Constants
@@ -225,13 +224,11 @@ export async function analyzeMacroMetadata(variant: VariantService, context: Bui
     context.stage.defineMetadata = metadata;
     const warnings: Array<PartialMessage> = [];
 
-    const result = await analyzeDependencies(context.build.initialOptions.entryPoints);
-    if(!result.metafile) return Promise.resolve({ warnings });
-
     const filesModel = inject(FilesModel);
     const defines = variant.config.define ?? {};
 
-    const files = Object.keys(result.metafile.inputs);
+    const files = Object.keys(variant.dependencies);
+    if(!files) return Promise.resolve({ warnings });
     for (const file of files) {
         const snapshot = filesModel.getSnapshot(file) ?? filesModel.touchFile(file);
         const content = snapshot?.contentSnapshot?.text;
