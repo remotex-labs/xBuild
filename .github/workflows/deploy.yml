@@ -58,15 +58,16 @@ jobs:
 
             -   name: Run lint, typecheck and build (package)
                 run: |
+                    pnpm run build
                     pnpm run lint
                     pnpm run test
+
+            -   name: Run npm version command
+                run: npm --no-git-tag-version version from-git
 
             # Build the package
             -   name: Build
                 run: pnpm run build
-
-            -   name: Run npm version command
-                run: npm --no-git-tag-version version from-git
 
             # Publish to npm if version is new
             -   name: Publish to npm
