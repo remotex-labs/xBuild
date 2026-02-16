@@ -22,7 +22,7 @@ jobs:
     publish-npm:
         name: Publish to npm
         runs-on: ubuntu-latest
-        if: github.ref == 'refs/heads/master'
+        if: github.event_name == 'release'
 
         steps:
             # Checkout repository code

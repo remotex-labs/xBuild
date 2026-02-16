@@ -2,89 +2,75 @@
  * Import will remove at compile time
  */
 
-import type { EntryPointsType } from '@configuration/interfaces/configuration.interface';
+import type { BuildOptions } from 'esbuild';
 
 /**
  * Imports
  */
 
 import { xBuildError } from '@errors/xbuild.error';
+import { collectFilesFromGlob } from '@components/glob.component';
 
 /**
- * Maps an array of file paths to an object where the keys are filenames (without extensions)
- * and the values are the corresponding file paths.
+ * Extracts and normalizes entry points from various esbuild entry point formats.
  *
- * Each key in the resulting object is derived from the filename by removing the file extension.
- * For example, given a file path `src/index.ts`, the key in the resulting object will be `src/index`.
+ * @param baseDir - Base directory to resolve glob patterns from
+ * @param entryPoints - Entry points in any esbuild-supported format
+ * @returns Normalized object mapping output names to input file paths
  *
- * @param filePaths - An array of file paths to map. Each file path should be a string.
- * @returns An object where the keys are filenames (without extensions) and the values are the corresponding file paths.
+ * @remarks
+ * Supports three esbuild entry point formats:
+ *
+ * **Array of strings (glob patterns):**
+ * - Treats entries as glob patterns to match files
+ * - Keys are filenames without extensions
+ *
+ * **Array of objects with `in` and `out` properties:**
+ * - `in`: Input file path
+ * - `out`: Output file path
+ * - Keys are the `out` values
+ *
+ * **Record object:**
+ * - Keys are output names
+ * - Values are input file paths
+ * - Returned as-is without modification
+ *
+ * @throws {@link xBuildError}
+ * Thrown when entry points format is unsupported or invalid
  *
  * @example
+ * Array of glob patterns:
  * ```ts
- * const filePaths = ['src/index.ts', 'src/utils.ts'];
- * const result = mapFilePathsToNames(filePaths);
- * console.log(result);
- * // Output: {
- * //   'src/index': 'src/index.ts',
- * //   'src/utils': 'src/utils.ts'
- * // }
+ * const entries = extractEntryPoints('./src', ['**\/*.ts', '!**\/*.test.ts']);
+ * // Returns: { 'index': 'index.ts', 'utils/helper': 'utils/helper.ts' }
  * ```
+ *
+ * @example
+ * Array of in/out objects:
+ * ```ts
+ * const entries = extractEntryPoints('./src', [
+ *   { in: 'src/index.ts', out: 'bundle' },
+ *   { in: 'src/worker.ts', out: 'worker' }
+ * ]);
+ * // Returns: { 'bundle': 'src/index.ts', 'worker': 'src/worker.ts' }
+ * ```
+ *
+ * @example
+ * Record object:
+ * ```ts
+ * const entries = extractEntryPoints('./src', {
+ *   main: 'src/index.ts',
+ *   worker: 'src/worker.ts'
+ * });
+ * // Returns: { 'main': 'src/index.ts', 'worker': 'src/worker.ts' }
+ * ```
+ *
+ * @see {@link https://esbuild.github.io/api/#entry-points|esbuild Entry Points}
+ *
+ * @since 2.0.0
  */
 
-export function mapFilePathsToNames(filePaths: Array<string>): Record<string, string> {
-    const result: Record<string, string> = {};
-
-    filePaths.forEach(filePath => {
-        // Extract the filename without extension
-        const fileName = filePath.substring(0, filePath.lastIndexOf('.'));
-        // Map the filename to the file path
-        result[fileName] = filePath;
-    });
-
-    return result;
-}
-
-/**
- * Extracts and returns an object mapping output file paths to input file paths from the provided `EntryPointsType` object.
- *
- * This function handles multiple formats of entry points, including:
- * - An array of strings representing file paths.
- * - An array of objects containing `in` and `out` properties, where `in` is the input file path and `out` is the output file path.
- * - A `Record<string, string>` where the keys represent input file paths and the values represent output file paths.
- *
- * Depending on the format, the function constructs an object with the output file paths as keys and the input file paths as values.
- * If the output path is not available, the filename (without extension) is used as the key.
- *
- * If a regular object with string keys and values (not in the supported formats) is provided, it will be returned as is.
- *
- * @param entryPoints - The entry points to extract from, which can be in different formats: an array of strings,
- * an array of objects with `in` and `out` properties, or a `Record<string, string>`.
- *
- * @returns An object mapping output file paths to input file paths, or filename (without extension) to file path.
- *
- * @throws Will throw an `Error` if the entry points format is unsupported.
- *
- * @example
- * ```ts
- * const entryPoints = extractEntryPoints(['src/index.ts', 'src/utils.ts']);
- * console.log(entryPoints); // { 'index': 'src/index.ts', 'utils': 'src/utils.ts' }
- * ```
- *
- * @example
- * ```ts
- * const entryPoints = extractEntryPoints([{ in: 'src/index.ts', out: 'dist/index.js' }]);
- * console.log(entryPoints); // { 'dist/index.js': 'src/index.ts' }
- * ```
- *
- * @example
- * ```ts
- * const entryPoints = extractEntryPoints({ index: 'src/index.ts', index2: 'dist/index2.js' });
- * console.log(entryPoints); // { index: 'src/index.ts', index2: 'dist/index2.js' }
- * ```
- */
-
-export function extractEntryPoints(entryPoints: EntryPointsType): Record<string, string> {
+export function extractEntryPoints(baseDir: string, entryPoints: BuildOptions['entryPoints']): Record<string, string> {
     if (Array.isArray(entryPoints)) {
         let result: Record<string, string> = {};
 
@@ -93,7 +79,7 @@ export function extractEntryPoints(entryPoints: EntryPointsType): Record<string,
                 result[entry.out] = entry.in;
             });
         } else if (typeof entryPoints[0] === 'string') {
-            result = mapFilePathsToNames(<Array<string>> entryPoints);
+            result =  collectFilesFromGlob(baseDir, <Array<string>> entryPoints);
         }
 
         return result;

@@ -2,7 +2,7 @@
  * Imports
  */
 
-import { xterm } from '@remotex-labs/xansi';
+import { xterm } from '@remotex-labs/xansi/xterm.component';
 
 /**
  * ASCII Logo and Version Information
@@ -24,50 +24,66 @@ __  _| |_/ /_   _ _| | __| |
 /_/\\_\\____/ \\__,_|_|_|\\__,_|
 `;
 
-// ANSI escape codes for colors
-export const cleanScreen = '\x1Bc';
-
 /**
  * Renders the banner with the ASCII logo and version information.
  *
- * This function constructs and returns a formatted banner string that includes an ASCII logo and the version number.
- * The colors used for the ASCII logo and version number can be enabled or disabled based on the `activeColor` parameter.
- * If color formatting is enabled, the ASCII logo will be rendered in burnt orange, and the version number will be in bright pink.
- *
- * @returns A formatted string containing the ASCII logo, version number, and ANSI color codes if `activeColor` is `true`.
+ * @returns A formatted string containing the ASCII logo and version number with color formatting
  *
  * @remarks
- * The `bannerComponent` function clears the terminal screen, applies color formatting if enabled, and displays
- * the ASCII logo and version number. The version number is retrieved from the global `__VERSION` variable, and
- * the colors are reset after the text is rendered.
+ * This function constructs and returns a formatted banner string that includes:
+ * - An ASCII logo rendered in burnt orange
+ * - The current version number displayed in bright pink
+ *
+ * The function uses ANSI color codes through the xterm utility to create visually
+ * distinct elements in the banner. The version number is retrieved from the global
+ * `__VERSION` variable.
+ *
+ * The banner is designed with appropriate spacing and carriage returns to ensure
+ *  a consistent display across different terminal environments.
  *
  * @example
  * ```ts
+ * // Display the banner in the console.
  * console.log(bannerComponent());
  * ```
  *
- * This will output the banner to the console with the ASCII logo, version, and colors.
- *
- * @example
- * ```ts
- * console.log(bannerComponent(false));
- * ```
- *
- * This will output the banner to the console with the ASCII logo and version number without color formatting.
- *
- * @public
+ * @since 1.0.0
  */
 
 export function bannerComponent(): string {
     return `
-        \r${  xterm.burntOrange(asciiLogo) }
+        \r${ xterm.burntOrange(asciiLogo) }
         \rVersion: ${ xterm.brightPink(__VERSION) }
     \r`;
 }
 
 /**
- * A formatted string prefix used for logging build-related messages.
- * // todo optimize this
+ * Returns a formatted prefix string for xBuild log messages.
+ *
+ * @returns A string containing the xBuild prefix formatted in light coral color
+ *
+ * @remarks
+ * This function creates a consistent, visually distinct prefix for all xBuild
+ * logging output. The prefix is formatted with light coral coloring using the
+ * xterm color utility to make xBuild logs easily identifiable in console output.
+ *
+ * The function is used throughout the build system to maintain consistent
+ * log formatting and improve readability when multiple tools or processes
+ * are outputting to the same console.
+ *
+ * @example
+ * ```ts
+ * // Basic usage in log messages
+ * console.log(`${prefix()} Starting build process...`);
+ * // Output: "[xBuild] Starting build process..." (with "[xBuild]" in light coral)
+ *
+ * // In a logger utility
+ * function log(message: string): void {
+ *   console.log(`${prefix()} ${message}`);
+ * }
+ * ```
+ *
+ * @since 1.0.0
  */
 
 export function prefix(): string {

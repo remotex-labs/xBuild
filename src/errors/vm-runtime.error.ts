@@ -2,86 +2,107 @@
  * Import will remove at compile time
  */
 
-import type { SourceService } from '@remotex-labs/xmap';
-import type { ErrorType } from '@errors/interfaces/stack.interface';
+import type { StackTraceInterface } from '@providers/interfaces/stack-provider.interface';
 
 /**
  * Imports
  */
 
-import { BaseError } from '@errors/base.error';
+import { xBuildBaseError } from '@errors/base.error';
 
 /**
- * A custom error class to handle errors occurring within a virtual machine (VM) execution context.
+ * Represents an error that occurs during VM runtime execution.
  *
- * The `VMRuntimeError` class extends the native `Error` class and enhances the error with
- * source map information to map stack traces back to the original source. This is particularly
- * useful when debugging errors from code executed in a `vm` or `evalmachine` environment.
+ * Extends {@link xBuildBaseError} and adds support for wrapping native errors,
+ * handling `AggregateError` instances, and preserving nested errors.
  *
- * @param message - The error message describing the error.
- * @param originalError - The original error object thrown from the VM execution.
- * @param sourceMap - The `SourceService` providing source map data to link the error to its original source.
+ * @remarks
+ * This class is designed to encapsulate runtime errors in a virtual machine context.
+ * If the original error is already a `xJetBaseError`, it is returned as-is.
+ * AggregateErrors are flattened into an array of `VMRuntimeError` instances.
+ *
+ * The formatted stack trace is automatically generated for both single and nested errors.
  *
  * @example
  * ```ts
  * try {
- *    vm.run(someCode);
- * } catch (error) {
- *    throw new VMRuntimeError("VM execution failed", error, sourceMapService);
+ *   // Some VM execution code that throws
+ * } catch (err) {
+ *   const vmError = new VMRuntimeError(err, { withFrameworkFrames: true });
+ *   console.error(vmError.formattedStack);
  * }
  * ```
+ *
+ * @since 2.0.0
  */
 
-export class VMRuntimeError extends BaseError {
+export class VMRuntimeError extends xBuildBaseError {
     /**
-     * The original error thrown during the VM execution.
+     * If the original error is an AggregateError, contains nested VMRuntimeError instances.
+     *
+     * @since 2.0.0
      */
 
-    originalError: Error;
+    errors?: Array<VMRuntimeError> = [];
 
     /**
-     * Original error stack
+     * Creates a new `VMRuntimeError` instance from a native or xJetBaseError.
+     *
+     * @param originalError - The original error object thrown during execution.
+     * @param options - Optional stack trace formatting options.
+     *
+     * @remarks
+     * - If `originalError` is already an instance of `xJetBaseError`, it is returned as-is.
+     * - If `originalError` is an `AggregateError`, each nested error is converted into a `VMRuntimeError`.
+     * - The message and stack of the original error are preserved.
+     * - The formatted stack trace is generated via {@link xBuildBaseError.reformatStack}.
+     *
+     * @since 2.0.0
      */
 
-    originalErrorStack: string | undefined;
-
-    /**
-     * Creates a new VMRuntimeError instance.
-     *
-     * This constructor initializes a new `VMRuntimeError` object, extending the native `Error` class with
-     * additional information, including the original error and optional source map data. It also ensures that
-     * the stack trace is correctly captured and reformatted using the source map (if provided) to enhance
-     * debugging.
-     *
-     * @param originalError - The original error object that was thrown during the VM execution.
-     * @param sourceMap - (Optional) The source map service used to map the error stack trace to its original
-     *                    source code locations. If not provided, this will be `null`.
-     *
-     * @example
-     * ```ts
-     * try {
-     *    vm.run(code);
-     * } catch (error) {
-     *    throw new VMRuntimeError(error, sourceMapService);
-     * }
-     * ```
-     */
-
-    constructor(originalError: ErrorType, sourceMap?: SourceService) {
-        // Pass the message to the base class Error
-        super(originalError.message, sourceMap);
-
-        // Maintain proper stack trace
-        if (Error.captureStackTrace) {
-            Error.captureStackTrace(this, VMRuntimeError);
+    constructor(private originalError: Error, options?: StackTraceInterface) {
+        if (originalError instanceof xBuildBaseError) {
+            return <VMRuntimeError> originalError;
         }
 
-        // Store the original error
-        this.originalError = originalError;
-        this.originalErrorStack = originalError.stack;
+        // Pass the message to the base class Error
+        super(originalError.message, 'VMRuntimeError');
 
-        // Assign the name of the error
-        this.name = 'VMRuntimeError';
-        this.stack = this.reformatStack(originalError);
+        // Handle AggregateError
+        if (originalError instanceof AggregateError && Array.isArray(originalError.errors)) {
+            // Process nested errors
+            this.errors = originalError.errors.map(error =>
+                new VMRuntimeError(error, options)
+            );
+        }
+
+        this.stack = originalError.stack;
+        this.message = originalError.message;
+        this.reformatStack(originalError, options);
+    }
+
+    /**
+     * Custom Node.js inspect method for displaying the error in the console.
+     *
+     * @returns A string representation of the formatted stack trace, or
+     *          a concatenated list of nested errors if present.
+     *
+     * @remarks
+     * Overrides the Node.js default inspection behavior.
+     * If this instance contains nested errors, they are listed with their formatted stacks.
+     *
+     * @since 2.0.0
+     */
+
+    [Symbol.for('nodejs.util.inspect.custom')](): string | undefined {
+        if (this.errors && this.errors.length > 0) {
+            const errorList = this.errors.map(
+                (error) => `${ error.formattedStack ?? error.stack }`
+            ).join('');
+
+            return `VMRuntimeError Contains ${ this.errors.length } nested errors:\n${ errorList }\n`;
+        }
+
+        return this.formattedStack || this.stack;
     }
 }
