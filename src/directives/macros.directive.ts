@@ -127,14 +127,17 @@ export async function isVariableStatement(node: VariableStatement, replacements:
         if (!MACRO_FUNCTIONS.includes(fnName)) continue;
 
         const argsCount = fnName == MACRO_FUNCTIONS[2] ? 1 : 2;
-        if (!MACRO_FUNCTIONS.includes(fnName) || init.arguments.length < argsCount) {
-            replacements.add({
-                replacement: 'undefined',
-                end: node.getEnd(),
-                start: node.getStart(state.sourceFile)
-            });
+        if(!MACRO_FUNCTIONS.includes(fnName)) return;
+        if (init.arguments.length < argsCount) {
+            throw new Error(`Invalid macro call: ${ fnName } with ${ init.arguments.length } arguments`);
 
-            return;
+            // replacements.add({
+            //     replacement: 'undefined',
+            //     end: node.getEnd(),
+            //     start: node.getStart(state.sourceFile)
+            // });
+            //
+            // return;
         }
 
         const hasExport =
@@ -217,14 +220,16 @@ export async function isCallExpression(
 
     const fnName = callExpr.expression.text;
     const argsCount = fnName == MACRO_FUNCTIONS[2] ? 1 : 2;
-    if (!MACRO_FUNCTIONS.includes(fnName) || callExpr.arguments.length < argsCount) {
-        replacements.add({
-            replacement: 'undefined',
-            end: node.getEnd(),
-            start: node.getStart(state.sourceFile)
-        });
-
-        return;
+    if(!MACRO_FUNCTIONS.includes(fnName)) return;
+    if (callExpr.arguments.length < argsCount) {
+        throw new Error(`Invalid macro call: ${ fnName } with ${ callExpr.arguments.length } arguments`);
+        // replacements.add({
+        //     replacement: 'undefined',
+        //     end: node.getEnd(),
+        //     start: node.getStart(state.sourceFile)
+        // });
+        //
+        // return;
     }
 
     let replacement: string | false = false;
@@ -445,10 +450,10 @@ export async function astProcess(state: StateInterface): Promise<string> {
 
 export async function transformerDirective(variant: VariantService, context: LoadContextInterface): Promise<OnLoadResult | undefined> {
     const { args, loader, stage, contents } = context;
-    if(args.path.includes('node_modules')) return;
+    if (args.path.includes('node_modules')) return;
 
-    if(contents.length < 1) return;
-    if(!TS_JS_REGEX.test(args.path)) return;
+    if (contents.length < 1) return;
+    if (!TS_JS_REGEX.test(args.path)) return;
 
     const languageService = variant.typescript.languageService;
     const sourceFile = languageService.getProgram()?.getSourceFile(args.path);
