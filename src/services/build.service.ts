@@ -2,686 +2,644 @@
  * Import will remove at compile time
  */
 
-import type { ChildProcessWithoutNullStreams } from 'child_process';
-import type { BuildStateInterface } from '@plugins/interfaces/plugin.interface';
-import type { PluginBuild, BuildResult, BuildContext, BuildOptions } from 'esbuild';
-import type { PluginsBuildStateInterface } from '@providers/interfaces/plugins.interface';
-import type { Loader, Message, Metafile, SameShape, OnLoadArgs, OnEndResult } from 'esbuild';
-import type { ConfigurationInterface } from '@configuration/interfaces/configuration.interface';
+import type { OnLoadResult, Message, PartialMessage } from 'esbuild';
+import type { BuildContextInterface } from '@providers/interfaces/lifecycle-provider.interface';
+import type { OnEndType, OnStartType } from '@providers/interfaces/lifecycle-provider.interface';
+import type { ResultContextInterface } from '@providers/interfaces/lifecycle-provider.interface';
+import type { BuildResultInterface } from '@providers/interfaces/esbuild-messages-provider.interface';
+import type { BuildConfigInterface, PartialBuildConfigType } from '@interfaces/configuration.interface';
+import type { DiagnosticsInterface } from '@typescript/services/interfaces/typescript-service.interface';
 
 /**
  * Imports
  */
 
-import * as process from 'node:process';
-import { dirname, resolve } from 'path';
-import { build, context } from 'esbuild';
-import { xterm } from '@remotex-labs/xansi';
-import { TypesError } from '@errors/types.error';
-import { spawn } from '@services/process.service';
-import { parseMacros } from '@plugins/macro.plugin';
-import { esBuildError } from '@errors/esbuild.error';
-import { prefix } from '@components/banner.component';
-import { VMRuntimeError } from '@errors/vm-runtime.error';
-import { ServerProvider } from '@providers/server.provider';
-import { PluginsProvider } from '@providers/plugins.provider';
-import { parseIfDefConditionals } from '@plugins/ifdef.plugin';
-import { TypescriptModule } from '@typescript/typescript.module';
-import { resolveAliasPlugin } from '@plugins/resolve-alias.plugin';
-import { analyzeDependencies } from '@services/transpiler.service';
-import { extractEntryPoints } from '@components/entry-points.component';
-import { packageTypeComponent } from '@components/package-type.component';
+import { xBuildError } from '@errors/xbuild.error';
+import { inject } from '@symlinks/symlinks.module';
+import { VariantService } from '@services/variant.service';
+import { LifecycleProvider } from '@providers/lifecycle.provider';
+import { transformerDirective } from '@directives/macros.directive';
+import { analyzeMacroMetadata } from '@directives/analyze.directive';
+import { ConfigurationService } from '@services/configuration.service';
+import { enhancedBuildResult, isBuildResultError } from '@providers/esbuild-messages.provider';
 
 /**
- * Manages the build process for a TypeScript project using esbuild.
- *
- * The `BuildService` class orchestrates the build process, including TypeScript compilation, handling of build errors,
- * and lifecycle management of the build. It can operate in various modes, such as watching for file changes or running
- * in development mode. It also provides functionality for spawning development processes and processing entry points.
+ * Orchestrates the build process across multiple variants with lifecycle management and configuration.
  *
  * @remarks
- * - The build process can be configured using the provided `ConfigurationInterface`.
- * - Errors related to TypeScript are handled separately and are not logged by default.
- * - The class supports various build modes, including watch mode and development mode, and handles different scenarios
- *   based on the configuration.
+ * The `BuildService` is the primary service for managing multi-variant builds in xBuild.
+ * It handles configuration changes, variant lifecycle, type checking, and build execution
+ * with support for hot reloading and file watching.
  *
- * @public
- * @category Services
+ * **Key responsibilities**:
+ * - Manages multiple build variants (e.g., production, development, testing)
+ * - Provides reactive configuration updates through subscription system
+ * - Coordinates lifecycle hooks (onStart, onEnd) across all variants
+ * - Handles macro transformation and directive processing
+ * - Supports incremental builds and file touch notifications
+ * - Aggregates build results and type checking diagnostics
+ *
+ * **Architecture**:
+ * Each variant is managed by a {@link VariantService} instance with its own:
+ * - esbuild configuration and context
+ * - TypeScript language service
+ * - Lifecycle provider for hooks and plugins
+ * - Build state and watch mode support
+ *
+ * The service uses a subscription pattern to react to configuration changes,
+ * automatically creating new variants or disposing removed ones.
+ *
+ * @example Basic usage
+ * ```ts
+ * const buildService = new BuildService({
+ *   variants: {
+ *     production: {
+ *       esbuild: { minify: true, sourcemap: false }
+ *     },
+ *     development: {
+ *       esbuild: { minify: false, sourcemap: true }
+ *     }
+ *   }
+ * });
+ *
+ * // Build all variants
+ * const results = await buildService.build();
+ * console.log(results.production.errors);
+ * ```
+ *
+ * @example With lifecycle hooks
+ * ```ts
+ * const buildService = new BuildService(config);
+ *
+ * buildService.onStart = (context) => {
+ *   console.log(`Building variant: ${context.variantName}`);
+ * };
+ *
+ * buildService.onEnd = (context) => {
+ *   console.log(`Completed ${context.variantName}: ${context.result.errors.length} errors`);
+ * };
+ *
+ * await buildService.build();
+ * ```
+ *
+ * @example Configuration reload
+ * ```ts
+ * const buildService = new BuildService(initialConfig);
+ *
+ * // Reload with new configuration
+ * buildService.reload({
+ *   variants: {
+ *     production: { esbuild: { target: 'es2020' } },
+ *     staging: { esbuild: { minify: true } }
+ *   }
+ * });
+ * // Old variants disposed, new ones created
+ * ```
+ *
+ * @example Type checking
+ * ```ts
+ * const buildService = new BuildService(config);
+ * const diagnostics = await buildService.typeChack();
+ *
+ * for (const [variant, errors] of Object.entries(diagnostics)) {
+ *   console.log(`${variant}: ${errors.length} type errors`);
+ * }
+ * ```
+ *
+ * @see {@link VariantService} for individual variant management
+ * @see {@link ConfigurationService} for configuration handling
+ * @see {@link LifecycleProvider} for hook management
+ *
+ * @since 2.0.0
  */
 
 export class BuildService {
     /**
-     * Provides TypeScript-related functionality for the build process.
-     */
-
-    readonly typescriptModule: TypescriptModule;
-
-    /**
-     * Keeps track of active development processes spawned during the build.
-     * This property holds an array of `ChildProcessWithoutNullStreams` instances that represent Node.js processes spawned
-     * for running development tasks. These processes are used to handle development builds or runtime tasks and are managed
-     * by the `BuildService` class to ensure they are properly started and stopped.
+     * Callback invoked when a build completes for any variant.
      *
      * @remarks
-     * - The array is populated when development processes are spawned, such as when specific development files are
-     *   processed or when running in development mode.
-     * - The processes are terminated gracefully at the end of the build to avoid leaving orphaned processes running.
-     * - It is important to manage these processes correctly to avoid resource leaks and ensure proper cleanup.
+     * Set via the `onEnd` setter. Called after each variant's build finishes,
+     * providing access to build results, errors, warnings, and metadata.
      *
-     * @see ChildProcessWithoutNullStreams
+     * @since 2.0.0
      */
 
-    private activePossess: Array<ChildProcessWithoutNullStreams> = [];
+    private onEndCallback?: OnEndType;
 
     /**
-     * Plugin provider
-     *
-     * @private
-     */
-
-    private pluginsProvider: PluginsProvider;
-
-    /**
-     * A mapping of output filenames to their corresponding source file paths.
+     * Callback invoked when a build starts for any variant.
      *
      * @remarks
-     * This property stores the entry points configuration for TypeScript compilation.
-     * - Keys represent the output filenames (with or without .d.ts extension)
-     * - Values represent the source file paths to use as entry points
+     * Set via the `onStart` setter. Called before each variant's build begins,
+     * after macro metadata analysis completes.
      *
-     * Used by declaration bundling operations to determine which files to process
-     * and how to name the resulting declaration outputs.
-     *
-     * @example
-     * ```ts
-     * // Example entryPoints structure
-     * {
-     *   'index': 'src/index.ts',
-     *   'components/button': 'src/components/button.ts'
-     * }
-     * ```
-     *
-     * @private
-     * @since 1.5.9
+     * @since 2.0.0
      */
 
-    private readonly entryPoints: Record<string, string>;
+    private onStartCallback?: OnStartType;
 
     /**
-     * Initializes the build service with the provided configuration.
+     * Map of variant names to their service instances.
      *
-     * The constructor configures the TypeScript provider, suppresses esbuild logging,
-     * sets up development modes, and registers the necessary plugins.
+     * @remarks
+     * Contains all active build variants. Variants are created during construction
+     * and updated when configuration changes via {@link reload} or {@link setConfiguration}.
      *
-     * Declaration files will be output based on the following order of precedence:
-     * 1. If `declarationOutDir` is set in the configuration, it will be used.
-     * 2. If `declarationOutDir` is not provided, it will use the `outDir` value from the tsconfig.
-     * 3. If neither of the above is available, it falls back to using the `outdir` specified in the esbuild configuration.
-     *
-     * @param config - The configuration object for the build process, including esbuild and TypeScript settings.
+     * @since 2.0.0
      */
 
-    constructor(private config: ConfigurationInterface) {
-        this.config.esbuild.logLevel = 'silent';
-        this.pluginsProvider = new PluginsProvider();
-        this.typescriptModule = new TypescriptModule(
-            this.config.esbuild.tsconfig ?? 'tsconfig.json', this.config.declarationOutDir, this.config.esbuild.outdir!
-        );
+    private variants: { [variant: string]: VariantService } = {};
 
-        this.entryPoints = extractEntryPoints(this.config.esbuild.entryPoints);
-        this.typescriptModule.updateFiles(Object.values(this.entryPoints));
+    /**
+     * Configuration service managing build settings and variant definitions.
+     *
+     * @remarks
+     * Injected singleton that provides reactive configuration updates through
+     * its subscription system. Changes trigger automatic variant recreation.
+     *
+     * @since 2.0.0
+     */
 
-        this.configureDevelopmentMode();
-        this.setupPlugins();
+    private readonly configuration: ConfigurationService<BuildConfigInterface> = inject(ConfigurationService);
+
+    /**
+     * Creates a new BuildService instance with optional configuration and command-line arguments.
+     *
+     * @param argv - Command-line arguments passed to variant services (default: empty object)
+     *
+     * @remarks
+     * The constructor:
+     * 1. Accepts optional initial configuration
+     * 2. Stores command-line arguments for variant initialization
+     * 3. Subscribes to configuration changes via {@link parseVariants}
+     * 4. Automatically creates variants defined in the configuration
+     *
+     * Configuration can be provided later via {@link reload} or {@link setConfiguration}
+     * if not supplied during construction.
+     *
+     * @since 2.0.0
+     */
+
+    constructor(private argv: Record<string, unknown> = {}) {
+        this.configuration.subscribe(this.parseVariants.bind(this));
     }
 
     /**
-     * Executes the build process.
-     * This method performs the build and handles any errors that occur during the execution.
-     * If watching or development mode is enabled in the configuration, it starts watching for changes
-     * to automatically rebuild as needed.
-     * The method logs errors that are not related to TypeScript
-     * compilation issues.
+     * Gets the current complete build configuration.
      *
-     * @returns A promise that resolves with a `BuildResult` when the build process is complete,
-     *          or `undefined` if an error occurs during execution.
+     * @returns The active build configuration including all variants and common settings
      *
-     * @throws Error Throws an error if the build process encounters issues that are not related
-     *                 to TypeScript. Such errors are logged, but the method does not rethrow them.
+     * @remarks
+     * Retrieves the immutable snapshot of the current configuration from the
+     * configuration service. Changes to the returned object do not affect
+     * the actual configuration - use {@link setConfiguration} or {@link reload} instead.
+     *
+     * @since 2.0.0
+     */
+
+    get config(): BuildConfigInterface {
+        return this.configuration.getValue();
+    }
+
+    /**
+     * Sets the callback to invoke when any variant build completes.
+     *
+     * @param callback - Function receiving the result context with build output and metadata
+     *
+     * @remarks
+     * The callback receives a {@link ResultContextInterface} containing:
+     * - Variant name
+     * - Build result (errors, warnings, outputs)
+     * - Metadata files and outputs
+     * - Timestamp and duration
+     *
+     * Called after the build finishes but before promises resolve.
      *
      * @example
      * ```ts
-     * import { BuildService } from './build-service';
+     * buildService.onEnd = (context) => {
+     *   const { variantName, result } = context;
+     *   console.log(`✓ ${variantName}: ${result.errors.length} errors`);
+     * };
+     * ```
      *
-     * const buildService = new BuildService(config);
-     * buildService.run().then(() => {
-     *     console.log('Build process completed successfully.');
-     * }).catch((error) => {
-     *     console.error('Build process failed:', error);
+     * @since 2.0.0
+     */
+
+    set onEnd(callback: OnEndType) {
+        this.onEndCallback = callback;
+    }
+
+    /**
+     * Sets the callback to invoke when any variant build starts.
+     *
+     * @param callback - Function receiving the build context with file and variant information
+     *
+     * @remarks
+     * The callback receives a {@link BuildContextInterface} containing:
+     * - Variant name
+     * - File path being processed
+     * - Build stage and metadata
+     * - Loader type
+     *
+     * Called after macro analysis but before transformation begins.
+     *
+     * @example
+     * ```ts
+     * buildService.onStart = (context) => {
+     *   console.log(`Building ${context.args.path} for ${context.variantName}`);
+     * };
+     * ```
+     *
+     * @since 2.0.0
+     */
+
+    set onStart(callback: OnStartType) {
+        this.onStartCallback = callback;
+    }
+
+    /**
+     * Reloads the build configuration and updates variants accordingly.
+     *
+     * @param config - Optional new configuration to replace the current one
+     *
+     * @remarks
+     * The reload process:
+     * 1. Replaces configuration if provided
+     * 2. Compares new variant names with existing ones
+     * 3. Disposes variants no longer in configuration
+     * 4. Creates new variants from the updated configuration
+     * 5. Existing variants with matching names continue unchanged
+     *
+     * This is useful for hot-reloading configuration files without restarting the build process.
+     *
+     * @example
+     * ```ts
+     * // Add a new staging variant
+     * buildService.reload({
+     *   variants: {
+     *     ...buildService.config.variants,
+     *     staging: { esbuild: { minify: true } }
+     *   }
      * });
      * ```
      *
-     * In this example, the `run` method is invoked to execute the build process. It handles both successful
-     * completion and logs any encountered errors, allowing the user to understand the outcome of the build.
+     * @since 2.0.0
      */
 
-    async run(): Promise<BuildResult | void> {
-        return await this.execute(async () => {
-            const result = await this.build();
-            if (this.config.watch || this.config.dev) {
-                await (<BuildContext>result).watch();
-            }
-
-            return <BuildResult>result;
-        });
+    reload(config?: PartialBuildConfigType): void {
+        if (config) this.configuration.reload(config);
+        this.disposeVariants(this.compareKeys(this.config.variants, this.variants));
+        this.parseVariants();
     }
 
     /**
-     * Runs the build process in debug mode for the specified entry points.
-     * This method temporarily disables development and watch mode, initiates the build process, and spawns development processes
-     * for the specified entry points. If any errors occur during the build, they are handled appropriately.
+     * Notifies all variants that specific files have been modified.
      *
-     * @param entryPoints - An array of entry point file names for which the development processes will be spawned.
-     * These entry points are matched against the build output files.
-     *
-     * @returns A `Promise<void>` that resolves when the build and process spawning have completed.
-     *
-     * @throws Handles any build-related errors using the `handleErrors` method.
+     * @param files - Array of file paths that have changed
      *
      * @remarks
-     * - The `config.dev` and `config.watch` settings are temporarily disabled to prevent development mode or file watching during the build.
-     * - The `build()` method is called to generate the necessary build outputs.
-     * - The `spawnDev` method is then invoked to spawn processes for the matching entry points.
-     * - If any errors occur during the build, they are caught and passed to the `handleErrors` method.
+     * Propagates file change notifications to all variant services, triggering
+     * incremental rebuilds in watch mode. Each variant's watch service handles
+     * the actual rebuild logic.
+     *
+     * Typically used by file watchers or development servers to trigger hot reloads.
      *
      * @example
      * ```ts
-     * const entryPoints = ['index', 'main'];
-     * await this.runDebug(entryPoints);
-     * ```
-     *
-     * In this example, the `runDebug` method runs the build process and spawns development processes for `index` and `main`.
-     *
-     * @public
-     */
-
-    async runDebug(entryPoints: Array<string>): Promise<void> {
-        return await this.execute(async () => {
-            this.config.dev = false;
-            this.config.watch = false;
-            const result = <BuildResult>await this.build();
-            this.spawnDev(<Metafile>result.metafile, entryPoints, true);
-        });
-    }
-
-    /**
-     * Serves the project and watches for changes.
-     * This method starts the development server using the `ServerProvider`, builds the project using esbuild,
-     * and watches for file changes to automatically rebuild as needed. It initializes the server and invokes
-     * the build process, enabling continuous development mode.
-     *
-     * @returns A promise that resolves when the server is started and the build process is complete.
-     *
-     * @throws This method catches any errors thrown during the build process and handles them using the
-     * `handleErrors` method.
-     *
-     * @example
-     * ```ts
-     * const buildService = new BuildService(config);
-     * buildService.serve().then(() => {
-     *     console.log('Server is running and watching for changes.');
-     * }).catch((error) => {
-     *     console.error('Failed to start the server:', error);
+     * // File watcher integration
+     * watcher.on('change', (changedFiles) => {
+     *   buildService.touchFiles(changedFiles);
      * });
      * ```
      *
-     * In this example, the `serve` method starts the server and watches for changes. If an error occurs during
-     * the build or server startup, it is handled and logged.
+     * @see {@link VariantService.touchFiles}
+     *
+     * @since 2.0.0
      */
 
-    async serve(): Promise<void> {
-        const server = new ServerProvider(this.config.serve, this.config.esbuild.outdir ?? '');
-
-        return await this.execute(async () => {
-            server.start();
-            const result = await this.build();
-            await (<BuildContext>result).watch();
-        });
-    }
-
-    /**
-     * Executes a provided asynchronous callback function within a try-catch block.
-     * This method ensures that any errors thrown during the execution of the callback
-     * are properly handled and logged. If the error appears to be an `esbuild`-related
-     * `OnEndResult` error with an array of errors, it avoids redundant logging.
-     * Otherwise, it wraps the error in a `VMRuntimeError` and logs the stack trace.
-     *
-     * @template T - The return type of the callback function, allowing flexibility
-     *               in the expected result type. Defaults to `BuildResult`.
-     *
-     * @param callback - A function that returns a `Promise<T>`, which is executed asynchronously.
-     *                   The callback is wrapped in error handling logic to catch and process any exceptions.
-     *
-     * @returns A `Promise<T | void>` that resolves with the result of the callback function if successful,
-     *          or `void` if an error was thrown and handled. This allows for optional chaining on the return value.
-     *
-     * @throws This method does not throw explicitly but will log an error message if an exception is caught
-     *         and is not an `esbuild`-related error. The error stack is logged via `VMRuntimeError` for non-esbuild errors.
-     *
-     * @example
-     * ```ts
-     * await execute(async () => {
-     *   // Perform some asynchronous operation here
-     *   return someResult;
-     * });
-     * ```
-     */
-
-    private async execute<T = BuildResult>(callback: () => Promise<T>): Promise<T | void> {
-        try {
-            return await callback();
-        } catch (error: unknown) {
-            const esbuildError = error as OnEndResult;
-            if (Array.isArray(esbuildError.errors) && (!this.config.watch || !this.config.dev || !this.config.serve.active)) {
-                this.handleErrors(esbuildError);
-            } else {
-                console.error(new VMRuntimeError(error as Error).stack);
-            }
-        }
-
-        return;
-    }
-
-    /**
-     * Configures the development mode by ensuring that `config.dev` is set properly.
-     */
-
-    private configureDevelopmentMode(): void {
-        if (this.config.dev !== false && (!Array.isArray(this.config.dev) || this.config.dev.length < 1)) {
-            this.config.dev = [ 'index' ];
+    touchFiles(files: Array<string>): void {
+        for (const instance of Object.values(this.variants)) {
+            instance.touchFiles(files);
         }
     }
 
     /**
-     * Sets up the plugin's provider and registers the plugin HooksInterface.
-     */
-
-    private setupPlugins(): void {
-        const rootDir = resolve(this.typescriptModule.config.options.baseUrl ?? '');
-        const paths = this.generatePathAlias(rootDir);
-
-        this.registerPluginHooks(paths, rootDir);
-        this.pluginsProvider.registerOnLoad(async (content: string | Uint8Array, loader: Loader | undefined, args: OnLoadArgs, state) => {
-            return await parseMacros(content, loader, args, <BuildStateInterface>state, this.config);
-        });
-    }
-
-    /**
-     * Registers the plugin HooksInterface for start, end, and load events.
+     * Partially updates the build configuration without replacing it entirely.
      *
-     * @param paths - The resolved path aliases.
-     * @param rootDir - The root directory for resolving paths.
-     */
-
-    private registerPluginHooks(paths: Record<string, string>, rootDir: string): void {
-        this.pluginsProvider.registerOnLoad((content, loader, args) => {
-            this.typescriptModule.updateFiles(args.path);
-        });
-
-        this.pluginsProvider.registerOnEnd(this.end.bind(this));
-        this.pluginsProvider.registerOnStart(this.start.bind(this));
-
-        this.pluginsProvider.registerOnLoad((content, loader, args) => {
-            if (!args.path.endsWith('.ts')) return;
-
-            if (!this.config.esbuild.bundle) {
-                const sourceFile = dirname(resolve(args.path).replace(rootDir, '.'));
-                content = resolveAliasPlugin(content.toString(), sourceFile, paths, this.config.esbuild.format === 'esm');
-            }
-
-            return {
-                loader: 'ts',
-                contents: parseIfDefConditionals(content.toString(), this.config.define)
-            };
-        });
-    }
-
-    /**
-     * Generates a path alias object from the TypeScript provider's path options.
-     * This method processes the `paths` property from the TypeScript provider's options,
-     * which is expected to be an object where each key represents a path alias pattern,
-     * and the corresponding value is an array of paths. The method removes any wildcard
-     * characters (`*`) from both the keys and the first values of the arrays. It also
-     * resolves the paths relative to the specified `rootDir`, returning a simplified
-     * object that maps the cleaned keys to their respective paths.
-     *
-     * The resolved paths will be formatted to use a relative path notation.
-     *
-     * Example:
-     * Given the following paths:
-     * ```ts
-     * {
-     *   '@core/*': ['src/core/*'],
-     *   '@utils/*': ['src/utils/*']
-     * }
-     * ```
-     * And assuming `rootDir` is set to the base directory of your project, the method
-     * will return:
-     * ```ts
-     * {
-     *   '@core/': './core/',
-     *   '@utils/': './utils/'
-     * }
-     * ```
-     *
-     * @param rootDir - The root directory to resolve paths against.
-     * @returns An object mapping cleaned path aliases to their respective resolved paths.
-     */
-
-    private generatePathAlias(rootDir: string): Record<string, string> {
-        const paths = this.typescriptModule.config.options.paths;
-        const alias: Record<string, string> = {};
-
-        for (const key in paths) {
-            const valueArray = paths[key];
-            if (valueArray.length > 0) {
-                const newKey = key.replace(/\*/g, '');
-                alias[newKey] = resolve(valueArray[0].replace(/\*/g, '')).replace(rootDir, '.');
-            }
-        }
-
-        return alias;
-    }
-
-    /**
-     * Handles errors during the build process.
-     * This method processes and logs errors that occur during the esbuild process. It specifically filters out
-     * errors related to TypeScript (`TypesError`) to prevent them from being logged, while logging all other errors
-     * to the console. The error object is assumed to contain a list of messages, each with detailed information.
-     *
-     * @param esbuildError - The error object returned by esbuild, which is expected to contain an array of
-     * error messages.
-     *
-     * @private
+     * @param config - Partial configuration to merge with the current configuration
      *
      * @remarks
-     * - TypeScript errors (denoted as `TypesError`) are skipped and not logged.
-     * - Other errors are logged to the console with their text descriptions.
+     * Performs a shallow merge of the provided configuration with the current one.
+     * Use {@link reload} for deep configuration replacement or variant restructuring.
+     *
+     * Common use cases:
+     * - Toggling minification
+     * - Updating define constants
+     * - Modifying common build options
      *
      * @example
+     * ```ts
+     * // Enable minification for all variants
+     * buildService.setConfiguration({
+     *   common: { esbuild: { minify: true } }
+     * });
+     * ```
+     *
+     * @see {@link reload} for full configuration replacement
+     *
+     * @since 2.0.0
+     */
+
+    setConfiguration(config: Partial<BuildConfigInterface>): void {
+        this.configuration.patch(config);
+    }
+
+    /**
+     * Performs TypeScript type checking across all variants.
+     *
+     * @returns Promise resolving to a map of variant names to their diagnostic results
+     *
+     * @remarks
+     * Runs the TypeScript compiler's diagnostic checker for each variant in parallel.
+     * Returns all type errors, warnings, and suggestions without failing the build.
+     *
+     * **Note**: Method name has a typo - should be `typeCheck` but kept for backward compatibility.
+     *
+     * Useful for:
+     * - Pre-build validation
+     * - CI/CD type checking pipelines
+     * - IDE integration and diagnostics display
+     *
+     * @example
+     * ```ts
+     * const diagnostics = await buildService.typeChack();
+     *
+     * for (const [variant, errors] of Object.entries(diagnostics)) {
+     *   if (errors.length > 0) {
+     *     console.error(`${variant} has ${errors.length} type errors`);
+     *     errors.forEach(err => console.error(err.messageText));
+     *   }
+     * }
+     * ```
+     *
+     * @see {@link DiagnosticsInterface}
+     * @see {@link VariantService.check}
+     *
+     * @since 2.0.0
+     */
+
+    async typeChack(): Promise<Record<string, DiagnosticsInterface[]>> {
+        const result: Record<string, Array<DiagnosticsInterface>> = {};
+
+        for(const variant of Object.values(this.variants)) {
+            result[variant.name] = await variant.check();
+        }
+
+        return result;
+    }
+
+    /**
+     * Executes the build process for all or specific variants.
+     *
+     * @param names - Optional array of variant names to build (builds all if omitted)
+     *
+     * @returns Promise resolving to a map of variant names to their enhanced build results
+     *
+     * @throws AggregateError - When any variant build fails, containing all error details
+     *
+     * @remarks
+     * The build process:
+     * 1. Filters variants if specific names are provided
+     * 2. Builds all variants in parallel
+     * 3. Collects results and errors from each variant
+     * 4. Enhances build results with additional metadata
+     * 5. Aggregates errors if any builds failed
+     * 6. Throws AggregateError if errors occurred
+     *
+     * **Error handling**:
+     * - Build failures don't stop other variants from building
+     * - All errors are collected and thrown together after all builds are complete
+     * - Supports both esbuild errors and generic JavaScript errors
+     *
+     * **Result enhancement**:
+     * Build results are processed by {@link enhancedBuildResult} to provide
+     * structured error and warning information.
+     *
+     * @example Build all variants
      * ```ts
      * try {
-     *     await buildService.run();
-     * } catch (esbuildError) {
-     *     buildService.handleErrors(esbuildError);
+     *   const results = await buildService.build();
+     *   console.log(`Built ${Object.keys(results).length} variants`);
+     * } catch (error) {
+     *   if (error instanceof AggregateError) {
+     *     error.errors.forEach(err => console.error(err.message));
+     *   }
      * }
      * ```
      *
-     * In this example, if an error occurs during the build process, the `handleErrors` method is used to
-     * process and log the errors.
-     */
-
-    private handleErrors(esbuildError: OnEndResult): void {
-        const errors = esbuildError.errors ?? [];
-        for (const error of errors) {
-            if (!error.detail) {
-                console.error((new esBuildError(<Message>error)).stack);
-                continue;
-            }
-
-            // ignore typescript eslint error
-            if (error.detail.name === 'TypesError')
-                continue;
-
-            if (error.detail.name) {
-                if (error.detail.name === 'VMRuntimeError') {
-                    console.error(error.detail.stack);
-                    continue;
-                }
-
-                if (error.detail instanceof Error) {
-                    console.error(new VMRuntimeError(error.detail).stack);
-                    continue;
-                }
-            }
-
-            return console.error(error.text);
-        }
-    }
-
-    /**
-     * Injects a configuration object (banner or footer) into the `esbuild` options.
-     * This method will update the `esbuild` object by adding or modifying the `banner` or `footer`
-     * property based on the provided configuration.
-     * The function handles both static values
-     * and functions within the configuration.
-     *
-     * @param esbuild - The `esbuild` configuration object where the `banner` or `footer`
-     *                  should be injected or updated.
-     * @param object - The configuration object that contains the properties to inject.
-     *                 The properties can either be static values or functions.
-     * @param name - A string that determines whether the method modifies the `banner` or `footer`
-     *               property of the `esbuild` object.
-     *
-     * @returns void - This method does not return any value.
-     * It modifies the `esbuild` object directly.
-     *
-     * @throws Error - If the `object` parameter is not provided, nothing is injected.
-     *                   No action will be taken if the specific `name` property (either
-     *                   'banner' or 'footer') does not exist in the `esbuild` object.
-     */
-
-    private injects(esbuild: BuildOptions, object: ConfigurationInterface['banner'], name: 'banner' | 'footer'): void {
-        if (!object) return;
-        if (!esbuild[name]) esbuild[name] = {};
-        const accessKey = esbuild[name];
-
-        for (const key in object) {
-            if (object.hasOwnProperty(key)) {
-                const value = object[key];
-                if (typeof value === 'function') {
-                    console.log(`${ prefix() } trigger ${ name } function`);
-                    accessKey[key] = value();
-
-                    continue;
-                }
-
-                accessKey[key] = value;
-            }
-        }
-    }
-
-    /**
-     * Builds the project based on the configuration.
-     * Depending on the configuration, this method either uses esbuild's `context` for watching or `build` for a one-time build.
-     *
-     * @returns A promise that resolves with the build context or result.
-     *
-     * @private
-     */
-
-    private async build(): Promise<BuildContext | SameShape<unknown, unknown> | BuildResult> {
-        packageTypeComponent(this.config);
-        const esbuild = this.config.esbuild;
-
-        if (this.config.hooks) {
-            this.pluginsProvider.registerOnEnd(this.config.hooks.onEnd);
-            this.pluginsProvider.registerOnLoad(this.config.hooks.onLoad);
-            this.pluginsProvider.registerOnEnd(this.config.hooks.onSuccess);
-            this.pluginsProvider.registerOnStart(this.config.hooks.onStart);
-            this.pluginsProvider.registerOnResolve(this.config.hooks.onResolve);
-        }
-
-        if (!esbuild.define) {
-            esbuild.define = {};
-        }
-
-        for (const key in this.config.define) {
-            esbuild.define[key] = JSON.stringify(this.config.define[key]);
-        }
-
-        if (!this.config.esbuild.bundle) {
-            await this.processEntryPoints();
-        }
-
-        esbuild.plugins = [ this.pluginsProvider.setup() ];
-        this.injects(this.config.esbuild, this.config.banner, 'banner');
-        this.injects(this.config.esbuild, this.config.footer, 'footer');
-
-        if (this.config.watch || this.config.dev || this.config.serve.active) {
-            return await context(esbuild);
-        }
-
-        return await build(esbuild);
-    }
-
-    /**
-     * Manages development processes for specified entry points.*
-     * This method spawns development processes for each file in the metafile that matches any of the specified entry points.
-     * It enables features like source maps and optional debugging mode for each spawned process.
-     *
-     * @param meta - The metafile containing information about build outputs.
-     * This typically includes a mapping of output files and their dependencies.
-     * @param entryPoint - An array of entry point file names to match against the metafile outputs.
-     * Only files that match these entry points will have development processes spawned.
-     * @param debug - A boolean flag to enable debugging mode for spawned processes.
-     * If `true`, the processes will start in debug mode with the `--inspect-brk` option. Defaults to `false`.
-     *
-     * @returns void
-     *
-     * @remarks
-     * - Files that contain 'map' in their names (e.g., source map files) are ignored and no process is spawned for them.
-     * - For each matching file in the metafile outputs, a new development process is spawned using the `spawn` function.
-     * - The `activePossess` array tracks all spawned processes, allowing further management (e.g., termination).
-     *
-     * @example
+     * @example Build specific variants
      * ```ts
-     * const meta = {
-     *   outputs: {
-     *     'dist/index.js': { \/* ... *\/ },
-     *     'dist/index.js.map': { \/* ... *\/ }
-     *   }
-     * };
-     * const entryPoints = ['index'];
-     *
-     * this.spawnDev(meta, entryPoints, true); // Spawns processes in debug mode
+     * const results = await buildService.build(['production', 'staging']);
+     * // Only production and staging variants are built
      * ```
      *
-     * @private
-     */
-
-    private spawnDev(meta: Metafile, entryPoint: Array<string>, debug: boolean = false): void {
-        if (!Array.isArray(entryPoint))
-            return;
-
-        for (const file in meta.outputs) {
-            if (file.includes('map') || !entryPoint.some(key => file.includes(`/${ key }.`)))
-                continue;
-
-            this.activePossess.push(spawn(file, debug));
-        }
-    }
-
-    /**
-     * Starts the build process and type checking.
-     * This method performs initial setup for the build and ensures that any child processes are terminated properly.
+     * @example Handle individual variant errors
+     * ```ts
+     * try {
+     *   await buildService.build();
+     * } catch (error) {
+     *   if (error instanceof AggregateError) {
+     *     console.error(`${error.errors.length} variants failed`);
+     *   }
+     * }
+     * ```
      *
-     * @private
+     * @see {@link enhancedBuildResult}
+     * @see {@link BuildResultInterface}
+     * @see {@link VariantService.build}
+     *
+     * @since 2.0.0
      */
 
-    private async start(build: PluginBuild, state: PluginsBuildStateInterface): Promise<void> {
-        try {
-            state.startTime = Date.now();
-            console.log(`${ prefix() } StartBuild ${ build.initialOptions.outdir }`);
+    async build(names?: Array<string>): Promise<Record<string, BuildResultInterface>> {
+        const errorList: Array<Error> = [];
+        const results: Record<string, BuildResultInterface> = {};
+        const buildPromises = Object.entries(this.variants).map(async ([ variantName, variantInstance ]) => {
+            if(names && !names.includes(variantName)) return;
 
-            if (!this.config.noTypeChecker) {
-                const errors = this.typescriptModule.check();
-                if (errors.length > 0) {
-                    console.log(this.typescriptModule.formatDiagnostics(errors).join('\n') + '\n');
+            try {
+                const result = await variantInstance.build();
+                if(result) results[variantName] = enhancedBuildResult(result);
+            } catch(error) {
+                if (isBuildResultError(error) || error instanceof AggregateError) {
+                    const result = enhancedBuildResult({
+                        errors: error.errors as Array<Message>
+                    });
 
-                    if (!this.config.buildOnError)
-                        throw new TypesError('Type checking failed due to errors.');
+                    errorList.push(...result.errors);
+                } else if(error instanceof Error) {
+                    errorList.push(error);
+                } else {
+                    errorList.push(new Error(String(error)));
                 }
             }
-
-            if (this.config.bundleDeclaration)
-                this.typescriptModule.emitBundleDeclarations(this.entryPoints);
-            else if (this.config.declaration)
-                this.typescriptModule.emitDeclarations();
-        } finally {
-            while (this.activePossess.length > 0) {
-                const element = this.activePossess.pop();
-                if (element)
-                    element.kill('SIGTERM');
-            }
-        }
-    }
-
-    /**
-     * Finalizes the build process and logs results.
-     * This method handles the end of the build process, logs build results, and processes development files if applicable.
-     *
-     * @private
-     */
-
-    private async end(result: BuildResult, state: PluginsBuildStateInterface): Promise<void> {
-        if (result.errors.length > 0) {
-            this.handleErrors(result);
-            if (!this.config.serve.active && !this.config.dev && !this.config.watch) {
-                process.exit(1);
-            }
-
-            return;
-        }
-
-        const duration = Date.now() - <number>state.startTime;
-        console.log(
-            `\n${ prefix() } ${ xterm.deepOrange(`Build completed! in ${ duration } ms`) }`
-        );
-        console.log(`${ prefix() } ${ Object.keys(result.metafile!.outputs).length } Modules:`);
-        Object.keys(result.metafile!.outputs).forEach((output) => {
-            const size = result.metafile!.outputs[output].bytes;
-            console.log(
-                `${ prefix() } ${ xterm.canaryYellow(output) }: ${ xterm.burntOrange(size.toString()) } bytes`
-            );
         });
 
-        console.log('\n');
-        if (this.config.dev) {
-            this.spawnDev(<Metafile>result.metafile, <Array<string>>this.config.dev);
+        await Promise.allSettled(buildPromises);
+        if(errorList.length) throw new AggregateError(errorList, 'Build failed');
+
+        return results;
+    }
+
+    /**
+     * Triggers the onEnd callback when a variant build completes.
+     *
+     * @param context - The result context containing build output and metadata
+     *
+     * @remarks
+     * Internal handler that safely invokes the user-provided onEnd callback if set.
+     * Called by variant lifecycle providers after each build finishes.
+     *
+     * @since 2.0.0
+     */
+
+    private onEndTrigger(context: ResultContextInterface): void {
+        if(this.onEndCallback) this.onEndCallback(context);
+    }
+
+    /**
+     * Triggers the onStart callback and performs macro analysis before a variant build starts.
+     *
+     * @param context - The build context containing file and variant information
+     *
+     * @returns Promise resolving to the load result after macro metadata analysis
+     *
+     * @throws Error - Propagates errors from macro analysis that aren't AggregateErrors
+     *
+     * @remarks
+     * Internal handler that:
+     * 1. Analyzes macro metadata for the file being built
+     * 2. Invokes the user-provided onStart callback if set
+     * 3. Returns the analysis result to the build pipeline
+     * 4. Converts AggregateErrors to esbuild-compatible error format
+     *
+     * The macro analysis prepares directive information ($$ifdef, $$inline, etc.)
+     * that will be used during the transformation phase.
+     *
+     * @see {@link analyzeMacroMetadata}
+     *
+     * @since 2.0.0
+     */
+
+    private async onStartTrigger(context: BuildContextInterface): Promise<OnLoadResult> {
+        try {
+            const result = await analyzeMacroMetadata(this.variants[context.variantName], context);
+            if(this.onStartCallback) this.onStartCallback(context);
+
+            return result;
+        } catch(error) {
+            const errors: Array<PartialMessage> = [];
+            if(error instanceof AggregateError) {
+                for (const err of error.errors) {
+                    errors.push({
+                        detail: err,
+                        text: err.message
+                    });
+                }
+
+                return { errors };
+            }
+
+            throw error;
         }
     }
 
     /**
-     * Processes and updates entry points based on project dependencies.
-     * This method analyzes the project's dependencies and adjusts entry points configuration as needed.
+     * Disposes and removes variants by name.
      *
-     * @private
+     * @param dispose - Array of variant names to dispose
+     *
+     * @remarks
+     * Cleanly shuts down variant services and removes them from the internal map.
+     * Called during configuration reload to remove variants no longer in config.
+     *
+     * Each variant's dispose method:
+     * - Stops watch mode if active
+     * - Cleans up esbuild contexts
+     * - Releases TypeScript language service resources
+     *
+     * @since 2.0.0
      */
 
-    private async processEntryPoints(): Promise<void> {
-        const esbuild = this.config.esbuild;
-        const meta = await analyzeDependencies(esbuild.entryPoints, esbuild.platform);
-        const rootDir = resolve(this.typescriptModule.config.options.baseUrl ?? '');
-
-        // it pointer and change the esbuild.entryPoints if is object value from configuration !!
-        let entryPoints = extractEntryPoints(esbuild.entryPoints);
-        let entryPointsList = Object.values(entryPoints);
-
-        if (Array.isArray(esbuild.entryPoints) && typeof esbuild.entryPoints[0] === 'string') {
-            entryPoints = {};
-            entryPointsList = [];
+    private disposeVariants(dispose: Array<string>): void {
+        if (dispose.length) {
+            for (const variant of dispose) {
+                this.variants[variant].dispose();
+                delete this.variants[variant];
+            }
         }
+    }
 
-        for (const file in meta.metafile.inputs) {
-            if (entryPointsList.includes(file))
-                continue;
+    /**
+     * Compares two objects and returns keys present in the second but not the first.
+     *
+     * @param obj1 - Reference object (usually new configuration)
+     * @param obj2 - Comparison object (usually existing variants)
+     *
+     * @returns Array of keys present in obj2 but missing in obj1
+     *
+     * @remarks
+     * Used to identify variants that should be disposed during configuration reload.
+     * If a variant exists in the service but not in the new configuration, it's removed.
+     *
+     * @since 2.0.0
+     */
 
-            const resolveFile = resolve(file).replace(rootDir, '.');
-            const fileName = resolveFile.substring(0, resolveFile.lastIndexOf('.'));
-            entryPoints[fileName] = file;
+    private compareKeys(obj1: object, obj2: object): Array<string> {
+        const keys2 = Object.keys(obj2);
+        const onlyInObj2 = keys2.filter(key => !(key in obj1));
+
+        return [ ...onlyInObj2 ];
+    }
+
+    /**
+     * Creates variant service instances from the current configuration.
+     *
+     * @throws xBuildError - When no variants are defined in the configuration
+     *
+     * @remarks
+     * Invoked by the configuration subscription whenever configuration changes.
+     * For each variant in the configuration:
+     * 1. Skips if the variant already exists (prevents recreation)
+     * 2. Creates a new LifecycleProvider with hooks
+     * 3. Attaches onStart and onEnd listeners
+     * 4. Creates VariantService with configuration
+     * 5. Registers macro transformer directive
+     *
+     * The lifecycle hooks enable:
+     * - Build start/end notifications
+     * - Macro analysis and transformation
+     * - Custom plugin integration
+     *
+     * @see {@link VariantService}
+     * @see {@link LifecycleProvider}
+     * @see {@link transformerDirective}
+     *
+     * @since 2.0.0
+     */
+
+    private parseVariants(): void {
+        if(!this.config.variants)
+            throw new xBuildError('Variants are not defined in the configuration');
+
+        for (const name of Object.keys(this.config.variants)) {
+            if (this.variants[name]) continue;
+            const lifecycle = new LifecycleProvider(name, this.argv);
+            lifecycle.onEnd(this.onEndTrigger.bind(this), 'build-service');
+            lifecycle.onStart(this.onStartTrigger.bind(this), 'build-service');
+            this.variants[name] = new VariantService(name, lifecycle, this.config.variants[name], this.argv);
+            lifecycle.onLoad(transformerDirective.bind({}, this.variants[name]), 'build-service');
         }
-
-        esbuild.entryPoints = entryPoints;
     }
 }
