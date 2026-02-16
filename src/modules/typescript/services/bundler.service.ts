@@ -106,33 +106,6 @@ export class BundlerService {
     }
 
     /**
-     * Generates a short, unique random identifier (3 lowercase letters) not present in a given set.
-     *
-     * @param existingNames - set of already used names to avoid collisions
-     * @returns unique 3-letter name
-     *
-     * @remarks
-     * Used internally to avoid name conflicts when flattening namespaces.
-     *
-     * @since 2.0.0
-     */
-
-    private generateRandomName(existingNames: Set<string>): string {
-        const letters = 'abcdefghijklmnopqrstuvwxyz';
-        let name: string;
-
-        do {
-            name = Array.from({ length: 3 }, () =>
-                letters[Math.floor(Math.random() * letters.length)]
-            ).join('');
-        } while (existingNames.has(name));
-
-        existingNames.add(name);
-
-        return name;
-    }
-
-    /**
      * Scans entry point, collects transitive declarations, and writes a bundled file.
      *
      * @param source - entry source file
