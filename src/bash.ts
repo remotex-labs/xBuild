@@ -666,6 +666,8 @@ async function main(): Promise<void> {
     // Parse configuration
     const argvService = inject(ArgvModule);
     const preConfig = argvService.parseConfigFile(process.argv);
+
+    globalThis.$argv = preConfig;
     const config = await configFileProvider(preConfig.config);
     const args = argvService.enhancedParse(process.argv, config.userArgv);
     const userArgs = argvService.parseUserArgv(process.argv, config.userArgv);
