@@ -331,6 +331,35 @@ export async function astProcess(state: StateInterface): Promise<string> {
         const kind = node?.kind;
         if (!kind) continue;
 
+        // Process macro transformations only if file has macros
+        if (hasMacro) {
+            if (kind === ts.SyntaxKind.VariableStatement) {
+                await isVariableStatement(node as VariableStatement, replacements, state);
+            }
+            else if (kind === ts.SyntaxKind.ExpressionStatement) {
+                const exprStmt = node as ExpressionStatement;
+                if (ts.isCallExpression(exprStmt.expression)) {
+                    await isCallExpression(exprStmt, replacements, state);
+                }
+            }
+            else if (kind === ts.SyntaxKind.CallExpression) {
+                const callNode = node as ts.CallExpression;
+                if (ts.isIdentifier(callNode.expression) && callNode.expression.text === MACRO_FUNCTIONS[2]) {
+                    const parent = node.parent;
+                    if (!parent || (!ts.isVariableDeclaration(parent) && !ts.isExpressionStatement(parent))) {
+                        const replacement = await astInlineCallExpression(callNode.arguments, state);
+                        if (replacement !== false) {
+                            replacements.add({
+                                replacement,
+                                end: node.getEnd(),
+                                start: node.getStart(state.sourceFile)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
         if (fnToRemove.size > 0) {
             if (kind === ts.SyntaxKind.CallExpression) {
                 const callNode = node as ts.CallExpression;
@@ -358,35 +387,6 @@ export async function astProcess(state: StateInterface): Promise<string> {
                                     replacement: 'undefined'
                                 });
                             }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Process macro transformations only if file has macros
-        if (hasMacro) {
-            if (kind === ts.SyntaxKind.VariableStatement) {
-                await isVariableStatement(node as VariableStatement, replacements, state);
-            }
-            else if (kind === ts.SyntaxKind.ExpressionStatement) {
-                const exprStmt = node as ExpressionStatement;
-                if (ts.isCallExpression(exprStmt.expression)) {
-                    await isCallExpression(exprStmt, replacements, state);
-                }
-            }
-            else if (kind === ts.SyntaxKind.CallExpression) {
-                const callNode = node as ts.CallExpression;
-                if (ts.isIdentifier(callNode.expression) && callNode.expression.text === MACRO_FUNCTIONS[2]) {
-                    const parent = node.parent;
-                    if (!parent || (!ts.isVariableDeclaration(parent) && !ts.isExpressionStatement(parent))) {
-                        const replacement = await astInlineCallExpression(callNode.arguments, state);
-                        if (replacement !== false) {
-                            replacements.add({
-                                replacement,
-                                end: node.getEnd(),
-                                start: node.getStart(state.sourceFile)
-                            });
                         }
                     }
                 }
