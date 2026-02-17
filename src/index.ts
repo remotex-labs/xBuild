@@ -274,7 +274,8 @@ declare global {
      * @since 2.0.0
      */
 
-    function $$ifdef<T>(define: DefineType, callback: T): T;
+    function $$ifdef<T>(define: DefineType, callback: T):
+        T extends (...args: infer A) => infer R ? (...args: A) => R | undefined  : T | undefined;
 
     /**
      * Conditional inclusion macro that includes code when a definition is falsy or undefined.
@@ -337,7 +338,8 @@ declare global {
      * @since 2.0.0
      */
 
-    function $$ifndef<T>(define: DefineType, callback: T): T;
+    function $$ifndef<T>(define: DefineType, callback: T):
+        T extends (...args: infer A) => infer R ? (...args: A) => R | undefined  : T | undefined;
 
     /**
      * Inline evaluation macro that executes code at build time and replaces it with the result.
@@ -411,7 +413,7 @@ declare global {
      * @since 2.0.0
      */
 
-    function $$inline(callback: unknown): string;
+    function $$inline(callback: unknown): string | undefined;
 
     /**
      * Pre-configuration CLI arguments snapshot (bootstrap argv).

@@ -19,7 +19,7 @@ import { FilesModel } from '@typescript/models/files.model';
  */
 
 const MACRO_PREFIX = '$$';
-const IFDEF_REGEX = /(?:(?:export\s+)?(?:const|let|var)\s+([\w$]+)\s*=\s*)?\$\$(ifdef|ifndef)\s*\(\s*['"]([^'"]+)['"]/g;
+const IFDEF_REGEX = /(?:(?:export\s+)?(?:const|let|var)\s+([\w$]+)\s*=\s*)?\$\$(ifdef|ifndef|inline)\s*\(\s*['"]([^'"]+)['"]/g;
 
 /**
  * Calculates the line and column position of a macro name within source text.
@@ -227,7 +227,7 @@ export async function analyzeMacroMetadata(variant: VariantService, context: Bui
     const filesModel = inject(FilesModel);
     const defines = variant.config.define ?? {};
 
-    const files = Object.keys(variant.dependencies);
+    const files = Object.values(variant.dependencies ?? {});
     if(!files) return Promise.resolve({ warnings });
     for (const file of files) {
         const snapshot = filesModel.getOrTouchFile(file);

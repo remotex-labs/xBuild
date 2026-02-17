@@ -5,6 +5,7 @@
 import type { MockState } from '@remotex-labs/xjet';
 import type { VariantService } from '@services/variant.service';
 import type { StateInterface } from '@directives/interfaces/macros-directive.interface';
+import type { MacrosStaeInterface } from '@directives/interfaces/analyze-directive.interface';
 import type { LoadContextInterface } from '@providers/interfaces/lifecycle-provider.interface';
 
 /**
@@ -243,6 +244,10 @@ describe('macros.directive', () => {
     });
 
     describe('astProcess', () => {
+        beforeEach(() => {
+            state.stage.defineMetadata.filesWithMacros.add('test.ts');
+        });
+
         test('returns original content when no replacements', async () => {
             parseCode('const x = 1;');
             const result = await astProcess(state);
@@ -325,7 +330,6 @@ describe('macros.directive', () => {
                 .mockResolvedValueOnce('2')
                 .mockResolvedValueOnce(false); // nested call - return false to skip
 
-
             const result = await astProcess(state);
 
             // Verify both mocks were called
@@ -363,7 +367,7 @@ describe('macros.directive', () => {
 
     describe('transformerDirective', () => {
         let variant: VariantService;
-        let context: LoadContextInterface;
+        let context: LoadContextInterface & { stage: MacrosStaeInterface };
 
         beforeEach(() => {
             xJet.resetAllMocks();
@@ -414,6 +418,7 @@ describe('macros.directive', () => {
         });
 
         test('processes TypeScript files', async () => {
+            context.stage.defineMetadata.filesWithMacros.add('test.ts');
             context.contents = Buffer.from('const $$debug = $$ifdef("DEBUG", () => {});');
             astDefineVariableMock.mockReturnValue('function $$debug() {}');
 
@@ -430,6 +435,7 @@ describe('macros.directive', () => {
 
         test('processes JavaScript files', async () => {
             context.args.path = 'test.js';
+            context.stage.defineMetadata.filesWithMacros.add('test.js');
             context.contents = Buffer.from('const x = $$inline(() => 42);');
 
             // This is a VariableStatement, so it calls astInlineVariable

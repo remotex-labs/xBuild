@@ -127,7 +127,7 @@ export async function isVariableStatement(node: VariableStatement, replacements:
         if (!MACRO_FUNCTIONS.includes(fnName)) continue;
 
         const argsCount = fnName == MACRO_FUNCTIONS[2] ? 1 : 2;
-        if(!MACRO_FUNCTIONS.includes(fnName)) return;
+        if (!MACRO_FUNCTIONS.includes(fnName)) continue;
         if (init.arguments.length < argsCount || init.arguments.length > argsCount) {
             throw new Error(`Invalid macro call: ${ fnName } with ${ init.arguments.length } arguments`);
 
@@ -220,7 +220,7 @@ export async function isCallExpression(
 
     const fnName = callExpr.expression.text;
     const argsCount = fnName == MACRO_FUNCTIONS[2] ? 1 : 2;
-    if(!MACRO_FUNCTIONS.includes(fnName)) return;
+    if (!MACRO_FUNCTIONS.includes(fnName)) return;
     if (callExpr.arguments.length < argsCount || callExpr.arguments.length > argsCount) {
         throw new Error(`Invalid macro call: ${ fnName } with ${ callExpr.arguments.length } arguments`);
         // replacements.add({
@@ -319,32 +319,22 @@ export async function isCallExpression(
 export async function astProcess(state: StateInterface): Promise<string> {
     const replacements: Set<SubstInterface> = new Set();
     const fnToRemove = state.stage.defineMetadata.disabledMacroNames;
+    const hasMacro = state.stage.defineMetadata.filesWithMacros.has(state.sourceFile.fileName);
 
-    const visit = async (node: ts.Node): Promise<void> => {
-        if (ts.isVariableStatement(node)) {
-            await isVariableStatement(node, replacements, state);
-        } else if (ts.isExpressionStatement(node) && ts.isCallExpression(node.expression)) {
-            await isCallExpression(node, replacements, state);
-        } else if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === MACRO_FUNCTIONS[2]) {
-            const parent = node.parent;
-            if (!parent || (!ts.isVariableDeclaration(parent) && !ts.isExpressionStatement(parent))) {
-                const replacement = await astInlineCallExpression(node.arguments, state);
-                if (replacement !== false) {
-                    replacements.add({
-                        replacement,
-                        end: node.getEnd(),
-                        start: node.getStart(state.sourceFile)
-                    });
-                }
-            }
-        } else if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && fnToRemove.has(node.expression.text)) {
-            replacements.add({ start: node.getStart(state.sourceFile), end: node.getEnd(), replacement: 'undefined' });
-        } else if (ts.isIdentifier(node) && fnToRemove.has(node.text)) {
-            const parent = node.parent;
-            const parentText = parent?.getText(state.sourceFile);
+    if (!hasMacro && fnToRemove.size === 0) {
+        return state.contents;
+    }
 
-            if (!parent || !ts.isCallExpression(parent) || parent.expression !== node) {
-                if (!parentText || MACRO_FUNCTIONS.every(key => !parentText.includes(key))) {
+    const stack: Array<ts.Node> = [ state.sourceFile ];
+    while (stack.length > 0) {
+        const node = stack.pop();
+        const kind = node?.kind;
+        if (!kind) continue;
+
+        if (fnToRemove.size > 0) {
+            if (kind === ts.SyntaxKind.CallExpression) {
+                const callNode = node as ts.CallExpression;
+                if (ts.isIdentifier(callNode.expression) && fnToRemove.has(callNode.expression.text)) {
                     replacements.add({
                         start: node.getStart(state.sourceFile),
                         end: node.getEnd(),
@@ -352,15 +342,63 @@ export async function astProcess(state: StateInterface): Promise<string> {
                     });
                 }
             }
+            else if (kind === ts.SyntaxKind.Identifier) {
+                const identifier = node as ts.Identifier;
+                if (fnToRemove.has(identifier.text)) {
+                    const parent = node.parent ?? node;
+
+                    if (parent && !ts.isImportSpecifier(parent) && !ts.isExportSpecifier(parent)) {
+                        const parentText = parent?.getText(state.sourceFile);
+
+                        if (!ts.isCallExpression(parent) || parent.expression !== node) {
+                            if (!parentText || MACRO_FUNCTIONS.every(key => !parentText.includes(key))) {
+                                replacements.add({
+                                    start: node.getStart(state.sourceFile),
+                                    end: node.getEnd(),
+                                    replacement: 'undefined'
+                                });
+                            }
+                        }
+                    }
+                }
+            }
         }
 
+        // Process macro transformations only if file has macros
+        if (hasMacro) {
+            if (kind === ts.SyntaxKind.VariableStatement) {
+                await isVariableStatement(node as VariableStatement, replacements, state);
+            }
+            else if (kind === ts.SyntaxKind.ExpressionStatement) {
+                const exprStmt = node as ExpressionStatement;
+                if (ts.isCallExpression(exprStmt.expression)) {
+                    await isCallExpression(exprStmt, replacements, state);
+                }
+            }
+            else if (kind === ts.SyntaxKind.CallExpression) {
+                const callNode = node as ts.CallExpression;
+                if (ts.isIdentifier(callNode.expression) && callNode.expression.text === MACRO_FUNCTIONS[2]) {
+                    const parent = node.parent;
+                    if (!parent || (!ts.isVariableDeclaration(parent) && !ts.isExpressionStatement(parent))) {
+                        const replacement = await astInlineCallExpression(callNode.arguments, state);
+                        if (replacement !== false) {
+                            replacements.add({
+                                replacement,
+                                end: node.getEnd(),
+                                start: node.getStart(state.sourceFile)
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // ⚡ Push children to stack (reverse order to maintain left-to-right traversal)
         const children = node.getChildren(state.sourceFile);
-        for (const child of children) {
-            await visit(child);
+        for (let i = children.length - 1; i >= 0; i--) {
+            stack.push(children[i]);
         }
-    };
-
-    await visit(state.sourceFile);
+    }
 
     if (replacements.size === 0) return state.contents;
     const replacementsArray = Array.from(replacements);
