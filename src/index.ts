@@ -275,7 +275,7 @@ declare global {
      */
 
     function $$ifdef<T>(define: DefineType, callback: T):
-        T extends (...args: infer A) => infer R ? (...args: A) => R | undefined  : T | undefined;
+        T extends (...args: infer A) => infer R ? (...args: A) => R | undefined : T | undefined;
 
     /**
      * Conditional inclusion macro that includes code when a definition is falsy or undefined.
@@ -339,7 +339,7 @@ declare global {
      */
 
     function $$ifndef<T>(define: DefineType, callback: T):
-        T extends (...args: infer A) => infer R ? (...args: A) => R | undefined  : T | undefined;
+        T extends (...args: infer A) => infer R ? (...args: A) => R | undefined : T | undefined;
 
     /**
      * Inline evaluation macro that executes code at build time and replaces it with the result.
