@@ -64,7 +64,7 @@ import type { LifecycleStageInterface } from '@providers/interfaces/lifecycle-pr
  * ```
  *
  * @see {@link analyzeMacroMetadata} for the function that generates this metadata
- * @see {@link MacrosStaeInterface} for the stage interface that contains this metadata
+ * @see {@link MacrosStateInterface} for the stage interface that contains this metadata
  *
  * @since 2.0.0
  */
@@ -122,6 +122,59 @@ export interface MacrosMetadataInterface {
      */
 
     disabledMacroNames: Set<string>;
+}
+
+/**
+ * Describes a single text replacement produced by macro analysis/transformation.
+ *
+ * @remarks
+ * This is a small helper contract used to capture:
+ * - the original source fragment ({@link MacroReplacementInterface.source}), and
+ * - the text that should replace it ({@link MacroReplacementInterface.replacement}).
+ *
+ * It is useful for debugging, reporting, and applying deterministic transformations.
+ *
+ * @example Recording a replacement
+ * ```ts
+ * const r: MacroReplacementInterface = {
+ *   source: "$$ifdef('DEBUG', () => log())",
+ *   replacement: "undefined"
+ * };
+ * ```
+ *
+ * @since 2.0.0
+ */
+
+export interface MacroReplacementInterface {
+    /**
+     * Original source text that should be replaced.
+     *
+     * @remarks
+     * Typically, this is an exact substring extracted from a file (e.g., a macro call,
+     * a macro variable initializer, or any other segment discovered during analysis).
+     *
+     * Consumers can use this to:
+     * - build diagnostics ("what was replaced?")
+     * - provide debug output / reports
+     * - verify transformations are deterministic
+     *
+     * @since 2.0.0
+     */
+
+    source: string;
+
+    /**
+     * Replacement text that should be substituted in place of {@link source}.
+     *
+     * @remarks
+     * This is the final text representation that should appear in the transformed output.
+     * For disabled macros this is often `'undefined'`, but it may also be an inlined constant,
+     * rewritten function body, or other generated code.
+     *
+     * @since 2.0.0
+     */
+
+    replacement: string;
 }
 
 /**
@@ -186,7 +239,7 @@ export interface MacrosMetadataInterface {
  * @since 2.0.0
  */
 
-export interface MacrosStaeInterface extends LifecycleStageInterface {
+export interface MacrosStateInterface extends LifecycleStageInterface {
     /**
      * Macro analysis metadata for the current build.
      *
@@ -201,5 +254,30 @@ export interface MacrosStaeInterface extends LifecycleStageInterface {
      * @since 2.0.0
      */
 
-    defineMetadata: MacrosMetadataInterface
+    defineMetadata: MacrosMetadataInterface;
+
+    /**
+     * Optional list of macro-driven source replacements recorded during transformation.
+     *
+     * @remarks
+     * When present, this can be used for:
+     * - debugging (“what exactly changed?”),
+     * - producing transformation reports, or
+     * - testing/verifying deterministic output.
+     *
+     * Each entry describes the original fragment and its replacement via
+     * {@link MacroReplacementInterface}.
+     *
+     * @example
+     * ```ts
+     * stage.replacementInfo = [
+     *   { source: "$$inline(() => 1 + 1)", replacement: "2" },
+     *   { source: "$$debug()", replacement: "undefined" }
+     * ];
+     * ```
+     *
+     * @since 2.0.0
+     */
+
+    replacementInfo?: Array<MacroReplacementInterface>;
 }
