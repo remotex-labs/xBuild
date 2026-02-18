@@ -69,16 +69,16 @@ export class VMRuntimeError extends xBuildBaseError {
         super(originalError.message, 'VMRuntimeError');
 
         // Handle AggregateError
-        if (originalError instanceof AggregateError && Array.isArray(originalError.errors)) {
+        if (this.originalError instanceof AggregateError && Array.isArray(this.originalError.errors)) {
             // Process nested errors
-            this.errors = originalError.errors.map(error =>
+            this.errors = this.originalError.errors.map(error =>
                 new VMRuntimeError(error, options)
             );
         }
 
-        this.stack = originalError.stack;
-        this.message = originalError.message;
-        this.reformatStack(originalError, options);
+        this.stack = this.originalError.stack;
+        this.message = this.originalError.message;
+        this.reformatStack(this.originalError, options);
     }
 
     /**

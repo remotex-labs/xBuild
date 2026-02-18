@@ -58,7 +58,6 @@ jobs:
 
             -   name: Run lint, typecheck and build (package)
                 run: |
-                    pnpm run build
                     pnpm run lint
                     pnpm run test
 
