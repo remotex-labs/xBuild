@@ -253,8 +253,6 @@ describe('transformer.directive', () => {
             const replacements = new Set<any>();
             const node = state.sourceFile.statements[0] as ts.VariableStatement;
 
-            xJet.error(await isVariableStatement(node, replacements, state));
-
             await expect(isVariableStatement(node, replacements, state))
                 .resolves.toBeFalsy();
         });
