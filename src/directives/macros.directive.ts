@@ -189,6 +189,7 @@ export async function isVariableStatement(node: VariableStatement, replacements:
         if (!call) continue;
 
         const fnName = (call.expression as ts.Identifier).text;
+        if (!MACRO_FUNCTIONS.includes(fnName)) continue;
         if (call.arguments.length !== expectedArgCount(fnName)) {
             const { line, character } = state.sourceFile.getLineAndCharacterOfPosition(call.getStart(state.sourceFile));
             throw new esBuildError({

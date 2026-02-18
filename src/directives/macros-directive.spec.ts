@@ -253,8 +253,10 @@ describe('transformer.directive', () => {
             const replacements = new Set<any>();
             const node = state.sourceFile.statements[0] as ts.VariableStatement;
 
+            xJet.error(await isVariableStatement(node, replacements, state));
+
             await expect(isVariableStatement(node, replacements, state))
-                .rejects.toThrow('Invalid macro call');
+                .resolves.toBeFalsy();
         });
 
         test('skips variables with no initializer', async () => {
