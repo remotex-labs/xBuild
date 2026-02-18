@@ -410,7 +410,7 @@ export function logBuildIssues(issues: Array<IssueType>, issueType: 'Errors' | '
     }
 
     buffer.push('');
-    buffer[0] = `\n ${ color(issueType) } (${ totalIssueCount })`;
+    buffer[0] = `\n ${ color(issueType) } (${ totalIssueCount })\n`;
 
     console.log(buffer.join('\n'));
 }
@@ -680,7 +680,7 @@ export function logBuildStart({ variantName }: BuildContextInterface): void {
  * @since 2.0.0
  */
 
-export function logBuildEnd({ variantName, duration, buildResult }: ResultContextInterface): void {
+export function logBuildEnd({ variantName, duration, buildResult, stage }: ResultContextInterface): void {
     const { errors, warnings, metafile } = enhancedBuildResult(buildResult);
     const isSuccess = !!metafile;
 
@@ -693,6 +693,8 @@ export function logBuildEnd({ variantName, duration, buildResult }: ResultContex
 
     logBuildIssues(errors, 'Errors');
     logBuildIssues(warnings, 'Warnings');
+
+    console.log(stage)
 
     if (isSuccess) {
         logBuildOutputs(metafile);
