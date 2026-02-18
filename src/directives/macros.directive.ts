@@ -217,7 +217,7 @@ export async function isVariableStatement(node: VariableStatement, replacements:
         }
     }
 
-    return !!replacement;
+    return replacement !== false;
 }
 
 /**
@@ -307,7 +307,7 @@ export async function isCallExpression(
         });
     }
 
-    return !!replacement;
+    return replacement !== false;
 }
 
 /**
