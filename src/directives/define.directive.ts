@@ -3,8 +3,8 @@
  */
 
 import type { VariableDeclaration, CallExpression } from 'typescript';
+import type { SourceFile, Node, ArrowFunction, FunctionExpression } from 'typescript';
 import type { DefinesType, StateInterface } from './interfaces/macros-directive.interface';
-import type { SourceFile, Node, NodeArray, Expression, ArrowFunction, FunctionExpression } from 'typescript';
 
 /**
  * Imports
@@ -199,6 +199,8 @@ function getFunctionBody(node: ArrowFunction | FunctionExpression, sourceFile: S
  *
  * @param node - The AST node to transform
  * @param sourceFile - The source file containing the node
+ * @param prefix - The prefix to prepend before the IIFE; defaults to `''`
+ * @param suffix - The suffix to append after the IIFE; defaults to `'();'`
  *
  * @returns A string containing the IIFE expression
  *
@@ -209,10 +211,15 @@ function getFunctionBody(node: ArrowFunction | FunctionExpression, sourceFile: S
  * **For function-like nodes** (arrow functions and function expressions):
  * - Wraps directly: `(function)()` or `(() => value)()`
  * - Preserves the function as-is
+ * - Note: `prefix` and `suffix` are not applied to function-like nodes
  *
  * **For other node types** (expressions, statements):
  * - Wraps in an arrow function IIFE with explicit return
  * - Ensures the value is returned for use in expressions
+ * - Applies `prefix` before and `suffix` after the IIFE
+ *
+ * The `prefix` and `suffix` parameters allow customization of the IIFE syntax, useful when
+ * the IIFE needs additional context, chaining, or specific wrapping.
  *
  * Used when conditional macros appear in expression contexts where a function
  * declaration is not valid syntax.
@@ -238,17 +245,25 @@ function getFunctionBody(node: ArrowFunction | FunctionExpression, sourceFile: S
  * // '(() => { return 1 + 1; })()'
  * ```
  *
+ * @example Custom prefix and suffix
+ * ```ts
+ * const node = parseExpression('getValue()');
+ * const result = transformToIIFE(node, sourceFile, 'await ', '.catch(handleError)');
+ * // 'await (() => { return getValue(); })().catch(handleError)'
+ * ```
+ *
  * @see {@link astDefineCallExpression} for the calling context
  *
  * @since 2.0.0
  */
 
-export function transformToIIFE(node: Node, sourceFile: SourceFile): string {
+export function transformToIIFE(node: Node, sourceFile: SourceFile, prefix: string = '', suffix: string = '();'): string {
     if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
-        return `(${ node.getText(sourceFile) })()`;
+        return `${ prefix }(${ node.getText(sourceFile) })${ suffix }`;
     }
 
-    return `(() => { return ${ node.getText(sourceFile) }; })()`;
+    if(prefix) return `${ prefix }${ node.getText(sourceFile) }`;
+    else return `(() => { return ${ node.getText(sourceFile) }; })${ suffix }`;
 }
 
 /**
@@ -380,7 +395,7 @@ export function astDefineVariable(
     const defineName = defineArg.text;
 
     if (!isDefinitionMet(defineName, fnName, state.defines)) {
-        return '';
+        return 'undefined';
     }
 
     const varName = decl.name.getText(state.sourceFile);
@@ -389,74 +404,92 @@ export function astDefineVariable(
 }
 
 /**
- * Transforms a conditional macro call expression into an IIFE or returns empty string if excluded.
+ * Transforms a conditional macro call expression into a constant assignment with an IIFE or returns empty string if excluded.
  *
- * @param args - The arguments passed to the macro call
- * @param fnName - The macro function name (`'$$ifdef'` or `'$$ifndef'`)
+ * @param decl - The variable declaration node containing the macro
+ * @param init - The call expression node representing the macro call
+ * @param hasExport - Whether the variable declaration has an `export` modifier
  * @param state - The macro transformation state containing definitions and source file
+ * @param outerSuffix - Optional suffix to append after the IIFE invocation
  *
- * @returns The transformed IIFE string, empty string if excluded, or `false` if invalid
+ * @returns The transformed constant assignment string, empty string if excluded, or `false` if invalid
  *
  * @remarks
- * This function processes standalone conditional macro calls that appear in expression contexts:
+ * This function processes conditional macro call expressions that are assigned to constants:
  * ```ts
- * console.log($$ifdef('DEBUG', () => "debug mode"));
- * const value = $$ifndef('PRODUCTION', () => devValue);
+ * const $$value = $$ifdef('DEBUG', () => "debug mode");
+ * export const $$config = $$ifndef('PRODUCTION', () => devConfig);
  * ```
  *
- * Unlike {@link astDefineVariable}, this handles macros that are not part of variable
- * declarations but are used directly as expressions.
+ * Unlike {@link astDefineVariable}, which transforms macros into function declarations,
+ * this handles macros that should remain as constant assignments with IIFE values.
  *
  * The transformation process:
  * 1. Validates that the first argument is a string literal (the definition name)
- * 2. Checks if the definition condition is met using {@link isDefinitionMet}
- * 3. If included: transforms the callback into an IIFE using {@link transformToIIFE}
- * 4. If excluded: returns an empty string (macro evaluates to undefined)
- * 5. If invalid: returns `false` (non-string definition argument)
+ * 2. Extracts the macro function name (`$$ifdef` or `$$ifndef`)
+ * 3. Checks if the definition condition is met using {@link isDefinitionMet}
+ * 4. If included: transforms the callback into a constant assignment with IIFE using {@link transformToIIFE}
+ * 5. If excluded: returns an empty string (macro is stripped from output)
+ * 6. If invalid: returns `false` (non-string definition argument)
+ *
+ * The variable name from the declaration becomes the constant name in the output,
+ * and the `hasExport` parameter controls whether the constant is exported.
  *
  * @example Included expression (DEBUG=true)
  * ```ts
- * // Source: console.log($$ifdef('DEBUG', () => "debugging"));
+ * // Source: const $$debugMsg = $$ifdef('DEBUG', () => "debugging");
  * // With: { DEBUG: true }
- * const result = astDefineCallExpression(args, '$$ifdef', state);
- * // '(() => "debugging")()'
- * // Result: console.log((() => "debugging")());
+ * const result = astDefineCallExpression(decl, init, false, state);
+ * // 'const $$debugMsg = (() => { return "debugging"; })();'
  * ```
  *
  * @example Excluded expression (DEBUG=false)
  * ```ts
- * // Source: console.log($$ifdef('DEBUG', () => "debugging"));
+ * // Source: const $$debugMsg = $$ifdef('DEBUG', () => "debugging");
  * // With: { DEBUG: false }
- * const result = astDefineCallExpression(args, '$$ifdef', state);
+ * const result = astDefineCallExpression(decl, init, false, state);
  * // ''
- * // Result: console.log();
  * ```
  *
- * @example Using `$$ifndef`
+ * @example Exported constant
  * ```ts
- * // Source: const url = $$ifndef('PRODUCTION', () => 'http://localhost');
+ * // Source: export const $$apiUrl = $$ifndef('PRODUCTION', () => 'http://localhost');
  * // With: { PRODUCTION: false }
- * const result = astDefineCallExpression(args, '$$ifndef', state);
- * // '(() => "http://localhost")()'
+ * const result = astDefineCallExpression(decl, init, true, state);
+ * // 'export const $$apiUrl = (() => { return "http://localhost"; })();'
+ * ```
+ *
+ * @example With custom suffix
+ * ```ts
+ * // Source: const $$data = $$ifdef('FEATURE', () => fetchData());
+ * // With: { FEATURE: true }
+ * const result = astDefineCallExpression(decl, init, false, state, '.then(process)');
+ * // 'const $$data = (() => { return fetchData(); })().then(process)'
  * ```
  *
  * @see {@link isDefinitionMet} for condition evaluation
  * @see {@link transformToIIFE} for transformation logic
- * @see {@link astDefineVariable} for variable declaration handling
+ * @see {@link astDefineVariable} for function declaration handling
  *
  * @since 2.0.0
  */
 
-export function astDefineCallExpression(args: NodeArray<Expression>, fnName: string, state: StateInterface): string | false {
-    const [ defineArg, callbackArg ] = args;
+export function astDefineCallExpression(
+    init: CallExpression, state: StateInterface, decl?: VariableDeclaration, hasExport: boolean = false, outerSuffix?: string
+): string | false {
+    const [ defineArg, callbackArg ] = init.arguments;
 
     if (!ts.isStringLiteral(defineArg)) return false;
 
     const defineName = defineArg.text;
+    const fnName = (init.expression as ts.Identifier).text;
+    if (!isDefinitionMet(defineName, fnName, state.defines)) return '';
 
-    if (!isDefinitionMet(defineName, fnName, state.defines)) {
-        return '';
+    let constPrefix = '';
+    const varName = decl?.name.getText(state.sourceFile);
+    if(varName) {
+        constPrefix = hasExport ? `export const ${ varName } = ` : `const ${ varName } = `;
     }
 
-    return transformToIIFE(callbackArg, state.sourceFile);
+    return transformToIIFE(callbackArg, state.sourceFile, constPrefix, outerSuffix);
 }
