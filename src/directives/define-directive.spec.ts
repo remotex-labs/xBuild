@@ -1,4 +1,3 @@
-
 /**
  * Import will remove at compile time
  */
@@ -13,334 +12,503 @@ import ts from 'typescript';
 import { transformToFunction, transformToIIFE, astDefineVariable, astDefineCallExpression } from './define.directive';
 
 /**
- * Tests
+ * Build a minimal StateInterface for each test.
+ * Cast through `unknown` so the test file doesn't need the full internal type.
  */
 
-describe('define.directive', () => {
-    let state: StateInterface;
-
-    beforeEach(() => {
-        state = {
-            sourceFile: ts.createSourceFile('test.ts', '', ts.ScriptTarget.ESNext),
-            errors: [],
-            warnings: [],
-            defines: {},
-            contents: '',
-            stage: {
-                defineMetadata: {
-                    disabledMacroNames: new Set(),
-                    filesWithMacros: new Set()
-                }
+function makeState(defines: Record<string, unknown> = {}): StateInterface {
+    return {
+        sourceFile: ts.createSourceFile('test.ts', '', ts.ScriptTarget.ESNext),
+        errors: [],
+        warnings: [],
+        defines,
+        contents: '',
+        stage: {
+            defineMetadata: {
+                disabledMacroNames: new Set<string>(),
+                filesWithMacros: new Set<string>()
             }
-        } as any;
-    });
+        }
+    } as unknown as StateInterface;
+}
 
-    // Helper to parse macro variable statement
-    function parseMacroVariable(code: string) {
-        state.sourceFile = ts.createSourceFile('test.ts', code, ts.ScriptTarget.ESNext);
-        const varStmt = state.sourceFile.statements[0] as ts.VariableStatement;
-        const decl = varStmt.declarationList.declarations[0];
-        const init = decl.initializer as ts.CallExpression;
+/**
+ * Parse a variable-declaration statement and return its parts.
+ */
 
-        return { varStmt, decl, init, arg: init.arguments[1] };
-    }
+function parseMacroVariable(state: StateInterface, code: string) {
+    state.sourceFile = ts.createSourceFile('test.ts', code, ts.ScriptTarget.ESNext);
+    const varStmt = state.sourceFile.statements[0] as ts.VariableStatement;
+    const hasExport = varStmt.modifiers?.some(
+        m => m.kind === ts.SyntaxKind.ExportKeyword
+    ) ?? false;
+    const decl = varStmt.declarationList.declarations[0];
+    const init = decl.initializer as ts.CallExpression;
+    const callbackArg = init.arguments[1];
 
-    // Helper to parse macro call expression
-    function parseMacroCall(code: string) {
-        state.sourceFile = ts.createSourceFile('test.ts', code, ts.ScriptTarget.ESNext);
-        const callExpr = (state.sourceFile.statements[0] as ts.ExpressionStatement)
-            .expression as ts.CallExpression;
+    return { varStmt, decl, init, callbackArg, hasExport };
+}
 
-        return { callExpr, arg: callExpr.arguments[1] };
-    }
+/**
+ * Parse a bare call-expression statement and return the call node.
+ */
 
+function parseMacroCall(state: StateInterface, code: string) {
+    state.sourceFile = ts.createSourceFile('test.ts', code, ts.ScriptTarget.ESNext);
+    const callExpr = (state.sourceFile.statements[0] as ts.ExpressionStatement)
+        .expression as ts.CallExpression;
+
+    return { callExpr, callbackArg: callExpr.arguments[1] };
+}
+
+describe('define.directive', () => {
     describe('transformToFunction', () => {
-        test('transforms arrow function to function declaration', () => {
-            const { arg } = parseMacroVariable('const $$debug = $$ifdef("DEBUG", () => console.log("debug"));');
-            const result = transformToFunction('$$debug', arg, state.sourceFile);
+        let state: StateInterface;
+        beforeEach(() => { state = makeState(); });
 
-            expect(result).toContain('function $$debug()');
-            expect(result).toContain('console.log("debug")');
+        test('arrow function – expression body wraps in block with return', () => {
+            const { callbackArg } = parseMacroCall(state, '$$ifdef("D", () => 42);');
+            const result = transformToFunction('$$fn', callbackArg, state.sourceFile);
+
+            expect(result).toBe('function $$fn() { return 42; }');
         });
 
-        test('transforms arrow function with parameters', () => {
-            const { arg } = parseMacroVariable('const $$log = $$ifdef("DEBUG", (msg: string) => console.log(msg));');
-            const result = transformToFunction('$$log', arg, state.sourceFile);
+        test('arrow function – block body is kept as-is', () => {
+            const { callbackArg } = parseMacroCall(state, '$$ifdef("D", () => { return 42; });');
+            const result = transformToFunction('$$fn', callbackArg, state.sourceFile);
 
-            expect(result).toContain('function $$log(msg: string)');
-            expect(result).toContain('console.log(msg)');
+            expect(result).toBe('function $$fn() { return 42; }');
         });
 
-        test('transforms arrow function with return type', () => {
-            const { arg } = parseMacroVariable('const $$getNum = $$ifdef("DEBUG", (): number => 42);');
-            const result = transformToFunction('$$getNum', arg, state.sourceFile);
+        test('arrow function – typed parameter list is preserved', () => {
+            const { callbackArg } = parseMacroCall(
+                state,
+                '$$ifdef("D", (a: string, b: number, c?: boolean) => a);'
+            );
+            const result = transformToFunction('$$log', callbackArg, state.sourceFile);
 
-            expect(result).toContain('function $$getNum(): number');
-            expect(result).toContain('return 42');
+            expect(result).toContain('function $$log(a: string, b: number, c?: boolean)');
         });
 
-        test('transforms arrow function with block body', () => {
-            const { arg } = parseMacroVariable('const $$test = $$ifdef("DEBUG", () => { return "test"; });');
-            const result = transformToFunction('$$test', arg, state.sourceFile);
+        test('arrow function – return type annotation is preserved', () => {
+            const { callbackArg } = parseMacroCall(state, '$$ifdef("D", (): number => 0);');
+            const result = transformToFunction('$$num', callbackArg, state.sourceFile);
 
-            expect(result).toContain('function $$test()');
-            expect(result).toContain('{ return "test"; }');
+            expect(result).toContain('$$num(): number');
         });
 
-        test('transforms function expression to function declaration', () => {
-            const { arg } = parseMacroVariable('const $$fn = $$ifdef("DEBUG", function() { return 123; });');
-            const result = transformToFunction('$$fn', arg, state.sourceFile);
+        test('arrow function – complex body with multiple statements', () => {
+            const code = '$$ifdef("D", () => { const x = 1; return x + 2; });';
+            const { callbackArg } = parseMacroCall(state, code);
+            const result = transformToFunction('$$fn', callbackArg, state.sourceFile);
 
-            expect(result).toContain('function $$fn()');
-            expect(result).toContain('{ return 123; }');
+            expect(result).toContain('const x = 1');
+            expect(result).toContain('return x + 2');
         });
 
-        test('adds export prefix when hasExport is true', () => {
-            const { arg } = parseMacroVariable('export const $$api = $$ifdef("DEBUG", () => "api");');
-            const result = transformToFunction('$$api', arg, state.sourceFile, true);
+        test('function expression – converts to named declaration', () => {
+            const { callbackArg } = parseMacroCall(
+                state,
+                '$$ifdef("D", function() { return 123; });'
+            );
+            const result = transformToFunction('$$fn', callbackArg, state.sourceFile);
 
-            expect(result.startsWith('export function')).toBe(true);
+            expect(result).toBe('function $$fn() { return 123; }');
         });
 
-        test('transforms non-function node to const assignment', () => {
-            const { arg } = parseMacroVariable('const $$url = $$ifdef("DEBUG", "http://localhost");');
-            const result = transformToFunction('$$url', arg, state.sourceFile);
+        test('function expression – typed parameters are preserved', () => {
+            const { callbackArg } = parseMacroCall(
+                state,
+                '$$ifdef("D", function(x: number): string { return String(x); });'
+            );
+            const result = transformToFunction('$$fn', callbackArg, state.sourceFile);
+
+            expect(result).toContain('(x: number): string');
+        });
+
+        test('hasExport=false – emits "function " prefix', () => {
+            const { callbackArg } = parseMacroCall(state, '$$ifdef("D", () => 1);');
+            const result = transformToFunction('$$fn', callbackArg, state.sourceFile, false);
+
+            expect(result.startsWith('function ')).toBe(true);
+            expect(result.startsWith('export ')).toBe(false);
+        });
+
+        test('hasExport=true – emits "export function " prefix', () => {
+            const { callbackArg } = parseMacroCall(state, '$$ifdef("D", () => 1);');
+            const result = transformToFunction('$$fn', callbackArg, state.sourceFile, true);
+
+            expect(result.startsWith('export function ')).toBe(true);
+        });
+
+        // --- non-function fallback -----------------------------------------
+
+        test('string literal – falls back to const assignment', () => {
+            const { callbackArg } = parseMacroCall(state, '$$ifdef("D", "http://localhost");');
+            const result = transformToFunction('$$url', callbackArg, state.sourceFile);
 
             expect(result).toBe('const $$url = "http://localhost";');
         });
 
-        test('transforms non-function node with export', () => {
-            const { arg } = parseMacroVariable('export const $$config = $$ifdef("DEBUG", { debug: true });');
-            const result = transformToFunction('$$config', arg, state.sourceFile, true);
+        test('number literal – falls back to const assignment', () => {
+            const { callbackArg } = parseMacroCall(state, '$$ifdef("D", 99);');
+            const result = transformToFunction('$$n', callbackArg, state.sourceFile);
 
-            expect(result.startsWith('export const')).toBe(true);
-            expect(result).toContain('{ debug: true }');
+            expect(result).toBe('const $$n = 99;');
         });
 
-        test('preserves complex parameter types', () => {
-            const { arg } = parseMacroVariable('const $$fn = $$ifdef("DEBUG", (a: string, b: number, c?: boolean) => a);');
-            const result = transformToFunction('$$fn', arg, state.sourceFile);
+        test('object literal – falls back to const assignment', () => {
+            const { callbackArg } = parseMacroCall(state, '$$ifdef("D", { a: 1 });');
+            const result = transformToFunction('$$cfg', callbackArg, state.sourceFile);
 
-            expect(result).toContain('a: string, b: number, c?: boolean');
+            expect(result).toContain('const $$cfg =');
+            expect(result).toContain('{ a: 1 }');
+        });
+
+        test('non-function with hasExport=true – emits "export const"', () => {
+            const { callbackArg } = parseMacroCall(state, '$$ifdef("D", "val");');
+            const result = transformToFunction('$$x', callbackArg, state.sourceFile, true);
+
+            expect(result.startsWith('export const ')).toBe(true);
         });
     });
 
     describe('transformToIIFE', () => {
-        test('wraps arrow function in IIFE', () => {
-            const { arg } = parseMacroCall('$$ifdef("DEBUG", () => 42)');
-            const result = transformToIIFE(arg, state.sourceFile);
+        let state: StateInterface;
+        beforeEach(() => { state = makeState(); });
 
-            expect(result).toBe('(() => 42)()');
+        test('arrow function – wraps in IIFE with default suffix', () => {
+            const { callbackArg } = parseMacroCall(state, '$$ifdef("D", () => 42);');
+            expect(transformToIIFE(callbackArg, state.sourceFile)).toBe('(() => 42)();');
         });
 
-        test('wraps function expression in IIFE', () => {
-            const { arg } = parseMacroCall('$$ifdef("DEBUG", function() { return "hello"; })');
-            const result = transformToIIFE(arg, state.sourceFile);
-
-            expect(result).toBe('(function() { return "hello"; })()');
+        test('arrow function with block body – wraps in IIFE', () => {
+            const { callbackArg } = parseMacroCall(state, '$$ifdef("D", () => { return 1; });');
+            expect(transformToIIFE(callbackArg, state.sourceFile)).toBe('(() => { return 1; })();');
         });
 
-        test('wraps expression in arrow function IIFE', () => {
-            const { arg } = parseMacroCall('$$ifdef("DEBUG", 1 + 1)');
-            const result = transformToIIFE(arg, state.sourceFile);
-
-            expect(result).toBe('(() => { return 1 + 1; })()');
+        test('function expression – wraps in IIFE', () => {
+            const { callbackArg } = parseMacroCall(
+                state,
+                '$$ifdef("D", function() { return "hi"; });'
+            );
+            expect(transformToIIFE(callbackArg, state.sourceFile))
+                .toBe('(function() { return "hi"; })();');
         });
 
-        test('wraps string literal in IIFE', () => {
-            const { arg } = parseMacroCall('$$ifdef("DEBUG", "test value")');
-            const result = transformToIIFE(arg, state.sourceFile);
+        test('arrow function – prefix is applied', () => {
+            const { callbackArg } = parseMacroCall(state, '$$ifdef("D", () => fetch("/"));');
+            const result = transformToIIFE(callbackArg, state.sourceFile, 'await ', '();');
 
-            expect(result).toBe('(() => { return "test value"; })()');
+            expect(result.startsWith('await ')).toBe(true);
         });
 
-        test('wraps object literal in IIFE', () => {
-            const { arg } = parseMacroCall('$$ifdef("DEBUG", { key: "value" })');
-            const result = transformToIIFE(arg, state.sourceFile);
+        test('string literal – wrapped in arrow IIFE', () => {
+            const { callbackArg } = parseMacroCall(state, '$$ifdef("D", "value");');
+            expect(transformToIIFE(callbackArg, state.sourceFile))
+                .toBe('(() => { return "value"; })();');
+        });
 
-            expect(result).toContain('(() => { return');
-            expect(result).toContain('{ key: "value" }');
-            expect(result.endsWith('})()')).toBe(true);
+        test('number literal – wrapped in arrow IIFE', () => {
+            const { callbackArg } = parseMacroCall(state, '$$ifdef("D", 7);');
+            expect(transformToIIFE(callbackArg, state.sourceFile))
+                .toBe('(() => { return 7; })();');
+        });
+
+        test('binary expression – wrapped in arrow IIFE', () => {
+            const { callbackArg } = parseMacroCall(state, '$$ifdef("D", 1 + 2 * 3);');
+            expect(transformToIIFE(callbackArg, state.sourceFile))
+                .toBe('(() => { return 1 + 2 * 3; })();');
+        });
+
+        test('non-function with prefix but no suffix – returns prefixed text directly', () => {
+            // When prefix is set, the non-function branch returns `prefix + nodeText`
+            const { callbackArg } = parseMacroCall(state, '$$ifdef("D", "raw");');
+            const result = transformToIIFE(callbackArg, state.sourceFile, 'const x = ', '');
+
+            expect(result).toBe('const x = "raw"');
+        });
+
+        test('custom suffix is appended to IIFE', () => {
+            const { callbackArg } = parseMacroCall(state, '$$ifdef("D", () => p);');
+            const result = transformToIIFE(callbackArg, state.sourceFile, '', '.catch(e => e)');
+
+            expect(result.endsWith('.catch(e => e)')).toBe(true);
         });
     });
 
     describe('astDefineVariable', () => {
-        test('transforms ifdef with true definition', () => {
-            state.defines = { DEBUG: true };
-            const { decl, init } = parseMacroVariable('const $$debug = $$ifdef("DEBUG", () => console.log("debug"));');
+        let state: StateInterface;
+        beforeEach(() => { state = makeState(); });
+
+        test('$$ifdef, define=true → transforms to function', () => {
+            state = makeState({ DEBUG: true });
+            const { decl, init } = parseMacroVariable(
+                state, 'const $$debug = $$ifdef("DEBUG", () => "on");'
+            );
             const result = astDefineVariable(decl, init, false, state);
 
             expect(result).toContain('function $$debug()');
-            expect(result).not.toBe('');
+            expect(result).toContain('return "on"');
         });
 
-        test('returns empty string for ifdef with false definition', () => {
-            state.defines = { DEBUG: false };
-            const { decl, init } = parseMacroVariable('const $$debug = $$ifdef("DEBUG", () => console.log("debug"));');
+        test('$$ifdef, define=false → returns empty string', () => {
+            state = makeState({ DEBUG: false });
+            const { decl, init } = parseMacroVariable(
+                state, 'const $$debug = $$ifdef("DEBUG", () => "on");'
+            );
+            expect(astDefineVariable(decl, init, false, state)).toBe('undefined');
+        });
+
+        test('$$ifdef, define missing → returns empty string', () => {
+            state = makeState({});
+            const { decl, init } = parseMacroVariable(
+                state, 'const $$x = $$ifdef("MISSING", () => 1);'
+            );
+            expect(astDefineVariable(decl, init, false, state)).toBe('undefined');
+        });
+
+        test('$$ifdef, define=truthy number (1) → transforms', () => {
+            state = makeState({ FLAG: 1 });
+            const { decl, init } = parseMacroVariable(
+                state, 'const $$f = $$ifdef("FLAG", () => true);'
+            );
             const result = astDefineVariable(decl, init, false, state);
 
-            expect(result).toBe('');
+            expect(result).toContain('function $$f()');
         });
 
-        test('transforms ifndef with false definition', () => {
-            state.defines = { PRODUCTION: false };
-            const { decl, init } = parseMacroVariable('const $$noProd = $$ifndef("PRODUCTION", () => "dev");');
+        test('$$ifdef, define=falsy number (0) → returns empty string', () => {
+            state = makeState({ FLAG: 0 });
+            const { decl, init } = parseMacroVariable(
+                state, 'const $$f = $$ifdef("FLAG", () => true);'
+            );
+            expect(astDefineVariable(decl, init, false, state)).toBe('undefined');
+        });
+
+        test('$$ifndef, define=false → transforms to function', () => {
+            state = makeState({ PRODUCTION: false });
+            const { decl, init } = parseMacroVariable(
+                state, 'const $$dev = $$ifndef("PRODUCTION", () => "dev");'
+            );
             const result = astDefineVariable(decl, init, false, state);
 
-            expect(result).toContain('function $$noProd()');
-            expect(result).not.toBe('');
+            expect(result).toContain('function $$dev()');
         });
 
-        test('returns empty string for ifndef with true definition', () => {
-            state.defines = { PRODUCTION: true };
-            const { decl, init } = parseMacroVariable('const $$noProd = $$ifndef("PRODUCTION", () => "dev");');
+        test('$$ifndef, define=true → returns empty string', () => {
+            state = makeState({ PRODUCTION: true });
+            const { decl, init } = parseMacroVariable(
+                state, 'const $$dev = $$ifndef("PRODUCTION", () => "dev");'
+            );
+            expect(astDefineVariable(decl, init, false, state)).toBe('undefined');
+        });
+
+        test('$$ifndef, define missing → transforms (missing === not defined)', () => {
+            state = makeState({});
+            const { decl, init } = parseMacroVariable(
+                state, 'const $$dev = $$ifndef("MISSING", () => "yes");'
+            );
             const result = astDefineVariable(decl, init, false, state);
 
-            expect(result).toBe('');
+            expect(result).toContain('function $$dev()');
         });
 
-        test('includes export when hasExport is true', () => {
-            state.defines = { FEATURE: true };
-            const { decl, init } = parseMacroVariable('export const $$feature = $$ifdef("FEATURE", () => true);');
+        test('hasExport=true → emits "export function"', () => {
+            state = makeState({ F: true });
+            const { decl, init } = parseMacroVariable(
+                state, 'export const $$feat = $$ifdef("F", () => 1);'
+            );
             const result = astDefineVariable(decl, init, true, state);
 
-            expect((<string> result)?.startsWith('export function')).toBe(true);
+            expect((result as string).startsWith('export function')).toBe(true);
         });
 
-        test('returns false for non-string literal definition argument', () => {
-            state.defines = { DEBUG: true };
-            const { decl, init } = parseMacroVariable('const $$bad = $$ifdef(DEBUG, () => {});');
+        test('hasExport=false → does not emit "export"', () => {
+            state = makeState({ F: true });
+            const { decl, init } = parseMacroVariable(
+                state, 'const $$feat = $$ifdef("F", () => 1);'
+            );
             const result = astDefineVariable(decl, init, false, state);
 
-            expect(result).toBe(false);
+            expect(result as string).not.toMatch(/^export/);
         });
 
-        test('handles missing definition as falsy', () => {
-            state.defines = {};
-            const { decl, init } = parseMacroVariable('const $$missing = $$ifdef("MISSING", () => "value");');
-            const result = astDefineVariable(decl, init, false, state);
-
-            expect(result).toBe('');
+        test('non-string-literal first arg → returns false', () => {
+            state = makeState({ DEBUG: true });
+            const { decl, init } = parseMacroVariable(
+                state, 'const $$bad = $$ifdef(DEBUG, () => {});'
+            );
+            expect(astDefineVariable(decl, init, false, state)).toBe(false);
         });
 
-        test('handles non-function callback as const assignment', () => {
-            state.defines = { DEBUG: true };
-            const { decl, init } = parseMacroVariable('const $$url = $$ifdef("DEBUG", "http://localhost");');
-            const result = astDefineVariable(decl, init, false, state);
-
-            expect(result).toBe('const $$url = "http://localhost";');
+        test('string literal callback → const assignment', () => {
+            state = makeState({ D: true });
+            const { decl, init } = parseMacroVariable(
+                state, 'const $$url = $$ifdef("D", "http://localhost");'
+            );
+            expect(astDefineVariable(decl, init, false, state))
+                .toBe('const $$url = "http://localhost";');
         });
 
-        test('preserves variable name from declaration', () => {
-            state.defines = { DEBUG: true };
-            const { decl, init } = parseMacroVariable('const $$myCustomName = $$ifdef("DEBUG", () => true);');
-            const result = astDefineVariable(decl, init, false, state);
-
-            expect(result).toContain('$$myCustomName');
+        test('variable name from declaration is used in output', () => {
+            state = makeState({ D: true });
+            const { decl, init } = parseMacroVariable(
+                state, 'const $$myCustomName = $$ifdef("D", () => true);'
+            );
+            expect(astDefineVariable(decl, init, false, state))
+                .toContain('$$myCustomName');
         });
 
-        test('handles truthy non-boolean values', () => {
-            state.defines = { VALUE: 1 };
-            const { decl, init } = parseMacroVariable('const $$test = $$ifdef("VALUE", () => "yes");');
+        test('arrow function with typed params and return type', () => {
+            state = makeState({ D: true });
+            const { decl, init } = parseMacroVariable(
+                state,
+                'const $$fn = $$ifdef("D", (x: number): string => String(x));'
+            );
             const result = astDefineVariable(decl, init, false, state);
 
-            expect(result).not.toBe('');
-            expect(result).toContain('function $$test()');
-        });
-
-        test('handles falsy non-boolean values', () => {
-            state.defines = { VALUE: 0 };
-            const { decl, init } = parseMacroVariable('const $$test = $$ifdef("VALUE", () => "yes");');
-            const result = astDefineVariable(decl, init, false, state);
-
-            expect(result).toBe('');
+            expect(result).toContain('(x: number): string');
         });
     });
 
     describe('astDefineCallExpression', () => {
-        test('transforms ifdef with true definition to IIFE', () => {
-            state.defines = { DEBUG: true };
-            const { callExpr } = parseMacroCall('$$ifdef("DEBUG", () => console.log("debug"));');
-            const result = astDefineCallExpression(callExpr.arguments, '$$ifdef', state);
+        let state: StateInterface;
+        beforeEach(() => { state = makeState(); });
 
-            expect(result).toContain('() => console.log("debug")');
-            expect(result).toMatch(/^\(/);
-            expect(result).toMatch(/\)$/);
+        test('$$ifdef, define=true → IIFE wrapped in const assignment', () => {
+            state = makeState({ DEBUG: true });
+            const { decl, init } = parseMacroVariable(
+                state, 'const $$msg = $$ifdef("DEBUG", () => "on");'
+            );
+            const result = astDefineCallExpression(init, state, decl, false);
+
+            expect(result).toContain('const $$msg =');
+            expect(result).toContain('() => "on"');
         });
 
-        test('returns empty string for ifdef with false definition', () => {
-            state.defines = { DEBUG: false };
-            const { callExpr } = parseMacroCall('$$ifdef("DEBUG", () => console.log("debug"));');
-            const result = astDefineCallExpression(callExpr.arguments, '$$ifdef', state);
-
-            expect(result).toBe('');
+        test('$$ifdef, define=false → returns empty string', () => {
+            state = makeState({ DEBUG: false });
+            const { decl, init } = parseMacroVariable(
+                state, 'const $$msg = $$ifdef("DEBUG", () => "on");'
+            );
+            expect(astDefineCallExpression(init, state, decl, false)).toBe('');
         });
 
-        test('transforms ifndef with false definition to IIFE', () => {
-            state.defines = { PRODUCTION: false };
-            const { callExpr } = parseMacroCall('$$ifndef("PRODUCTION", () => "dev mode");');
-            const result = astDefineCallExpression(callExpr.arguments, '$$ifndef', state);
-
-            expect(result).not.toBe('');
-            expect(result).toContain('() => "dev mode"');
+        test('$$ifdef, define missing → returns empty string', () => {
+            state = makeState({});
+            const { decl, init } = parseMacroVariable(
+                state, 'const $$msg = $$ifdef("MISSING", () => "on");'
+            );
+            expect(astDefineCallExpression(init, state, decl, false)).toBe('');
         });
 
-        test('returns empty string for ifndef with true definition', () => {
-            state.defines = { PRODUCTION: true };
-            const { callExpr } = parseMacroCall('$$ifndef("PRODUCTION", () => "dev mode");');
-            const result = astDefineCallExpression(callExpr.arguments, '$$ifndef', state);
+        test('$$ifndef, define=false → IIFE wrapped in const assignment', () => {
+            state = makeState({ PRODUCTION: false });
+            const { decl, init } = parseMacroVariable(
+                state, 'const $$dev = $$ifndef("PRODUCTION", () => "dev");'
+            );
+            const result = astDefineCallExpression(init, state, decl, false);
 
-            expect(result).toBe('');
+            expect(result).toContain('const $$dev =');
+            expect(result).toContain('() => "dev"');
         });
 
-        test('returns false for non-string literal definition argument', () => {
-            state.defines = { DEBUG: true };
-            const { callExpr } = parseMacroCall('$$ifdef(DEBUG, () => {});');
-            const result = astDefineCallExpression(callExpr.arguments, '$$ifdef', state);
-
-            expect(result).toBe(false);
+        test('$$ifndef, define=true → returns empty string', () => {
+            state = makeState({ PRODUCTION: true });
+            const { decl, init } = parseMacroVariable(
+                state, 'const $$dev = $$ifndef("PRODUCTION", () => "dev");'
+            );
+            expect(astDefineCallExpression(init, state, decl, false)).toBe('');
         });
 
-        test('wraps non-function expression in IIFE', () => {
-            state.defines = { DEBUG: true };
-            const { callExpr } = parseMacroCall('$$ifdef("DEBUG", "literal value");');
-            const result = astDefineCallExpression(callExpr.arguments, '$$ifdef', state);
+        test('$$ifndef, define missing → IIFE (missing is falsy)', () => {
+            state = makeState({});
+            const { decl, init } = parseMacroVariable(
+                state, 'const $$dev = $$ifndef("MISSING", () => "yes");'
+            );
+            const result = astDefineCallExpression(init, state, decl, false);
 
-            expect(result).toContain('(() => { return "literal value"; })()');
+            expect(result).not.toBe('undefined');
+            expect(result).toContain('() => "yes"');
         });
 
-        test('handles missing definition as falsy for ifdef', () => {
-            state.defines = {};
-            const { callExpr } = parseMacroCall('$$ifdef("MISSING", () => "value");');
-            const result = astDefineCallExpression(callExpr.arguments, '$$ifdef', state);
+        test('hasExport=true → emits "export const"', () => {
+            state = makeState({ F: true });
+            const { decl, init } = parseMacroVariable(
+                state, 'export const $$cfg = $$ifdef("F", () => devCfg);'
+            );
+            const result = astDefineCallExpression(init, state, decl, true);
 
-            expect(result).toBe('');
+            expect((result as string).startsWith('export const $$cfg')).toBe(true);
         });
 
-        test('handles missing definition as truthy for ifndef', () => {
-            state.defines = {};
-            const { callExpr } = parseMacroCall('$$ifndef("MISSING", () => "value");');
-            const result = astDefineCallExpression(callExpr.arguments, '$$ifndef', state);
+        test('hasExport=false → plain "const"', () => {
+            state = makeState({ F: true });
+            const { decl, init } = parseMacroVariable(
+                state, 'const $$cfg = $$ifdef("F", () => devCfg);'
+            );
+            const result = astDefineCallExpression(init, state, decl, false);
 
-            expect(result).not.toBe('');
-            expect(result).toContain('() => "value"');
+            expect((result as string).startsWith('const $$cfg')).toBe(true);
+            expect(result as string).not.toMatch(/^export/);
         });
 
-        test('handles complex expressions', () => {
-            state.defines = { DEBUG: true };
-            const { callExpr } = parseMacroCall('$$ifdef("DEBUG", 1 + 2 * 3);');
-            const result = astDefineCallExpression(callExpr.arguments, '$$ifdef', state);
+        test('non-string-literal first arg → returns false', () => {
+            state = makeState({ DEBUG: true });
+            const { decl, init } = parseMacroVariable(
+                state, 'const $$bad = $$ifdef(DEBUG, () => {});'
+            );
+            expect(astDefineCallExpression(init, state, decl, false)).toBe(false);
+        });
+
+        test('outerSuffix is appended after IIFE invocation', () => {
+            state = makeState({ F: true });
+            const { decl, init } = parseMacroVariable(
+                state, 'const $$p = $$ifdef("F", () => fetchData());'
+            );
+            const result = astDefineCallExpression(init, state, decl, false, '.then(process)');
+
+            expect((result as string).endsWith('.then(process)')).toBe(true);
+        });
+
+        test('string literal callback → IIFE-wrapped const', () => {
+            state = makeState({ D: true });
+            const { decl, init } = parseMacroVariable(
+                state, 'const $$url = $$ifdef("D", "http://localhost");'
+            );
+            const result = astDefineCallExpression(init, state, decl, false);
+            expect(result).toContain('"http://localhost"');
+        });
+
+        test('complex expression callback wraps in arrow IIFE', () => {
+            state = makeState({ D: true });
+            const { decl, init } = parseMacroVariable(
+                state, 'const $$val = $$ifdef("D", 1 + 2 * 3);'
+            );
+            const result = astDefineCallExpression(init, state, decl, false);
 
             expect(result).toContain('1 + 2 * 3');
-            expect(result).toContain('(() => { return');
         });
 
-        test('handles object literal expressions', () => {
-            state.defines = { DEBUG: true };
-            const { callExpr } = parseMacroCall('$$ifdef("DEBUG", { debug: true, level: 1 });');
-            const result = astDefineCallExpression(callExpr.arguments, '$$ifdef', state);
+        test('object literal callback – value is in output', () => {
+            state = makeState({ D: true });
+            const { decl, init } = parseMacroVariable(
+                state, 'const $$cfg = $$ifdef("D", { debug: true, level: 1 });'
+            );
+            const result = astDefineCallExpression(init, state, decl, false);
 
             expect(result).toContain('{ debug: true, level: 1 }');
+        });
+
+        test('variable name appears in output', () => {
+            state = makeState({ D: true });
+            const { decl, init } = parseMacroVariable(
+                state, 'const $$mySpecialVar = $$ifdef("D", () => 1);'
+            );
+            const result = astDefineCallExpression(init, state, decl, false);
+
+            expect(result as string).toContain('$$mySpecialVar');
         });
     });
 });

@@ -2,7 +2,7 @@
  * Import will remove at compile time
  */
 
-import type { Message } from 'esbuild';
+import type { PartialMessage } from 'esbuild';
 
 /**
  * Imports
@@ -123,8 +123,8 @@ export class esBuildError extends xBuildBaseError {
      * @since 2.0.0
      */
 
-    constructor(message: Message) {
-        super(message.text, 'esBuildError');
+    constructor(message: PartialMessage) {
+        super(message.text ?? '', 'esBuildError');
 
         this.errorMetadata = getErrorMetadata(message, { withFrameworkFrames: true });
         this.stack = formatStack(this.errorMetadata, this.name, this.message, message.notes);

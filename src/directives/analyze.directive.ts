@@ -19,7 +19,7 @@ import { FilesModel } from '@typescript/models/files.model';
  */
 
 const MACRO_PREFIX = '$$';
-const IFDEF_REGEX = /(?:(?:export\s+)?(?:const|let|var)\s+([\w$]+)\s*=\s*)?\$\$(ifdef|ifndef|inline)\s*\(\s*['"]([^'"]+)['"]/g;
+const IFDEF_REGEX = /(?:(?:export\s+)?(?:const|let|var)\s+([\w$]+)\s*=\s*)?\$\$(ifdef|ifndef|inline)\s*\(\s*(?:['"]([^'"]+)['"])?/g;
 
 /**
  * Calculates the line and column position of a macro name within source text.
@@ -30,53 +30,18 @@ const IFDEF_REGEX = /(?:(?:export\s+)?(?:const|let|var)\s+([\w$]+)\s*=\s*)?\$\$(
  * @param index - The starting index in the text where the match was found
  * @returns A partial {@link Location} object containing file, line, and column information
  *
- * @remarks
- * Line numbers are 1-based. The column is calculated relative to the match index.
- * This function is primarily used for generating accurate diagnostic messages.
- *
- * @example
- * ```ts
- * const sourceCode = 'import x from "y";\nconst $$myMacro = $$ifdef("DEBUG");';
- * const macroIndex = sourceCode.indexOf('$$myMacro');
- *
- * const location = getLineAndColumn(sourceCode, '$$myMacro', 'src/app.ts', macroIndex);
- * console.log(location);
- * // Output: {
- * //   file: 'src/app.ts',
- * //   line: 2,
- * //   column: 6
- * // }
- * ```
- *
- * @example Multi-line file positioning
- * ```ts
- * const code = [
- *   'const x = 1;',
- *   'const y = 2;',
- *   'const $$feature = $$ifdef("FEATURE_X");'
- * ].join('\n');
- *
- * const index = code.indexOf('$$feature');
- * const loc = getLineAndColumn(code, '$$feature', 'config.ts', index);
- * // loc.line === 3
- * ```
- *
- * @see {@link Location}
  * @since 2.0.0
  */
 
 export function getLineAndColumn(text: string, name: string, file: string, index: number): Partial<Location> {
     let line = 1;
-    for (let i = 0; i < index; i++) {
-        if (text[i] === '\n') {
-            line++;
-        }
-    }
+    for (let i = 0; i < index; i++) if (text[i] === '\n') line++;
+    const startLinePosition = text.lastIndexOf('\n', index - 1) + 1;
 
     return {
         file,
         line,
-        column: text.indexOf(name, index) - index
+        column: text.indexOf(name, startLinePosition) - startLinePosition
     };
 }
 
@@ -129,11 +94,13 @@ export function getLineAndColumn(text: string, name: string, file: string, index
 
 export function isCommentLine(content: string, index: number): boolean {
     let lineStart = content.lastIndexOf('\n', index - 1) + 1;
+
     while (lineStart < index && (content[lineStart] === ' ' || content[lineStart] === '\t')) {
         lineStart++;
     }
 
     if (lineStart >= index) return false;
+
     const char1 = content[lineStart];
     const char2 = content[lineStart + 1];
 
@@ -220,29 +187,34 @@ export function isCommentLine(content: string, index: number): boolean {
  */
 
 export async function analyzeMacroMetadata(variant: VariantService, context: BuildContextInterface): Promise<OnLoadResult> {
-    const metadata: MacrosMetadataInterface = { disabledMacroNames: new Set(), filesWithMacros: new Set() };
-    context.stage.defineMetadata = metadata;
-    const warnings: Array<PartialMessage> = [];
+    const metadata: MacrosMetadataInterface = {
+        disabledMacroNames: new Set(),
+        filesWithMacros: new Set()
+    };
 
+    context.stage.defineMetadata = metadata;
+
+    const warnings: Array<PartialMessage> = [];
     const filesModel = inject(FilesModel);
     const defines = variant.config.define ?? {};
-
     const files = Object.values(variant.dependencies ?? {});
-    if(!files) return Promise.resolve({ warnings });
+
     for (const file of files) {
-        const snapshot = filesModel.getOrTouchFile(file);
-        const content = snapshot?.contentSnapshot?.text;
+        const content = filesModel.getOrTouchFile(file)?.contentSnapshot?.text;
         if (!content) continue;
+
+        const resolvedFile = filesModel.resolve(file);
 
         IFDEF_REGEX.lastIndex = 0;
         for (const match of content.matchAll(IFDEF_REGEX)) {
-            if (isCommentLine(content, match.index!)) continue;
-            metadata.filesWithMacros.add(filesModel.resolve(file));
+            const matchIndex = match.index!;
+            if (isCommentLine(content, matchIndex)) continue;
 
             const [ , fn, directive, define ] = match;
-            if(!fn) continue;
+            metadata.filesWithMacros.add(resolvedFile);  // always register the file
+            if (!fn) continue;
 
-            const isDefined = define in defines && !!defines[define];
+            const isDefined = !!defines[define];
             if ((directive === 'ifndef') === isDefined) {
                 metadata.disabledMacroNames.add(fn);
             }
@@ -250,7 +222,7 @@ export async function analyzeMacroMetadata(variant: VariantService, context: Bui
             if (!fn.startsWith(MACRO_PREFIX)) {
                 warnings.push({
                     text: `Macro function '${ fn }' not start with '${ MACRO_PREFIX }' prefix to avoid conflicts`,
-                    location: getLineAndColumn(content, fn, file, match.index!)
+                    location: getLineAndColumn(content, fn, file, matchIndex)
                 });
             }
         }

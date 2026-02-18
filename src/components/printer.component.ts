@@ -4,6 +4,7 @@
 
 import type { Metafile } from 'esbuild';
 import type { IssueType } from '@components/interfaces/printer-component.interface';
+import type { MacroReplacementInterface } from '@directives/interfaces/analyze-directive.interface';
 import type { DiagnosticsInterface } from '@typescript/services/interfaces/typescript-service.interface';
 import type { BuildContextInterface, ResultContextInterface } from '@providers/interfaces/lifecycle-provider.interface';
 
@@ -12,11 +13,13 @@ import type { BuildContextInterface, ResultContextInterface } from '@providers/i
  */
 
 import { TypesError } from '@errors/types.error';
+import { inject } from '@symlinks/symlinks.module';
 import { xBuildBaseError } from '@errors/base.error';
 import { prefix } from '@components/banner.component';
 import { relative } from '@components/path.component';
 import { VMRuntimeError } from '@errors/vm-runtime.error';
 import { xterm } from '@remotex-labs/xansi/xterm.component';
+import { ConfigurationService } from '@services/configuration.service';
 import { enhancedBuildResult } from '@providers/esbuild-messages.provider';
 import { mutedColor, pathColor, textColor, warnColor } from '@components/color.component';
 import { errorColor, infoColor, keywordColor, okColor } from '@components/color.component';
@@ -410,7 +413,7 @@ export function logBuildIssues(issues: Array<IssueType>, issueType: 'Errors' | '
     }
 
     buffer.push('');
-    buffer[0] = `\n ${ color(issueType) } (${ totalIssueCount })`;
+    buffer[0] = `\n ${ color(issueType) } (${ totalIssueCount })\n`;
 
     console.log(buffer.join('\n'));
 }
@@ -680,7 +683,7 @@ export function logBuildStart({ variantName }: BuildContextInterface): void {
  * @since 2.0.0
  */
 
-export function logBuildEnd({ variantName, duration, buildResult }: ResultContextInterface): void {
+export function logBuildEnd({ variantName, duration, buildResult, stage }: ResultContextInterface): void {
     const { errors, warnings, metafile } = enhancedBuildResult(buildResult);
     const isSuccess = !!metafile;
 
@@ -693,6 +696,16 @@ export function logBuildEnd({ variantName, duration, buildResult }: ResultContex
 
     logBuildIssues(errors, 'Errors');
     logBuildIssues(warnings, 'Warnings');
+
+    if(inject(ConfigurationService).getValue().verbose) {
+        const replaceInfo = <Array<MacroReplacementInterface> | undefined > stage?.replacementInfo;
+        if(replaceInfo && Array.isArray(stage.replacementInfo)) {
+            stage.replacementInfo.forEach(({ source, replacement }): void => {
+                console.log(createActionPrefix('Macro replacement:') + '\n');
+                console.log(`${ xterm.dim(source) }\n\n${ replacement }\n`);
+            });
+        }
+    }
 
     if (isSuccess) {
         logBuildOutputs(metafile);

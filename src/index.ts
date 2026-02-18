@@ -413,7 +413,7 @@ declare global {
      * @since 2.0.0
      */
 
-    function $$inline(callback: unknown): string | undefined;
+    function $$inline<T>(callback: () => T): string | undefined;
 
     /**
      * Pre-configuration CLI arguments snapshot (bootstrap argv).
