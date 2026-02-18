@@ -4,7 +4,7 @@
 
 import type { SourceFile } from 'typescript';
 import type { PartialMessage } from 'esbuild';
-import type { MacrosStaeInterface } from '@directives/interfaces/analyze-directive.interface';
+import type { MacrosStateInterface } from '@directives/interfaces/analyze-directive.interface';
 
 /**
  * Type alias for build-time definition values used in conditional compilation.
@@ -114,7 +114,7 @@ export type DefinesType = Record<string, unknown>;
  *
  * @see {@link transformerDirective} for state creation
  * @see {@link astProcess} for state usage during transformation
- * @see {@link MacrosStaeInterface} for stage metadata structure
+ * @see {@link MacrosStateInterface} for stage metadata structure
  *
  * @since 2.0.0
  */
@@ -131,13 +131,13 @@ export interface StateInterface {
      * This metadata is used to optimize transformation by skipping files without
      * macros and replacing disabled macro references with `undefined`.
      *
-     * @see {@link MacrosStaeInterface} for metadata structure
+     * @see {@link MacrosStateInterface} for metadata structure
      * @see {@link analyzeMacroMetadata} for metadata generation
      *
      * @since 2.0.0
      */
 
-    stage: MacrosStaeInterface;
+    stage: MacrosStateInterface;
 
     /**
      * Array of error messages collected during transformation.

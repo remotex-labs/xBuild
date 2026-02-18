@@ -5,7 +5,7 @@
 import type { OnLoadResult } from 'esbuild';
 import type { VariantService } from '@services/variant.service';
 import type { CallExpression, VariableStatement, ExpressionStatement } from 'typescript';
-import type { MacrosStaeInterface } from '@directives/interfaces/analyze-directive.interface';
+import type { MacrosStateInterface } from '@directives/interfaces/analyze-directive.interface';
 import type { LoadContextInterface } from '@providers/interfaces/lifecycle-provider.interface';
 import type { SubstInterface, StateInterface } from '@directives/interfaces/macros-directive.interface';
 
@@ -14,6 +14,8 @@ import type { SubstInterface, StateInterface } from '@directives/interfaces/macr
  */
 
 import ts from 'typescript';
+import { esBuildError } from '@errors/esbuild.error';
+import { highlightCode } from '@remotex-labs/xmap/highlighter.component';
 import { astDefineVariable, astDefineCallExpression } from '@directives/define.directive';
 import { astInlineCallExpression, astInlineVariable } from '@directives/inline.directive';
 
@@ -47,6 +49,43 @@ const TS_JS_REGEX = /\.(ts|js)$/;
  */
 
 const MACRO_FUNCTIONS = [ '$$ifdef', '$$ifndef', '$$inline' ];
+
+/**
+ * Checks whether a given AST node’s source text contains any supported macro function name.
+ *
+ * @param node - AST node to inspect
+ * @param sourceFile - Optional source file used by TypeScript to compute node text
+ *
+ * @returns `true` if the node text contains at least one macro identifier; otherwise `false`.
+ *
+ * @remarks
+ * This is a fast, text-based pre-check used to avoid deeper macro parsing work when a node
+ * clearly cannot contain macro calls.
+ *
+ * @since 2.0.0
+ */
+
+export function nodeContainsMacro(node: ts.Node, sourceFile?: ts.SourceFile): boolean {
+    return (MACRO_FUNCTIONS as ReadonlyArray<string>).some(m => node.getText(sourceFile).includes(m));
+}
+
+/**
+ * Returns the expected argument count for a supported macro function.
+ *
+ * @param fnName - Macro function name (e.g. `$$ifdef`, `$$ifndef`, `$$inline`)
+ *
+ * @returns The required number of arguments for the macro.
+ *
+ * @remarks
+ * - `$$inline` expects 1 argument (a thunk/callback)
+ * - `$$ifdef` / `$$ifndef` expect 2 arguments (name + callback/value)
+ *
+ * @since 2.0.0
+ */
+
+function expectedArgCount(fnName: string): number {
+    return fnName === MACRO_FUNCTIONS[2] ? 1 : 2;
+}
 
 /**
  * Processes variable statements containing macro calls and adds replacements to the replacement set.
@@ -118,34 +157,56 @@ const MACRO_FUNCTIONS = [ '$$ifdef', '$$ifndef', '$$inline' ];
  * @since 2.0.0
  */
 
-export async function isVariableStatement(node: VariableStatement, replacements: Set<SubstInterface>, state: StateInterface): Promise<void> {
+export async function isVariableStatement(node: VariableStatement, replacements: Set<SubstInterface>, state: StateInterface): Promise<boolean> {
+    let replacement: string | false = false;
+
     for (const decl of node.declarationList.declarations) {
+        let suffix = '';
+        let call: ts.CallExpression | undefined;
         const init = decl.initializer;
-        if (!init || !ts.isCallExpression(init) || !ts.isIdentifier(init.expression)) continue;
+        if (!init) continue;
 
-        const fnName = init.expression.text;
-        if (!MACRO_FUNCTIONS.includes(fnName)) continue;
+        if (ts.isCallExpression(init) && ts.isIdentifier(init.expression)) {
+            // Plain: $$macro(...)
+            call = init;
+        } else if (
+            ts.isCallExpression(init) &&
+            ts.isCallExpression(init.expression) &&
+            ts.isIdentifier(init.expression.expression)
+        ) {
+            // IIFE: $$macro(...)(...outerArgs)
+            call = init.expression;
+            const args = init.arguments.map(a => a.getText(state.sourceFile)).join(', ');
+            suffix = `(${ args })`;
+        } else if (
+            ts.isAsExpression(init) &&
+            ts.isCallExpression(init.expression) &&
+            ts.isIdentifier(init.expression.expression)
+        ) {
+            call = init.expression;
+        }
 
-        const argsCount = fnName == MACRO_FUNCTIONS[2] ? 1 : 2;
-        if (!MACRO_FUNCTIONS.includes(fnName)) continue;
-        if (init.arguments.length < argsCount || init.arguments.length > argsCount) {
-            throw new Error(`Invalid macro call: ${ fnName } with ${ init.arguments.length } arguments`);
+        if (!call) continue;
 
-            // replacements.add({
-            //     replacement: 'undefined',
-            //     end: node.getEnd(),
-            //     start: node.getStart(state.sourceFile)
-            // });
-            //
-            // return;
+        const fnName = (call.expression as ts.Identifier).text;
+        if (call.arguments.length !== expectedArgCount(fnName)) {
+            const { line, character } = state.sourceFile.getLineAndCharacterOfPosition(call.getStart(state.sourceFile));
+            throw new esBuildError({
+                text: `Invalid macro call: ${ fnName } with ${ call.arguments.length } arguments`,
+                location: {
+                    file: state.sourceFile.fileName,
+                    line: line + 1,
+                    column: character
+                }
+            });
         }
 
         const hasExport =
             node.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword) ?? false;
 
-        let replacement: string | false = false;
-        if (fnName === MACRO_FUNCTIONS[2]) replacement = await astInlineVariable(decl, node, init, hasExport, state);
-        else replacement = astDefineVariable(decl, init, hasExport, state);
+        if (fnName === MACRO_FUNCTIONS[2]) replacement = await astInlineVariable(decl, node, call, hasExport, state);
+        else if (suffix) replacement = astDefineCallExpression(call, state, decl, hasExport, suffix);
+        else replacement = astDefineVariable(decl, call, hasExport, state);
 
         if (replacement !== false) {
             replacements.add({
@@ -155,6 +216,8 @@ export async function isVariableStatement(node: VariableStatement, replacements:
             });
         }
     }
+
+    return !!replacement;
 }
 
 /**
@@ -214,36 +277,105 @@ export async function isVariableStatement(node: VariableStatement, replacements:
 
 export async function isCallExpression(
     node: ExpressionStatement, replacements: Set<SubstInterface>, state: StateInterface
-): Promise<void> {
-    const callExpr = <CallExpression>node.expression;
-    if (!ts.isIdentifier(callExpr.expression)) return;
+): Promise<boolean> {
+    const callExpr = <CallExpression> node.expression;
+    if (!callExpr.expression || !ts.isIdentifier(callExpr.expression)) return false;
 
     const fnName = callExpr.expression.text;
-    const argsCount = fnName == MACRO_FUNCTIONS[2] ? 1 : 2;
-    if (!MACRO_FUNCTIONS.includes(fnName)) return;
-    if (callExpr.arguments.length < argsCount || callExpr.arguments.length > argsCount) {
-        throw new Error(`Invalid macro call: ${ fnName } with ${ callExpr.arguments.length } arguments`);
-        // replacements.add({
-        //     replacement: 'undefined',
-        //     end: node.getEnd(),
-        //     start: node.getStart(state.sourceFile)
-        // });
-        //
-        // return;
+    if (!MACRO_FUNCTIONS.includes(fnName)) return false;
+    if (callExpr.arguments.length !== expectedArgCount(fnName)) {
+        const { line, character } = state.sourceFile.getLineAndCharacterOfPosition(node.getStart(state.sourceFile));
+        throw new esBuildError({
+            text: `Invalid macro call: ${ fnName } with ${ callExpr.arguments.length } arguments`,
+            location: {
+                file: state.sourceFile.fileName,
+                line: line + 1,
+                column: character
+            }
+        });
     }
 
     let replacement: string | false = false;
     if (fnName == MACRO_FUNCTIONS[2]) replacement = await astInlineCallExpression(callExpr.arguments, state);
-    else replacement = astDefineCallExpression(callExpr.arguments, fnName, state);
+    else replacement = astDefineCallExpression(callExpr, state);
 
     if (replacement !== false) {
         replacements.add({
             replacement,
-            end: node.getEnd(),
-            start: node.getStart(state.sourceFile)
+            end: callExpr.getEnd(),
+            start: callExpr.getStart(state.sourceFile)
         });
     }
+
+    return !!replacement;
 }
+
+/**
+ * Processes a `CallExpression` AST node that targets one of the supported macro functions and,
+ * if possible, registers a text replacement.
+ *
+ * @param node - The AST node to process (must be a `CallExpression` to be meaningful)
+ * @param replacements - Collection of replacements to apply later (sorted and spliced into the source)
+ * @param state - Current macro processing state (includes `sourceFile`, `contents`, metadata, etc.)
+ *
+ * @returns `true` when a macro replacement was added; otherwise `false`.
+ *
+ * @remarks
+ * This handler is used for *nested* macro call sites (i.e. `CallExpression` nodes that are not
+ * expression statements or variable statements), for example:
+ *
+ * ```ts
+ * const value = someFn($$inline(() => 123));
+ * ```
+ *
+ * Routing:
+ * - `$$inline(...)` → {@link astInlineCallExpression} (async)
+ * - `$$ifdef(...)` / `$$ifndef(...)` → {@link astDefineCallExpression}
+ *
+ * The replacement range is based on the node’s `[start, end]` positions in {@link StateInterface.sourceFile}.
+ *
+ * @see {@link astInlineCallExpression}
+ * @see {@link astDefineCallExpression}
+ *
+ * @since 2.0.0
+ */
+
+async function macroCallExpression(node: ts.Node, replacements: Set<SubstInterface>, state: StateInterface): Promise<boolean> {
+    if (!ts.isCallExpression(node)) return false;
+    if (!nodeContainsMacro(node, state.sourceFile)) return false;
+
+    const callNode = node as ts.CallExpression;
+    if (!ts.isIdentifier(callNode.expression)) return false;
+
+    const fnName = callNode.expression.text;
+
+    if (fnName === MACRO_FUNCTIONS[2]) {
+        // $$inline macro
+        const replacement = await astInlineCallExpression(callNode.arguments, state);
+        if (replacement === false) return false;
+
+        replacements.add({
+            start: node.getStart(state.sourceFile),
+            end: node.getEnd(),
+            replacement
+        });
+
+        return true;
+    }
+
+    // $$ifdef / $$ifndef macro
+    const replacement = astDefineCallExpression(callNode, state);
+    if (replacement === false) return false;
+
+    replacements.add({
+        start: node.getStart(state.sourceFile),
+        end: node.getEnd(),
+        replacement
+    });
+
+    return true;
+}
+
 
 /**
  * Recursively traverses the AST to find and transform all macro occurrences in the source file.
@@ -317,19 +449,30 @@ export async function isCallExpression(
  */
 
 export async function astProcess(state: StateInterface): Promise<string> {
-    const replacements: Set<SubstInterface> = new Set();
     const fnToRemove = state.stage.defineMetadata.disabledMacroNames;
     const hasMacro = state.stage.defineMetadata.filesWithMacros.has(state.sourceFile.fileName);
-
-    if (!hasMacro && fnToRemove.size === 0) {
-        return state.contents;
-    }
+    if (!hasMacro && fnToRemove.size === 0) return state.contents;
 
     const stack: Array<ts.Node> = [ state.sourceFile ];
+    const replacements: Set<SubstInterface> = new Set();
+
     while (stack.length > 0) {
         const node = stack.pop();
         const kind = node?.kind;
-        if (!kind) continue;
+        if (!node || !kind) continue;
+        if (hasMacro) {
+            if (kind === ts.SyntaxKind.VariableStatement) {
+                if (await isVariableStatement(node as VariableStatement, replacements, state)) continue;
+            }
+
+            if (kind === ts.SyntaxKind.ExpressionStatement && nodeContainsMacro(node, state.sourceFile)) {
+                if (await isCallExpression(node as ExpressionStatement, replacements, state)) continue;
+            }
+
+            if (kind === ts.SyntaxKind.CallExpression && nodeContainsMacro(node, state.sourceFile)) {
+                if (await macroCallExpression(node as ExpressionStatement, replacements, state)) continue;
+            }
+        }
 
         if (fnToRemove.size > 0) {
             if (kind === ts.SyntaxKind.CallExpression) {
@@ -341,8 +484,7 @@ export async function astProcess(state: StateInterface): Promise<string> {
                         replacement: 'undefined'
                     });
                 }
-            }
-            else if (kind === ts.SyntaxKind.Identifier) {
+            } else if (kind === ts.SyntaxKind.Identifier) {
                 const identifier = node as ts.Identifier;
                 if (fnToRemove.has(identifier.text)) {
                     const parent = node.parent ?? node;
@@ -364,36 +506,6 @@ export async function astProcess(state: StateInterface): Promise<string> {
             }
         }
 
-        // Process macro transformations only if file has macros
-        if (hasMacro) {
-            if (kind === ts.SyntaxKind.VariableStatement) {
-                await isVariableStatement(node as VariableStatement, replacements, state);
-            }
-            else if (kind === ts.SyntaxKind.ExpressionStatement) {
-                const exprStmt = node as ExpressionStatement;
-                if (ts.isCallExpression(exprStmt.expression)) {
-                    await isCallExpression(exprStmt, replacements, state);
-                }
-            }
-            else if (kind === ts.SyntaxKind.CallExpression) {
-                const callNode = node as ts.CallExpression;
-                if (ts.isIdentifier(callNode.expression) && callNode.expression.text === MACRO_FUNCTIONS[2]) {
-                    const parent = node.parent;
-                    if (!parent || (!ts.isVariableDeclaration(parent) && !ts.isExpressionStatement(parent))) {
-                        const replacement = await astInlineCallExpression(callNode.arguments, state);
-                        if (replacement !== false) {
-                            replacements.add({
-                                replacement,
-                                end: node.getEnd(),
-                                start: node.getStart(state.sourceFile)
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
-        // ⚡ Push children to stack (reverse order to maintain left-to-right traversal)
         const children = node.getChildren(state.sourceFile);
         for (let i = children.length - 1; i >= 0; i--) {
             stack.push(children[i]);
@@ -404,7 +516,13 @@ export async function astProcess(state: StateInterface): Promise<string> {
     const replacementsArray = Array.from(replacements);
     replacementsArray.sort((a, b) => b.start - a.start);
 
+    state.stage.replacementInfo = [];
     for (const { start, end, replacement } of replacementsArray) {
+        state.stage.replacementInfo.push({
+            source: highlightCode(state.contents.slice(start, end)),
+            replacement: highlightCode(replacement)
+        });
+
         state.contents = state.contents.slice(0, start) + replacement + state.contents.slice(end);
     }
 
@@ -497,20 +615,17 @@ export async function transformerDirective(variant: VariantService, context: Loa
     const sourceFile = languageService.getProgram()?.getSourceFile(args.path);
     if (!sourceFile) return;
 
-    let content = contents.toString();
     const state: StateInterface = {
-        stage: stage as MacrosStaeInterface,
+        stage: stage as MacrosStateInterface,
         errors: [],
-        contents: content,
+        contents: contents.toString(),
         warnings: [],
         defines: variant.config.define ?? {},
         sourceFile: sourceFile!
     };
 
-    if (sourceFile) {
-        content = await astProcess(state);
-    }
 
+    let content = await astProcess(state);
     if (!variant.config.esbuild.bundle) {
         const alias = variant.typescript.languageHostService.aliasRegex;
         if (alias) {
