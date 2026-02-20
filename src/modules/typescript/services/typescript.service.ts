@@ -543,7 +543,8 @@ export class TypescriptService {
 
     private formatDiagnostic(diagnostic: Diagnostic): DiagnosticsInterface {
         const result: DiagnosticsInterface = {
-            message: ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')
+            message: ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'),
+            category: diagnostic.category
         };
 
         if (diagnostic.file && diagnostic.start !== undefined) {

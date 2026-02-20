@@ -2,8 +2,8 @@
  * Import will remove at compile time
  */
 
-import type { ParsedCommandLine, LanguageService } from 'typescript';
 import type { LanguageHostService } from '@typescript/services/hosts.service';
+import type { ParsedCommandLine, LanguageService, DiagnosticCategory } from 'typescript';
 
 /**
  * Represents a cached TypeScript language service instance with reference counting for shared resource management.
@@ -178,4 +178,31 @@ export interface DiagnosticsInterface {
      */
 
     message: string;
+
+    /**
+     * Category of the diagnostic indicating its severity level.
+     *
+     * @remarks
+     * Determines how the diagnostic should be treated and displayed. TypeScript uses this to distinguish
+     * between different severity levels:
+     * - `DiagnosticCategory.Error` (1): Compilation-blocking errors
+     * - `DiagnosticCategory.Warning` (0): Non-blocking warnings
+     * - `DiagnosticCategory.Suggestion` (2): Code improvement suggestions
+     * - `DiagnosticCategory.Message` (3): Informational messages
+     *
+     * This property is essential for filtering diagnostics by severity and determining whether
+     * a build should fail or continue.
+     *
+     * @example
+     * ```ts
+     * if (diagnostic.category === DiagnosticCategory.Error) {
+     *   console.error(`Error: ${diagnostic.message}`);
+     *   process.exit(1);
+     * }
+     * ```
+     *
+     * @since 2.0.0
+     */
+
+    category: DiagnosticCategory
 }
