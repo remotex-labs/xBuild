@@ -165,7 +165,7 @@ export function appendErrorMetadata(buffer: Array<string>, error: xBuildBaseErro
     }
     buffer.push('');
     buffer.push(`${ INDENT }Enhanced Stack Trace:`);
-    buffer.push(`    ${ stackTrace }\n`);
+    buffer.push(`    ${ stackTrace }`);
 }
 
 /**
@@ -230,7 +230,7 @@ export function formatTypescriptDiagnostic(diagnostic: DiagnosticInterface, symb
     const diagnosticCode = codeColor(`TS${ diagnostic.code }`);
     const message = mutedColor(diagnostic.message);
 
-    return `${ INDENT }${ symbol } ${ location } ${ textColor(ARROW_SYMBOL) } ${ diagnosticCode } ${ textColor(DASH_SYMBOL) } ${ message }\n`;
+    return `\n${ INDENT }${ symbol } ${ location } ${ textColor(ARROW_SYMBOL) } ${ diagnosticCode } ${ textColor(DASH_SYMBOL) } ${ message }`;
 }
 
 /**
@@ -309,7 +309,7 @@ export function appendTypesError(buffer: Array<string>, error: TypesError, symbo
  */
 
 export function appendGenericIssue(buffer: Array<string>, issue: IssueType, symbol: string, color: typeof errorColor): void {
-    buffer.push(`${ INDENT }${ color(symbol) } ${ issue }`);
+    buffer.push(`\n${ INDENT }${ color(symbol) } ${ issue }`);
     if (issue instanceof xBuildBaseError) {
         appendErrorMetadata(buffer, issue);
     }
@@ -412,9 +412,7 @@ export function logBuildIssues(issues: Array<IssueType>, issueType: 'Errors' | '
         totalIssueCount += appendIssue(buffer, issue, symbol, color);
     }
 
-    buffer.push('');
-    buffer[0] = `\n ${ color(issueType) } (${ totalIssueCount })\n`;
-
+    buffer[0] = `\n ${ color(issueType) } (${ totalIssueCount })`;
     console.log(buffer.join('\n'));
 }
 
