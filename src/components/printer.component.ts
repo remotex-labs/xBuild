@@ -700,10 +700,16 @@ export function logBuildEnd({ variantName, duration, buildResult, stage }: Resul
     if(inject(ConfigurationService).getValue().verbose) {
         const replaceInfo = <Array<MacroReplacementInterface> | undefined > stage?.replacementInfo;
         if(replaceInfo && Array.isArray(stage.replacementInfo)) {
+            const buffer: Array<string> = [ createActionPrefix(`Macro ${ warnColor('replacement') }\n`) ];
+
             stage.replacementInfo.forEach(({ source, replacement }): void => {
-                console.log(createActionPrefix('Macro replacement:') + '\n');
-                console.log(`${ xterm.dim(source) }\n\n${ replacement }\n`);
+                buffer.push(`\t${ xterm.dim(source).replaceAll('\n', '\n\t') }\n`);
+                if(replacement && replacement !== 'undefined') buffer.push(
+                    `\t${ replacement.replaceAll('\n', '\n\t') }\n`
+                );
             });
+
+            console.log(buffer.join('\n'));
         }
     }
 
