@@ -4,7 +4,7 @@
 
 import type { Metafile } from 'esbuild';
 import type { IssueType } from '@components/interfaces/printer-component.interface';
-import type { MacroReplacementInterface } from '@directives/interfaces/analyze-directive.interface';
+import type { MacrosStateInterface } from '@directives/interfaces/analyze-directive.interface';
 import type { DiagnosticInterface } from '@typescript/services/interfaces/typescript-service.interface';
 import type { BuildContextInterface, ResultContextInterface } from '@providers/interfaces/lifecycle-provider.interface';
 
@@ -632,6 +632,70 @@ export function logBuildStart({ variantName }: BuildContextInterface): void {
 }
 
 /**
+ * Logs macro replacement information for a specific build variant.
+ *
+ * @remarks
+ * Displays all macro transformations that occurred during the build process
+ * for the specified variant. This function only outputs when verbose mode is enabled
+ * in the configuration.
+ *
+ * Each replacement shows:
+ * - The replacement value (if not 'undefined')
+ * - The original source code as a comment
+ *
+ * Output is indented and color-coded for better readability.
+ *
+ * @param variant - The build variant name to retrieve replacements for
+ * @param stage - The macro state interface containing replacement information
+ *
+ * @example
+ * ```ts
+ * const stage: MacrosStateInterface = {
+ *   defineMetadata: { ... },
+ *   replacementInfo: {
+ *     'production': [
+ *       { source: "$$ifdef('DEBUG', () => log())", replacement: "undefined" },
+ *       { source: "$$inline(() => 1 + 1)", replacement: "2" }
+ *     ]
+ *   }
+ * };
+ *
+ * logMacroReplacements('production', stage);
+ * // Output (when verbose):
+ * // [xBuild] macro replacement
+ * //    → 2 // $$inline(() => 1 + 1)
+ * //    → // $$ifdef('DEBUG', () => log())
+ * ```
+ *
+ * @see {@link MacrosStateInterface}
+ * @see {@link MacroReplacementInterface}
+ *
+ * @since 2.1.5
+ */
+
+export function logMacroReplacements(variant: string, stage: MacrosStateInterface): void {
+    if (!inject(ConfigurationService).getValue().verbose) return;
+    const replaceInfo = stage?.replacementInfo?.[variant];
+    if (!replaceInfo || !Array.isArray(replaceInfo) || replaceInfo.length === 0) return;
+
+    const prefix = INDENT + pathColor(ARROW_SYMBOL);
+    const buffer: Array<string> = [ createActionPrefix(`macro ${ warnColor('replacement') }`) ];
+
+    for (const { source, replacement } of replaceInfo) {
+        const code = xterm.dim('// ' + source).replaceAll('\n', `\n${ INDENT }`);
+
+        if (replacement && replacement !== 'undefined') {
+            const resultCode = replacement.replaceAll('\n', `\n${ INDENT }`);
+            buffer.push(`\n${ prefix } ${ resultCode } ${ code }`);
+        } else {
+            buffer.push(`\n${ prefix } ${ code }`);
+        }
+    }
+
+    console.log(buffer.join('\n'));
+}
+
+/**
  * Logs the completion of a build operation with results summary.
  *
  * @remarks
@@ -639,6 +703,7 @@ export function logBuildStart({ variantName }: BuildContextInterface): void {
  * - Completion status with build duration
  * - All errors encountered during the build
  * - All warnings encountered during the build
+ * - Macro replacements (if verbose mode is enabled)
  * - Output files with their sizes (if build succeeded)
  *
  * The completion status shows an error symbol if the build failed (no metafile),
@@ -648,7 +713,7 @@ export function logBuildStart({ variantName }: BuildContextInterface): void {
  * This is the primary function for providing build feedback to users and is
  * called by the build lifecycle at the end of each build operation.
  *
- * @param context - Result context containing variant name, duration, and build result
+ * @param context - Result context containing variant name, duration, build result, and stage
  *
  * @example
  * ```ts
@@ -659,7 +724,8 @@ export function logBuildStart({ variantName }: BuildContextInterface): void {
  *     errors: [],
  *     warnings: [warning1],
  *     metafile: { outputs: { ... } }
- *   }
+ *   },
+ *   stage: macroStage
  * };
  *
  * logBuildEnd(context);
@@ -669,6 +735,9 @@ export function logBuildStart({ variantName }: BuildContextInterface): void {
  * // Warnings (1)
  * //    • Unused variable warning
  * //
+ * // [xBuild] macro replacement
+ * //    → 2 // $$inline(() => 1 + 1)
+ * //
  * // Outputs (2)
  * //    → dist/index.js: 45.23 KB
  * //    → dist/utils.js: 12.45 KB
@@ -676,6 +745,7 @@ export function logBuildStart({ variantName }: BuildContextInterface): void {
  *
  * @see {@link logBuildIssues}
  * @see {@link logBuildOutputs}
+ * @see {@link logMacroReplacements}
  * @see {@link ResultContextInterface}
  *
  * @since 2.0.0
@@ -688,31 +758,16 @@ export function logBuildEnd({ variantName, duration, buildResult, stage }: Resul
     const nameColor = isSuccess ? keywordColor(variantName) : warnColor(variantName);
     const statusSymbol = isSuccess ? infoColor.dim(ARROW_SYMBOL) : errorColor(ERROR_SYMBOL);
     const status = createActionPrefix('completed', statusSymbol);
-    const durationText = xterm.dim(`in ${ duration } ms`);
 
-    console.log(`${ status } ${ nameColor } ${ durationText }`);
+    console.log(`${ status } ${ nameColor } ${ xterm.dim(`in ${ duration } ms`) }`);
 
     logBuildIssues(errors, 'Errors');
     logBuildIssues(warnings, 'Warnings');
-    console.log(''); // empty new line
-
-    if(inject(ConfigurationService).getValue().verbose) {
-        const replaceInfo = <Array<MacroReplacementInterface> | undefined > stage?.replacementInfo;
-        if(replaceInfo && Array.isArray(stage.replacementInfo)) {
-            const buffer: Array<string> = [ createActionPrefix(`Macro ${ warnColor('replacement') }\n`) ];
-
-            stage.replacementInfo.forEach(({ source, replacement }): void => {
-                buffer.push(`\t${ xterm.dim(source).replaceAll('\n', '\n\t') }\n`);
-                if(replacement && replacement !== 'undefined') buffer.push(
-                    `\t${ replacement.replaceAll('\n', '\n\t') }\n`
-                );
-            });
-
-            console.log(buffer.join('\n'));
-        }
-    }
+    logMacroReplacements(variantName, <MacrosStateInterface> stage);
 
     if (isSuccess) {
         logBuildOutputs(metafile);
+    } else {
+        console.log(''); // add space line
     }
 }
