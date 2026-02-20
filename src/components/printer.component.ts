@@ -5,7 +5,7 @@
 import type { Metafile } from 'esbuild';
 import type { IssueType } from '@components/interfaces/printer-component.interface';
 import type { MacroReplacementInterface } from '@directives/interfaces/analyze-directive.interface';
-import type { DiagnosticsInterface } from '@typescript/services/interfaces/typescript-service.interface';
+import type { DiagnosticInterface } from '@typescript/services/interfaces/typescript-service.interface';
 import type { BuildContextInterface, ResultContextInterface } from '@providers/interfaces/lifecycle-provider.interface';
 
 /**
@@ -112,7 +112,7 @@ export function formatByteSize(bytes: number): string {
  *
  * @example
  * ```ts
- * const diagnostic: DiagnosticsInterface = {
+ * const diagnostic: DiagnosticInterface = {
  *   file: '/project/src/index.ts',
  *   line: 10,
  *   column: 5,
@@ -126,12 +126,12 @@ export function formatByteSize(bytes: number): string {
  *
  * @see {@link pathColor}
  * @see {@link warnColor}
- * @see {@link DiagnosticsInterface}
+ * @see {@link DiagnosticInterface}
  *
  * @since 2.0.0
  */
 
-export function formatDiagnosticLocation(diagnostic: DiagnosticsInterface): string {
+export function formatDiagnosticLocation(diagnostic: DiagnosticInterface): string {
     const filePath = diagnostic.file ? relative(process.cwd(), diagnostic.file) : '(unknown)';
     const lineNumber = warnColor(String((diagnostic.line ?? 0) + 1));
     const columnNumber = warnColor(String((diagnostic.column ?? 0) + 1));
@@ -225,7 +225,7 @@ export function logErrorMetadata(error: xBuildBaseError): void {
  * @since 2.0.0
  */
 
-export function formatTypescriptDiagnostic(diagnostic: DiagnosticsInterface, symbol: string, codeColor: typeof errorColor): string {
+export function formatTypescriptDiagnostic(diagnostic: DiagnosticInterface, symbol: string, codeColor: typeof errorColor): string {
     const location = formatDiagnosticLocation(diagnostic);
     const diagnosticCode = codeColor(`TS${ diagnostic.code }`);
     const message = mutedColor(diagnostic.message);
@@ -248,7 +248,7 @@ export function formatTypescriptDiagnostic(diagnostic: DiagnosticsInterface, sym
  * @since 2.0.0
  */
 
-export function logTypescriptDiagnostic(diagnostic: DiagnosticsInterface, symbol: string, codeColor: typeof errorColor = errorColor): void {
+export function logTypescriptDiagnostic(diagnostic: DiagnosticInterface, symbol: string, codeColor: typeof errorColor = errorColor): void {
     const location = formatDiagnosticLocation(diagnostic);
     const diagnosticCode = codeColor(`TS${ diagnostic.code }`);
     const message = mutedColor(diagnostic.message);
@@ -545,7 +545,7 @@ export function logError(issue: unknown): void {
  * @since 2.0.0
  */
 
-export function logTypeDiagnostic(name: string, diagnostics: Array<DiagnosticsInterface>): void {
+export function logTypeDiagnostic(name: string, diagnostics: Array<DiagnosticInterface>): void {
     const hasErrors = diagnostics.length > 0;
     const nameColor = hasErrors ? warnColor(name) : keywordColor(name);
     const statusSymbol = hasErrors ? errorColor(ERROR_SYMBOL) : infoColor.dim(ARROW_SYMBOL);
@@ -591,12 +591,12 @@ export function logTypeDiagnostic(name: string, diagnostics: Array<DiagnosticsIn
  * // [xBuild] → completed development
  * ```
  *
- * @see {@link DiagnosticsInterface}
+ * @see {@link DiagnosticInterface}
  *
  * @since 2.0.0
  */
 
-export function logTypeDiagnostics(diagnostics: Record<string, Array<DiagnosticsInterface>>): void {
+export function logTypeDiagnostics(diagnostics: Record<string, Array<DiagnosticInterface>>): void {
     for (const [ name, errors ] of Object.entries(diagnostics)) {
         logTypeDiagnostic(name, errors);
     }

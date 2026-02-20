@@ -3,7 +3,7 @@
  */
 
 import type { ParsedCommandLine, LanguageService, Diagnostic } from 'typescript';
-import type { CachedServiceInterface, DiagnosticsInterface } from './interfaces/typescript-service.interface';
+import type { CachedServiceInterface, DiagnosticInterface } from './interfaces/typescript-service.interface';
 
 /**
  * Imports
@@ -181,7 +181,7 @@ export class TypescriptService {
      * @since 2.0.0
      */
 
-    check(filesList?: Array<string>): Array<DiagnosticsInterface> {
+    check(filesList?: Array<string>): Array<DiagnosticInterface> {
         const program = this.languageService.getProgram();
         if (!program) return [];
 
@@ -403,7 +403,7 @@ export class TypescriptService {
      * @since 2.0.0
      */
 
-    private collectDiagnostics(file: ts.SourceFile): DiagnosticsInterface[] {
+    private collectDiagnostics(file: ts.SourceFile): DiagnosticInterface[] {
         return [
             ...this.languageService.getSemanticDiagnostics(file.fileName),
             ...this.languageService.getSyntacticDiagnostics(file.fileName),
@@ -541,8 +541,8 @@ export class TypescriptService {
      * @since 2.0.0
      */
 
-    private formatDiagnostic(diagnostic: Diagnostic): DiagnosticsInterface {
-        const result: DiagnosticsInterface = {
+    private formatDiagnostic(diagnostic: Diagnostic): DiagnosticInterface {
+        const result: DiagnosticInterface = {
             message: ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'),
             category: diagnostic.category
         };

@@ -3,7 +3,7 @@
  */
 
 import type { LifecycleProvider } from '@providers/lifecycle.provider';
-import type { DiagnosticsInterface } from '@typescript/typescript.module';
+import type { DiagnosticInterface } from '@typescript/typescript.module';
 import type { VariantBuildInterface } from '@interfaces/configuration.interface';
 import type { BuildOptions, OnStartResult, BuildResult, Message } from 'esbuild';
 import type { UnsubscribeType } from '@observable/interfaces/observable.interface';
@@ -397,7 +397,66 @@ export class VariantService {
         this.typescriptModule.touchFiles(files);
     }
 
-    async check(): Promise<DiagnosticsInterface[]> {
+    /**
+     * Performs TypeScript type checking for all files in the variant's dependency graph.
+     *
+     * @returns Array of diagnostic information containing errors, warnings, and suggestions
+     *
+     * @remarks
+     * This method executes type checking on all source files discovered through dependency
+     * analysis. It ensures the dependency map is built before checking, building it lazily
+     * on the first invocation if not already available.
+     *
+     * The type checking process:
+     * 1. Builds the dependency map if not already cached (first invocation only)
+     * 2. Extracts all source file paths from the dependency map
+     * 3. Passes the file list to the TypeScript module for semantic analysis
+     * 4. Returns diagnostics for all type errors, warnings, and suggestions
+     *
+     * This method can be called independently of the build process to perform
+     * type checking without compilation. It's also used internally by the `start`
+     * lifecycle hook during builds when type checking is enabled.
+     *
+     * The dependency file map is cached after the first build, so subsequent
+     * type checks reuse the same file list unless the variant is rebuilt or
+     * dependencies change.
+     *
+     * @example
+     * ```ts
+     * const service = new VariantService('production', lifecycle, config);
+     *
+     * // Check types without building
+     * const diagnostics = await service.check();
+     *
+     * if (diagnostics.length > 0) {
+     *   console.error(`Found ${diagnostics.length} type issues`);
+     *   diagnostics.forEach(d => {
+     *     console.error(`${d.file}:${d.line}:${d.column} - ${d.message}`);
+     *   });
+     * }
+     * ```
+     *
+     * @example
+     * ```ts
+     * // Used in CI pipeline
+     * const errors = (await service.check()).filter(
+     *   d => d.category === DiagnosticCategory.Error
+     * );
+     *
+     * if (errors.length > 0) {
+     *   process.exit(1);
+     * }
+     * ```
+     *
+     * @see {@link start}
+     * @see {@link Typescript.check}
+     * @see {@link buildDependencyMap}
+     * @see {@link DiagnosticInterface}
+     *
+     * @since 2.0.0
+     */
+
+    async check(): Promise<DiagnosticInterface[]> {
         if(!this.dependenciesFile)
             this.dependenciesFile = await this.buildDependencyMap();
 
@@ -543,6 +602,7 @@ export class VariantService {
         if (buildOnError) {
             result.warnings?.push({ detail: error, location: undefined });
         } else {
+
             result.errors?.push({ detail: error, location: undefined });
         }
 

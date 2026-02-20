@@ -97,7 +97,7 @@ export interface CachedServiceInterface {
  *
  * @example
  * ```ts
- * const diagnostic: DiagnosticsInterface = {
+ * const diagnostic: DiagnosticInterface = {
  *   file: 'src/index.ts',
  *   line: 42,
  *   column: 15,
@@ -115,7 +115,7 @@ export interface CachedServiceInterface {
  * @since 2.0.0
  */
 
-export interface DiagnosticsInterface {
+export interface DiagnosticInterface {
 
     /**
      * File path where the diagnostic occurred.
@@ -206,3 +206,4 @@ export interface DiagnosticsInterface {
 
     category: DiagnosticCategory
 }
+
