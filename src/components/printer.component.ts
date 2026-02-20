@@ -165,7 +165,7 @@ export function appendErrorMetadata(buffer: Array<string>, error: xBuildBaseErro
     }
     buffer.push('');
     buffer.push(`${ INDENT }Enhanced Stack Trace:`);
-    buffer.push(`    ${ stackTrace }`);
+    buffer.push(`    ${ stackTrace }\n`);
 }
 
 /**
@@ -230,7 +230,7 @@ export function formatTypescriptDiagnostic(diagnostic: DiagnosticsInterface, sym
     const diagnosticCode = codeColor(`TS${ diagnostic.code }`);
     const message = mutedColor(diagnostic.message);
 
-    return `${ INDENT }${ symbol } ${ location } ${ textColor(ARROW_SYMBOL) } ${ diagnosticCode } ${ textColor(DASH_SYMBOL) } ${ message }`;
+    return `${ INDENT }${ symbol } ${ location } ${ textColor(ARROW_SYMBOL) } ${ diagnosticCode } ${ textColor(DASH_SYMBOL) } ${ message }\n`;
 }
 
 /**
