@@ -281,7 +281,7 @@ export function appendTypesError(buffer: Array<string>, error: TypesError, symbo
     const diagnosticCount = error.diagnostics.length;
 
     if (diagnosticCount === 0) {
-        buffer.push(`\n${ INDENT }${ warnColor(symbol) } ${ warnColor('TypesError') }: ${ mutedColor(error.message || 'Type checking warning') }`);
+        buffer.push(`${ INDENT }${ warnColor(symbol) } ${ warnColor('TypesError') }: ${ mutedColor(error.message || 'Type checking warning') }`);
 
         return 1;
     }
@@ -309,7 +309,7 @@ export function appendTypesError(buffer: Array<string>, error: TypesError, symbo
  */
 
 export function appendGenericIssue(buffer: Array<string>, issue: IssueType, symbol: string, color: typeof errorColor): void {
-    buffer.push(`\n${ INDENT }${ color(symbol) } ${ issue }`);
+    buffer.push(`${ INDENT }${ color(symbol) } ${ issue }`);
     if (issue instanceof xBuildBaseError) {
         appendErrorMetadata(buffer, issue);
     }
