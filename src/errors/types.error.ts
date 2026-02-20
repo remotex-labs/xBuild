@@ -2,7 +2,7 @@
  * Import will remove at compile time
  */
 
-import type { DiagnosticsInterface } from '@typescript/typescript.module';
+import type { DiagnosticInterface } from '@typescript/typescript.module';
 
 /**
  * Represents a TypeScript type checking error with associated diagnostic information.
@@ -13,7 +13,7 @@ import type { DiagnosticsInterface } from '@typescript/typescript.module';
  * from TypeScript's type checker, allowing structured access to individual diagnostics.
  *
  * **Error context**:
- * Each `TypesError` can contain zero or more {@link DiagnosticsInterface} objects that provide:
+ * Each `TypesError` can contain zero or more {@link DiagnosticInterface} objects that provide:
  * - Source file location (file path, line, column)
  * - Diagnostic code for error identification
  * - Detailed error messages
@@ -21,10 +21,10 @@ import type { DiagnosticsInterface } from '@typescript/typescript.module';
  * @example
  * ```ts
  * import { TypesError } from '@errors/types.error';
- * import type { DiagnosticsInterface } from '@typescript/interfaces/typescript.interface';
+ * import type { DiagnosticInterface } from '@typescript/interfaces/typescript.interface';
  *
  * // Create error with diagnostics from type checker
- * const diagnostics: DiagnosticsInterface[] = [
+ * const diagnostics: DiagnosticInterface[] = [
  *   {
  *     file: 'src/index.ts',
  *     line: 10,
@@ -38,7 +38,7 @@ import type { DiagnosticsInterface } from '@typescript/typescript.module';
  * ```
  *
  * @see {@link Typescript.check} for type checking context
- * @see {@link DiagnosticsInterface} for diagnostic structure
+ * @see {@link DiagnosticInterface} for diagnostic structure
  *
  * @since 2.0.0
  */
@@ -69,12 +69,12 @@ export class TypesError extends Error {
      * }
      * ```
      *
-     * @see {@link DiagnosticsInterface}
+     * @see {@link DiagnosticInterface}
      *
      * @since 2.0.0
      */
 
-    readonly diagnostics: Array<DiagnosticsInterface>;
+    readonly diagnostics: Array<DiagnosticInterface>;
 
     /**
      * Creates a new instance of `TypesError`.
@@ -114,7 +114,7 @@ export class TypesError extends Error {
      * @since 2.0.0
      */
 
-    constructor(message?: string, diagnostics: Array<DiagnosticsInterface> = []) {
+    constructor(message?: string, diagnostics: Array<DiagnosticInterface> = []) {
         super(message);
         this.name = 'TypesError';
         this.diagnostics = diagnostics;

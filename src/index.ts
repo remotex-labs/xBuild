@@ -72,7 +72,7 @@ import { ConfigurationService } from '@services/configuration.service';
 
 export type { ArgumentsInterface } from '@argv/interfaces/argv-module.interface';
 export type { ServerConfigurationInterface } from '@server/interfaces/server.interface';
-export type { DiagnosticsInterface } from '@typescript/services/interfaces/typescript-service.interface';
+export type { DiagnosticInterface } from '@typescript/services/interfaces/typescript-service.interface';
 
 /**
  * Export

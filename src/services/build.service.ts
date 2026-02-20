@@ -8,7 +8,7 @@ import type { OnEndType, OnStartType } from '@providers/interfaces/lifecycle-pro
 import type { ResultContextInterface } from '@providers/interfaces/lifecycle-provider.interface';
 import type { BuildResultInterface } from '@providers/interfaces/esbuild-messages-provider.interface';
 import type { BuildConfigInterface, PartialBuildConfigType } from '@interfaces/configuration.interface';
-import type { DiagnosticsInterface } from '@typescript/services/interfaces/typescript-service.interface';
+import type { DiagnosticInterface } from '@typescript/services/interfaces/typescript-service.interface';
 
 /**
  * Imports
@@ -383,14 +383,14 @@ export class BuildService {
      * }
      * ```
      *
-     * @see {@link DiagnosticsInterface}
+     * @see {@link DiagnosticInterface}
      * @see {@link VariantService.check}
      *
      * @since 2.0.0
      */
 
-    async typeChack(): Promise<Record<string, DiagnosticsInterface[]>> {
-        const result: Record<string, Array<DiagnosticsInterface>> = {};
+    async typeChack(): Promise<Record<string, DiagnosticInterface[]>> {
+        const result: Record<string, Array<DiagnosticInterface>> = {};
 
         for(const variant of Object.values(this.variants)) {
             result[variant.name] = await variant.check();

@@ -377,11 +377,11 @@ async function macroCallExpression(node: ts.Node, replacements: Set<SubstInterfa
     return true;
 }
 
-
 /**
  * Recursively traverses the AST to find and transform all macro occurrences in the source file.
  *
  * @param state - The macro transformation state containing source file, definitions, and content
+ * @param variant - The build variant name for tracking replacements (defaults to 'unknow')
  *
  * @returns A promise resolving to the transformed source code with all macro replacements applied
  *
@@ -396,20 +396,6 @@ async function macroCallExpression(node: ts.Node, replacements: Set<SubstInterfa
  * 4. **Disabled macro calls**: Calls to macros marked as disabled in metadata
  * 5. **Disabled macro identifiers**: References to disabled macro names (replaced with `undefined`)
  *
- * **Processing algorithm**:
- * 1. Creates a set to collect all code replacements
- * 2. Retrieves the set of disabled macro names from metadata
- * 3. Recursively visits all AST nodes in depth-first order
- * 4. For each node type, applies appropriate transformation logic
- * 5. Collects all replacements with their positions
- * 6. Sorts replacements by position (reverse order for safe text replacement)
- * 7. Applies replacements sequentially to the source content
- *
- * **Replacement strategy**:
- * - Sorts replacements from end to start to avoid position invalidation
- * - Uses string slicing for efficient text replacement
- * - Preserves source text outside macro regions unchanged
- *
  * @example Complete transformation
  * ```ts
  * // Original source:
@@ -418,11 +404,13 @@ async function macroCallExpression(node: ts.Node, replacements: Set<SubstInterfa
  * $$debug();
  *
  * // With definitions: { DEBUG: false }
- * const result = await astProcess(state);
+ * const result = await astProcess(state, 'production');
  *
  * // Transformed result:
  * const value = undefined;
  * undefined();
+ *
+ * // Tracked in state.stage.replacementInfo['production']
  * ```
  *
  * @example Handling disabled macros
@@ -437,19 +425,24 @@ async function macroCallExpression(node: ts.Node, replacements: Set<SubstInterfa
  *
  * @example No macros (short circuit)
  * ```ts
- * const state = { contents: 'const x = 1;', sourceFile, ... };
+ * const state = {
+ *   contents: 'const x = 1;',
+ *   sourceFile,
+ *   stage: { defineMetadata: { filesWithMacros: new Set(), disabledMacroNames: new Set() } }
+ * };
  * const result = await astProcess(state);
- * // Returns original content unchanged
+ * // Returns original content unchanged immediately
  * ```
  *
- * @see {@link astInlineCallExpression} for nested inline calls
+ * @see {@link macroCallExpression} for nested inline calls
  * @see {@link isCallExpression} for expression statement handling
  * @see {@link isVariableStatement} for variable declaration handling
+ * @see {@link MacrosStateInterface.replacementInfo} for replacement tracking
  *
  * @since 2.0.0
  */
 
-export async function astProcess(state: StateInterface): Promise<string> {
+export async function astProcess(state: StateInterface, variant: string = 'unknow'): Promise<string> {
     const fnToRemove = state.stage.defineMetadata.disabledMacroNames;
     const hasMacro = state.stage.defineMetadata.filesWithMacros.has(state.sourceFile.fileName);
     if (!hasMacro && fnToRemove.size === 0) return state.contents;
@@ -517,9 +510,12 @@ export async function astProcess(state: StateInterface): Promise<string> {
     const replacementsArray = Array.from(replacements);
     replacementsArray.sort((a, b) => b.start - a.start);
 
-    state.stage.replacementInfo = [];
+    state.stage.replacementInfo ??= {};
+    state.stage.replacementInfo[variant] ??= [];
+    const replacementInfo = state.stage.replacementInfo[variant];
+
     for (const { start, end, replacement } of replacementsArray) {
-        state.stage.replacementInfo.push({
+        replacementInfo.push({
             source: highlightCode(state.contents.slice(start, end)),
             replacement: highlightCode(replacement)
         });
@@ -625,8 +621,7 @@ export async function transformerDirective(variant: VariantService, context: Loa
         sourceFile: sourceFile!
     };
 
-
-    let content = await astProcess(state);
+    let content = await astProcess(state, variant.name);
     if (!variant.config.esbuild.bundle) {
         const alias = variant.typescript.languageHostService.aliasRegex;
         if (alias) {

@@ -580,8 +580,8 @@ describe('transformer.directive', () => {
             state.stage.defineMetadata.filesWithMacros.clear();
             state.stage.defineMetadata.disabledMacroNames.add('$$disabledMacro');
 
-            await astProcess(state);
-            expect(Array.isArray(state.stage.replacementInfo)).toBe(true);
+            await astProcess(state, 'index');
+            expect(Array.isArray(state.stage.replacementInfo?.['index'])).toBe(true);
         });
 
         test('handles empty code', async () => {

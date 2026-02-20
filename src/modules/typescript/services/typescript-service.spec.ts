@@ -132,6 +132,7 @@ describe('TypescriptService', () => {
             const fakeDiag = {
                 file: { fileName: fakeFileName, getLineAndCharacterOfPosition: () => ({ line: 0, character: 0 }) },
                 messageText: 'Test error',
+                category: ts.DiagnosticCategory.Error,
                 code: 1234,
                 start: 10
             } as any;
@@ -152,7 +153,8 @@ describe('TypescriptService', () => {
                 file: fakeFileName,
                 line: 1,
                 column: 1,
-                code: 1234
+                code: 1234,
+                category: ts.DiagnosticCategory.Error
             });
         });
     });

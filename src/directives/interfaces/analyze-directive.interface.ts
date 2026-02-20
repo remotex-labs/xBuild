@@ -191,7 +191,7 @@ export interface MacroReplacementInterface {
  *
  * @example Using in build lifecycle
  * ```ts
- * async function onBuild(context: { stage: MacrosStaeInterface }) {
+ * async function onBuild(context: { stage: MacrosStateInterface }) {
  *   const { defineMetadata } = context.stage;
  *
  *   console.log(`Files with macros: ${defineMetadata.filesWithMacros.size}`);
@@ -201,7 +201,7 @@ export interface MacroReplacementInterface {
  *
  * @example Checking macro status in plugin
  * ```ts
- * function myPlugin(stage: MacrosStaeInterface) {
+ * function myPlugin(stage: MacrosStateInterface) {
  *   return {
  *     name: 'my-plugin',
  *     setup(build) {
@@ -220,7 +220,7 @@ export interface MacroReplacementInterface {
  *
  * @example Accessing in transformer
  * ```ts
- * function transform (code: string, stage: MacrosStaeInterface): string {
+ * function transform(code: string, stage: MacrosStateInterface): string {
  *   const { disabledMacroNames } = stage.defineMetadata;
  *
  *   // Remove disabled macros
@@ -238,6 +238,7 @@ export interface MacroReplacementInterface {
  *
  * @since 2.0.0
  */
+
 
 export interface MacrosStateInterface extends LifecycleStageInterface {
     /**
@@ -257,27 +258,34 @@ export interface MacrosStateInterface extends LifecycleStageInterface {
     defineMetadata: MacrosMetadataInterface;
 
     /**
-     * Optional list of macro-driven source replacements recorded during transformation.
+     * Optional map of macro-driven source replacements recorded during transformation.
      *
      * @remarks
      * When present, this can be used for:
-     * - debugging (“what exactly changed?”),
+     * - debugging ("what exactly changed?"),
      * - producing transformation reports, or
      * - testing/verifying deterministic output.
      *
+     * The keys are the name of the variant, and each value is an array of replacements made.
      * Each entry describes the original fragment and its replacement via
      * {@link MacroReplacementInterface}.
      *
      * @example
      * ```ts
-     * stage.replacementInfo = [
-     *   { source: "$$inline(() => 1 + 1)", replacement: "2" },
-     *   { source: "$$debug()", replacement: "undefined" }
-     * ];
+     * stage.replacementInfo = {
+     *   'index': [
+     *     { source: "$$inline(() => 1 + 1)", replacement: "2" },
+     *     { source: "$$debug()", replacement: "undefined" }
+     *   ],
+     *   'config': [
+     *     { source: "$$ifdef('PROD', ...)", replacement: "undefined" }
+     *   ]
+     * };
      * ```
      *
      * @since 2.0.0
      */
 
-    replacementInfo?: Array<MacroReplacementInterface>;
+
+    replacementInfo?: Record<string, Array<MacroReplacementInterface>>;
 }
