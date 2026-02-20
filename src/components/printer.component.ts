@@ -309,7 +309,7 @@ export function appendTypesError(buffer: Array<string>, error: TypesError, symbo
  */
 
 export function appendGenericIssue(buffer: Array<string>, issue: IssueType, symbol: string, color: typeof errorColor): void {
-    buffer.push(`\n${ INDENT }${ color(symbol) } ${ issue }`);
+    buffer.push(`\n${ INDENT }${ color(symbol) } ${ color.dim(issue.toString()) }`);
     if (issue instanceof xBuildBaseError) {
         appendErrorMetadata(buffer, issue);
     }
@@ -694,6 +694,7 @@ export function logBuildEnd({ variantName, duration, buildResult, stage }: Resul
 
     logBuildIssues(errors, 'Errors');
     logBuildIssues(warnings, 'Warnings');
+    console.log(''); // empty new line
 
     if(inject(ConfigurationService).getValue().verbose) {
         const replaceInfo = <Array<MacroReplacementInterface> | undefined > stage?.replacementInfo;
