@@ -15,6 +15,7 @@ import type { CommonBuildInterface, LifecycleHooksInterface } from '@interfaces/
  * Imports
  */
 
+import ts from 'typescript';
 import { build } from 'esbuild';
 import { writeFile, mkdir } from 'fs/promises';
 import { TypesError } from '@errors/types.error';
@@ -595,15 +596,27 @@ export class VariantService {
         );
 
         if (diagnostics.length === 0) return result;
-        const error = new TypesError('Type checking failed', diagnostics);
         const buildOnError = typeof this.buildConfig.types === 'object' &&
             !this.buildConfig.types.failOnError;
 
         if (buildOnError) {
+            const error = new TypesError('Type checking failed', diagnostics);
             result.warnings?.push({ detail: error, location: undefined });
         } else {
+            const errors: Array<DiagnosticInterface> = [];
+            const warnings: Array<DiagnosticInterface> = [];
+            const error = new TypesError('Type checking failed', errors);
+            const warning = new TypesError('Type checking failed', warnings);
 
-            result.errors?.push({ detail: error, location: undefined });
+            for (const d of diagnostics) {
+                (d.category === ts.DiagnosticCategory.Error ? errors : warnings).push(d);
+            }
+
+            if(errors.length)
+                result.errors?.push({ detail: error, location: undefined });
+
+            if(warnings.length)
+                result.warnings?.push({ detail: warning, location: undefined });
         }
 
         return result;

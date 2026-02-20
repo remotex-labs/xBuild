@@ -401,8 +401,8 @@ describe('VariantService', () => {
 
             const result = await startCallback();
 
-            expect(result.errors).toHaveLength(1);
-            expect(result.errors[0].detail).toBeInstanceOf(TypesError);
+            expect(result.warnings).toHaveLength(1);
+            expect(result.warnings[0].detail).toBeInstanceOf(TypesError);
         });
 
         test('adds type warnings when failOnError is false', async () => {
