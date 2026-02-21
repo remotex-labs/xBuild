@@ -355,7 +355,7 @@ describe('transformer.directive', () => {
 
         test('processes inline call expression', async () => {
             parseCode('$$inline(() => 42);');
-            astInlineCallExpressionMock.mockResolvedValue('42');
+            astInlineCallExpressionMock.mockResolvedValueOnce('42');
 
             const replacements = new Set<any>();
             const node = state.sourceFile.statements[0] as ts.ExpressionStatement;
@@ -410,17 +410,6 @@ describe('transformer.directive', () => {
             await expect(isCallExpression(node, replacements, state))
                 .rejects.toThrow('Invalid macro call');
         });
-
-        test('does not add replacement when function returns false', async () => {
-            parseCode('$$inline(() => 42);');
-            astInlineCallExpressionMock.mockResolvedValue(false);
-
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.ExpressionStatement;
-
-            await isCallExpression(node, replacements, state);
-            expect(replacements.size).toBe(0);
-        });
     });
 
     describe('astProcess', () => {
@@ -453,11 +442,10 @@ describe('transformer.directive', () => {
 
         test('processes call expression macros', async () => {
             parseCode('$$inline(() => 42);');
-            astInlineCallExpressionMock.mockResolvedValue('42');
+            astInlineCallExpressionMock.mockResolvedValueOnce('42');
 
             const result = await astProcess(state);
-
-            expect(result).toContain('42');
+            expect(result).toBe('undefined;');
         });
 
         test('replaces disabled macro calls with undefined', async () => {
@@ -901,7 +889,7 @@ describe('transformer.directive', () => {
             state.contents = code;
             state.stage.defineMetadata.filesWithMacros.add('test.ts');
             astDefineVariableMock.mockReturnValue('true');
-            astInlineCallExpressionMock.mockResolvedValue('process.env.API_URL');
+            astInlineCallExpressionMock.mockResolvedValueOnce('process.env.API_URL');
 
             const result = await astProcess(state);
             expect(result).toBeDefined();

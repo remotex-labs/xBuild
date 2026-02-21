@@ -297,8 +297,10 @@ export async function isCallExpression(
     }
 
     let replacement: string | false = false;
-    if (fnName == MACRO_FUNCTIONS[2]) replacement = await astInlineCallExpression(callExpr.arguments, state);
-    else replacement = astDefineCallExpression(callExpr, state);
+    if (fnName == MACRO_FUNCTIONS[2])  {
+        await astInlineCallExpression(callExpr.arguments, state);
+        replacement = 'undefined';
+    } else replacement = astDefineCallExpression(callExpr, state);
 
     if (replacement !== false) {
         replacements.add({
