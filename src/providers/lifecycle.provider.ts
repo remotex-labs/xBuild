@@ -451,12 +451,21 @@ export class LifecycleProvider {
      *
      * @param errors - The error array to append to
      * @param err - The thrown value to wrap
+     * @param names - The hook name to set as `pluginName` on the message, defaults to the variant name
+     *
+     * @remarks
+     * The `pluginName` field is populated so esbuild can attribute the error to the specific
+     * hook that threw, rather than the plugin as a whole. This makes error output more precise
+     * when multiple hooks are registered under different names.
      *
      * @since 2.0.0
      */
 
-    private pushError(errors: Array<PartialMessage>, err: unknown): void {
-        errors.push({ detail: err });
+    private pushError(errors: Array<PartialMessage>, err: unknown, names: string = this.variantName): void {
+        errors.push({
+            detail: err,
+            pluginName: names
+        });
     }
 
     /**
@@ -477,6 +486,8 @@ export class LifecycleProvider {
      *
      * Errors thrown by a hook are caught and appended to the error array rather than
      * propagating, so all hooks always execute regardless of individual failures.
+     * Each captured error is attributed to its hook's registered name via `pluginName`
+     * on the `PartialMessage`, making the source of the failure identifiable in esbuild output.
      *
      * The context object is passed through to later lifecycle stages for consistent
      * state management across the build.
@@ -493,13 +504,13 @@ export class LifecycleProvider {
         const warnings: Array<PartialMessage> = [];
         const hookContext = { build, ...context };
 
-        for (const hook of this.startHooks.values()) {
+        for (const [ name, hook ] of this.startHooks.entries()) {
             try {
                 const result = await hook(hookContext);
                 if (result?.errors) errors.push(...result.errors);
                 if (result?.warnings) warnings.push(...result.warnings);
             } catch (err) {
-                this.pushError(errors, err);
+                this.pushError(errors, err, name);
             }
         }
 
@@ -516,10 +527,11 @@ export class LifecycleProvider {
      * @remarks
      * This method calculates the build duration from the start time and executes hooks in two phases:
      * 1. **End hooks**: Execute for all builds with a result context containing build result and duration;
-     *    errors and warnings are aggregated into the return value.
+     *    errors and warnings are aggregated into the return value. Each captured error is attributed
+     *    to its hook's registered name via `pluginName` on the `PartialMessage`.
      * 2. **Success hooks**: Execute only if `buildResult.errors.length === 0` with the same result context.
-     *    Errors thrown by success hooks are captured into the return value, but return values from
-     *    success hooks are intentionally ignored — they are meant for side effects only.
+     *    Errors thrown by success hooks are captured into the return value, attributed to the variant name,
+     *    but return values from success hooks are intentionally ignored — they are meant for side effects only.
      *
      * Both hook phases share the same pre-built hook context object, constructed once before
      * any iteration begins.
@@ -537,22 +549,22 @@ export class LifecycleProvider {
         const duration = Date.now() - context.stage.startTime.getTime();
         const hookContext = { buildResult, duration, ...context };
 
-        for (const hook of this.endHooks.values()) {
+        for (const [ name, hook ] of this.endHooks.entries()) {
             try {
                 const result = await hook(hookContext);
                 if (result?.errors) errors.push(...result.errors);
                 if (result?.warnings) warnings.push(...result.warnings);
             } catch (err) {
-                this.pushError(errors, err);
+                this.pushError(errors, err, name);
             }
         }
 
         if (buildResult.errors.length === 0) {
-            for (const hook of this.successHooks.values()) {
+            for (const [ name, hook ] of this.successHooks.entries()) {
                 try {
                     await hook(hookContext);
                 } catch (err) {
-                    this.pushError(errors, err);
+                    this.pushError(errors, err, name);
                 }
             }
         }
@@ -619,8 +631,9 @@ export class LifecycleProvider {
      * - Falls back to reading the file from disk using `fs/promises`
      *
      * The loader starts as `'default'` and can be changed by any hook in the pipeline.
-     * Errors thrown by individual hooks are caught and appended to the error list so the
-     * pipeline continues running for subsequent hooks.
+     * Errors thrown by individual hooks are caught and appended to the error list, attributed to
+     * the hook's registered name via `pluginName` on the `PartialMessage`, so the pipeline continues
+     * running for subsequent hooks and the failing hook is clearly identifiable in esbuild output.
      * The final contents, loader, errors, and warnings are returned to esbuild for processing.
      *
      * @see {@link onLoad}
@@ -641,7 +654,7 @@ export class LifecycleProvider {
             ? snapshot.contentSnapshot.text
             : await readFile(filePath, 'utf8');
 
-        for (const hook of this.loadHooks.values()) {
+        for (const [ name, hook ] of this.loadHooks.entries()) {
             try {
                 const result = await hook({ contents, loader, args, ...context });
                 if (!result) continue;
@@ -650,7 +663,7 @@ export class LifecycleProvider {
                 if (result.errors) errors.push(...result.errors);
                 if (result.warnings) warnings.push(...result.warnings);
             } catch (err) {
-                this.pushError(errors, err);
+                this.pushError(errors, err, name);
             }
         }
 

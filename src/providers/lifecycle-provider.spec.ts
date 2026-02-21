@@ -168,6 +168,7 @@ describe('LifecycleProvider', () => {
             expect(hook2).toHaveBeenCalled();
             expect(result.errors).toHaveLength(1);
             expect(result.errors[0].detail).toBe(error);
+            expect(result.errors[0].pluginName).toBe('a');
             expect(result.warnings).toEqual([ 'warn1' ]);
         });
 
@@ -259,6 +260,7 @@ describe('LifecycleProvider', () => {
             expect(hook2).toHaveBeenCalled();
             expect(result.errors).toHaveLength(1);
             expect(result.errors[0].detail).toBe(error);
+            expect(result.errors[0].pluginName).toBe('a');
             expect(result.warnings).toEqual([ 'warn1' ]);
         });
 
@@ -273,6 +275,7 @@ describe('LifecycleProvider', () => {
 
             expect(result.errors).toHaveLength(1);
             expect(result.errors[0].detail).toBe(error);
+            expect(result.errors[0].pluginName).toBe(variantName);
         });
 
         test('calculates duration correctly', async () => {
@@ -492,6 +495,7 @@ describe('LifecycleProvider', () => {
             expect(hook2).toHaveBeenCalled();
             expect(result.errors).toHaveLength(1);
             expect(result.errors[0].detail).toBe(error);
+            expect(result.errors[0].pluginName).toBe('a');
             expect(result.loader).toBe('ts');
         });
 
