@@ -49,6 +49,14 @@ describe('LifecycleProvider', () => {
         xJet.restoreAllMocks();
     });
 
+    /**
+     * Retrieves the bound callback registered on an esbuild mock at the given argument index
+     * and invokes it with the provided args.
+     */
+    async function callRegistered(mock: any, argIndex: number, ...args: any[]): Promise<any> {
+        return mock.mock.calls[0][argIndex](...args);
+    }
+
     describe('constructor & plugin creation', () => {
         test('creates esbuild plugin with correct name', () => {
             const plugin = provider.create();
@@ -86,6 +94,20 @@ describe('LifecycleProvider', () => {
             expect((provider as any).loadHooks.size).toBe(1);
         });
 
+        test('ignores undefined handlers', () => {
+            provider.onStart(undefined);
+            provider.onEnd(undefined);
+            provider.onSuccess(undefined);
+            provider.onResolve(undefined);
+            provider.onLoad(undefined);
+
+            expect((provider as any).startHooks.size).toBe(0);
+            expect((provider as any).endHooks.size).toBe(0);
+            expect((provider as any).successHooks.size).toBe(0);
+            expect((provider as any).resolveHooks.size).toBe(0);
+            expect((provider as any).loadHooks.size).toBe(0);
+        });
+
         test('clearAll removes all registered hooks', () => {
             provider.onStart(xJet.fn());
             provider.onEnd(xJet.fn());
@@ -104,72 +126,98 @@ describe('LifecycleProvider', () => {
     });
 
     describe('onStart execution', () => {
+        test('does not register esbuild onStart when no hooks', () => {
+            provider.create().setup(build);
+
+            expect(build.onStart).not.toHaveBeenCalled();
+        });
+
         test('executes registered start hooks and aggregates errors/warnings', async () => {
             const hook1 = xJet.fn<any, any, any>().mockResolvedValue({ errors: [ 'err1' ], warnings: [ 'warn1' ] });
             const hook2 = xJet.fn<any, any, any>().mockResolvedValue({ errors: [ 'err2' ] });
+            const expectedContext = expect.objectContaining({
+                build,
+                argv,
+                variantName,
+                stage: expect.objectContaining({ startTime: expect.any(Date) })
+            });
 
             provider.onStart(hook1, 'a');
             provider.onStart(hook2, 'b');
             provider.create().setup(build);
 
-            const startCallback = build.onStart.mock.calls[0][0];
-            const startResult = await startCallback();
+            const result = await callRegistered(build.onStart, 0);
 
-            expect(hook1).toHaveBeenCalledWith(expect.objectContaining({
-                build,
-                argv,
-                variantName,
-                stage: expect.objectContaining({ startTime: expect.any(Date) })
-            }));
-
-            expect(hook2).toHaveBeenCalledWith(expect.objectContaining({
-                build,
-                argv,
-                variantName,
-                stage: expect.objectContaining({ startTime: expect.any(Date) })
-            }));
-
-            expect(startResult.errors).toEqual([ 'err1', 'err2' ]);
-            expect(startResult.warnings).toEqual([ 'warn1' ]);
+            expect(hook1).toHaveBeenCalledWith(expectedContext);
+            expect(hook2).toHaveBeenCalledWith(expectedContext);
+            expect(result.errors).toEqual([ 'err1', 'err2' ]);
+            expect(result.warnings).toEqual([ 'warn1' ]);
         });
 
-        test('returns empty result when no hooks registered', async () => {
+        test('captures thrown errors from start hooks and continues to next hook', async () => {
+            const error = new Error('start hook failed');
+            const hook1 = xJet.fn<any, any, any>().mockRejectedValue(error);
+            const hook2 = xJet.fn<any, any, any>().mockResolvedValue({ warnings: [ 'warn1' ] });
+
+            provider.onStart(hook1, 'a');
+            provider.onStart(hook2, 'b');
             provider.create().setup(build);
 
-            // No onStart callback registered
-            expect(build.onStart).not.toHaveBeenCalled();
+            const result = await callRegistered(build.onStart, 0);
+
+            expect(hook2).toHaveBeenCalled();
+            expect(result.errors).toHaveLength(1);
+            expect(result.errors[0].detail).toBe(error);
+            expect(result.warnings).toEqual([ 'warn1' ]);
+        });
+
+        test('resets startTime on each invocation', async () => {
+            const hook = xJet.fn<any, any, any>().mockResolvedValue({});
+
+            provider.onStart(hook);
+            provider.create().setup(build);
+
+            const startCallback = build.onStart.mock.calls[0][0];
+
+            await startCallback();
+            const firstTime: Date = hook.mock.calls[0][0].stage.startTime;
+
+            await new Promise(r => setTimeout(r, 5));
+            await startCallback();
+            const secondTime: Date = hook.mock.calls[1][0].stage.startTime;
+
+            expect(hook).toHaveBeenCalledTimes(2);
+            expect(secondTime.getTime()).toBeGreaterThan(firstTime.getTime());
         });
     });
 
     describe('onEnd & onSuccess execution', () => {
+        test('does not register esbuild onEnd when no end or success hooks', () => {
+            provider.create().setup(build);
+
+            expect(build.onEnd).not.toHaveBeenCalled();
+        });
+
         test('executes end hooks and success hooks only on success', async () => {
             const endHook = xJet.fn<any, any, any>().mockResolvedValue({ errors: [ 'end-err' ] });
             const successHook = xJet.fn<any, any, any>();
+            const buildResult = { errors: [] };
+            const expectedContext = expect.objectContaining({
+                buildResult,
+                duration: expect.any(Number),
+                argv,
+                variantName,
+                stage: expect.any(Object)
+            });
 
             provider.onEnd(endHook);
             provider.onSuccess(successHook);
             provider.create().setup(build);
 
-            const endCallback = build.onEnd.mock.calls[0][0];
-            const buildResult = { errors: [] };
-            const result = await endCallback(buildResult);
+            const result = await callRegistered(build.onEnd, 0, buildResult);
 
-            expect(endHook).toHaveBeenCalledWith(expect.objectContaining({
-                buildResult,
-                duration: expect.any(Number),
-                argv,
-                variantName,
-                stage: expect.any(Object)
-            }));
-
-            expect(successHook).toHaveBeenCalledWith(expect.objectContaining({
-                buildResult,
-                duration: expect.any(Number),
-                argv,
-                variantName,
-                stage: expect.any(Object)
-            }));
-
+            expect(endHook).toHaveBeenCalledWith(expectedContext);
+            expect(successHook).toHaveBeenCalledWith(expectedContext);
             expect(result.errors).toEqual([ 'end-err' ]);
         });
 
@@ -177,115 +225,158 @@ describe('LifecycleProvider', () => {
             const successHook = xJet.fn<any, any, any>();
 
             provider.onSuccess(successHook);
-
             provider.create().setup(build);
 
-            const endCallback = build.onEnd.mock.calls[0][0];
-            await endCallback({ errors: [ 'build failed' ] });
+            await callRegistered(build.onEnd, 0, { errors: [ 'build failed' ] });
 
             expect(successHook).not.toHaveBeenCalled();
         });
 
+        test('success hook return value is ignored', async () => {
+            const endHook = xJet.fn<any, any, any>().mockResolvedValue({ warnings: [ 'end-warn' ] });
+            const successHook = xJet.fn<any, any, any>().mockResolvedValue({ warnings: [ 'success-warn' ] });
+
+            provider.onEnd(endHook);
+            provider.onSuccess(successHook);
+            provider.create().setup(build);
+
+            const result = await callRegistered(build.onEnd, 0, { errors: [] });
+
+            expect(result.warnings).toEqual([ 'end-warn' ]);
+        });
+
+        test('captures thrown errors from end hooks and continues to next hook', async () => {
+            const error = new Error('end hook failed');
+            const hook1 = xJet.fn<any, any, any>().mockRejectedValue(error);
+            const hook2 = xJet.fn<any, any, any>().mockResolvedValue({ warnings: [ 'warn1' ] });
+
+            provider.onEnd(hook1, 'a');
+            provider.onEnd(hook2, 'b');
+            provider.create().setup(build);
+
+            const result = await callRegistered(build.onEnd, 0, { errors: [] });
+
+            expect(hook2).toHaveBeenCalled();
+            expect(result.errors).toHaveLength(1);
+            expect(result.errors[0].detail).toBe(error);
+            expect(result.warnings).toEqual([ 'warn1' ]);
+        });
+
+        test('captures thrown errors from success hooks into result errors', async () => {
+            const error = new Error('success hook failed');
+            const successHook = xJet.fn<any, any, any>().mockRejectedValue(error);
+
+            provider.onSuccess(successHook);
+            provider.create().setup(build);
+
+            const result = await callRegistered(build.onEnd, 0, { errors: [] });
+
+            expect(result.errors).toHaveLength(1);
+            expect(result.errors[0].detail).toBe(error);
+        });
+
         test('calculates duration correctly', async () => {
-            const endHook = xJet.fn<any, any, any>();
             const startHook = xJet.fn<any, any, any>();
+            const endHook = xJet.fn<any, any, any>();
+
             provider.onStart(startHook);
             provider.onEnd(endHook);
             provider.create().setup(build);
 
-            // Trigger start to set startTime
-            const startCallback = build.onStart.mock.calls[0][0];
-            await startCallback();
+            await callRegistered(build.onStart, 0);
+            await new Promise(r => setTimeout(r, 10));
+            await callRegistered(build.onEnd, 0, { errors: [] });
 
-            // Wait a bit to get measurable duration
-            await new Promise(resolve => setTimeout(resolve, 10));
+            expect(endHook).toHaveBeenCalledWith(expect.objectContaining({ duration: expect.any(Number) }));
 
-            const endCallback = build.onEnd.mock.calls[0][0];
-            await endCallback({ errors: [] });
-
-            expect(endHook).toHaveBeenCalledWith(expect.objectContaining({
-                duration: expect.any(Number)
-            }));
-
-            const duration = endHook.mock.calls[0][0].duration;
-            expect(duration).toBeGreaterThanOrEqual(0);
+            const { duration } = endHook.mock.calls[0][0];
+            expect(duration).toBeGreaterThanOrEqual(10);
         });
     });
 
     describe('onResolve execution', () => {
-        test('executes resolve hooks and merges results', async () => {
-            const hook1 = xJet.fn<any, any, any>().mockResolvedValue({ namespace: 'ns1' });
-            const hook2 = xJet.fn<any, any, any>().mockResolvedValue({ external: true });
-
-            provider.onResolve(hook1, 'a');
-            provider.onResolve(hook2, 'b');
-
-            provider.create().setup(build);
-
-            const resolveCallback = build.onResolve.mock.calls[0][1];
-            const args = { path: './file.ts' } as any;
-            const result = await resolveCallback(args);
-
-            expect(hook1).toHaveBeenCalledWith(expect.objectContaining({
-                args,
-                argv,
-                variantName,
-                stage: expect.any(Object)
-            }));
-
-            expect(hook2).toHaveBeenCalledWith(expect.objectContaining({
-                args,
-                argv,
-                variantName,
-                stage: expect.any(Object)
-            }));
-
-            expect(result).toEqual({ namespace: 'ns1', external: true });
-        });
-
-        test('returns null when no hooks registered', async () => {
+        test('does not register esbuild onResolve when no hooks', () => {
             provider.create().setup(build);
 
             expect(build.onResolve).not.toHaveBeenCalled();
         });
 
-        test('returns null when all hooks return undefined', async () => {
+        test('registers onResolve with catch-all filter', () => {
+            provider.onResolve(xJet.fn());
+            provider.create().setup(build);
+
+            expect(build.onResolve).toHaveBeenCalledWith({ filter: /.*/ }, expect.any(Function));
+        });
+
+        test('executes resolve hooks and merges results', async () => {
+            const hook1 = xJet.fn<any, any, any>().mockResolvedValue({ namespace: 'ns1' });
+            const hook2 = xJet.fn<any, any, any>().mockResolvedValue({ external: true });
+            const args = { path: './file.ts' } as any;
+            const expectedContext = expect.objectContaining({ args, argv, variantName, stage: expect.any(Object) });
+
+            provider.onResolve(hook1, 'a');
+            provider.onResolve(hook2, 'b');
+            provider.create().setup(build);
+
+            const result = await callRegistered(build.onResolve, 1, args);
+
+            expect(hook1).toHaveBeenCalledWith(expectedContext);
+            expect(hook2).toHaveBeenCalledWith(expectedContext);
+            expect(result).toEqual({ namespace: 'ns1', external: true });
+        });
+
+        test('later resolve hook properties override earlier ones', async () => {
+            const hook1 = xJet.fn<any, any, any>().mockResolvedValue({ namespace: 'ns1', external: false });
+            const hook2 = xJet.fn<any, any, any>().mockResolvedValue({ external: true });
+
+            provider.onResolve(hook1, 'a');
+            provider.onResolve(hook2, 'b');
+            provider.create().setup(build);
+
+            const result = await callRegistered(build.onResolve, 1, { path: './file.ts' } as any);
+
+            expect(result).toEqual({ namespace: 'ns1', external: true });
+        });
+
+        test('returns null when all hooks return undefined or null', async () => {
             const hook1 = xJet.fn<any, any, any>().mockResolvedValue(undefined);
             const hook2 = xJet.fn<any, any, any>().mockResolvedValue(null);
 
             provider.onResolve(hook1, 'a');
             provider.onResolve(hook2, 'b');
-
             provider.create().setup(build);
 
-            const resolveCallback = build.onResolve.mock.calls[0][1];
-            const args = { path: './file.ts' } as any;
-            const result = await resolveCallback(args);
+            const result = await callRegistered(build.onResolve, 1, { path: './file.ts' } as any);
 
             expect(result).toBeNull();
         });
     });
 
     describe('onLoad execution', () => {
-        test('loads from filesModel snapshot when available', async () => {
-            const snapshot = {
-                contentSnapshot: {
-                    text: 'snapshot content'
-                }
-            };
+        test('does not register esbuild onLoad when no hooks', () => {
+            provider.create().setup(build);
 
-            filesModel.getSnapshot.mockReturnValue(snapshot);
+            expect(build.onLoad).not.toHaveBeenCalled();
+        });
+
+        test('registers onLoad with catch-all filter', () => {
+            provider.onLoad(xJet.fn());
+            provider.create().setup(build);
+
+            expect(build.onLoad).toHaveBeenCalledWith({ filter: /.*/ }, expect.any(Function));
+        });
+
+        test('loads from filesModel snapshot when available', async () => {
+            filesModel.getSnapshot.mockReturnValue({ contentSnapshot: { text: 'snapshot content' } });
 
             const hook = xJet.fn<any, any, any>()
                 .mockImplementation((context) => ({ contents: context.contents + ' modified' }));
 
             provider.onLoad(hook);
-
             provider.create().setup(build);
 
-            const loadCallback = build.onLoad.mock.calls[0][1];
             const args = { path: '/project/root/src/file.ts' } as any;
-            const result = await loadCallback(args);
+            const result = await callRegistered(build.onLoad, 1, args);
 
             expect(filesModel.getSnapshot).toHaveBeenCalledWith('/project/root/src/file.ts');
             expect(hook).toHaveBeenCalledWith(expect.objectContaining({
@@ -299,32 +390,40 @@ describe('LifecycleProvider', () => {
             expect(result.contents).toBe('snapshot content modified');
         });
 
-        test('falls back to readFile when no snapshot', async () => {
-            filesModel.getSnapshot.mockReturnValue(null);
-
+        test('falls back to readFile when snapshot has no contentSnapshot', async () => {
+            filesModel.getSnapshot.mockReturnValue({ contentSnapshot: null });
             xJet.mock(readFile).mockResolvedValue('disk content');
 
             const hook = xJet.fn<any, any, any>().mockReturnValue({ loader: 'ts' });
 
             provider.onLoad(hook);
-
             provider.create().setup(build);
 
-            const loadCallback = build.onLoad.mock.calls[0][1];
             const args = { path: '/project/root/src/file.ts' } as any;
-            const result = await loadCallback(args);
+            const result = await callRegistered(build.onLoad, 1, args);
 
             expect(readFile).toHaveBeenCalledWith('/project/root/src/file.ts', 'utf8');
-            expect(hook).toHaveBeenCalledWith(expect.objectContaining({
-                contents: 'disk content',
-                loader: 'default',
-                args
-            }));
+            expect(hook).toHaveBeenCalledWith(expect.objectContaining({ contents: 'disk content', loader: 'default', args }));
+            expect(result.loader).toBe('ts');
+        });
+
+        test('falls back to readFile when no snapshot', async () => {
+            xJet.mock(readFile).mockResolvedValue('disk content');
+
+            const hook = xJet.fn<any, any, any>().mockReturnValue({ loader: 'ts' });
+
+            provider.onLoad(hook);
+            provider.create().setup(build);
+
+            const args = { path: '/project/root/src/file.ts' } as any;
+            const result = await callRegistered(build.onLoad, 1, args);
+
+            expect(readFile).toHaveBeenCalledWith('/project/root/src/file.ts', 'utf8');
+            expect(hook).toHaveBeenCalledWith(expect.objectContaining({ contents: 'disk content', loader: 'default', args }));
             expect(result.loader).toBe('ts');
         });
 
         test('applies multiple load hooks sequentially in pipeline', async () => {
-            filesModel.getSnapshot.mockReturnValue(null);
             xJet.mock(readFile).mockResolvedValue('original');
 
             const hook1 = xJet.fn<any, any, any>()
@@ -337,27 +436,15 @@ describe('LifecycleProvider', () => {
             provider.onLoad(hook2, 'b');
             provider.create().setup(build);
 
-            const loadCallback = build.onLoad.mock.calls[0][1];
-            const result = await loadCallback({ path: '/file.ts' } as any);
+            const result = await callRegistered(build.onLoad, 1, { path: '/file.ts' } as any);
 
-            // Verify hook1 receives original content
-            expect(hook1).toHaveBeenCalledWith(expect.objectContaining({
-                contents: 'original',
-                loader: 'default'
-            }));
-
-            // Verify hook2 receives hook1's output
-            expect(hook2).toHaveBeenCalledWith(expect.objectContaining({
-                contents: 'original1',
-                loader: 'default'
-            }));
-
+            expect(hook1).toHaveBeenCalledWith(expect.objectContaining({ contents: 'original', loader: 'default' }));
+            expect(hook2).toHaveBeenCalledWith(expect.objectContaining({ contents: 'original1', loader: 'default' }));
             expect(result.contents).toBe('original12');
             expect(result.loader).toBe('js');
         });
 
         test('propagates loader changes through pipeline', async () => {
-            filesModel.getSnapshot.mockReturnValue(null);
             xJet.mock(readFile).mockResolvedValue('content');
 
             const hook1 = xJet.fn<any, any, any>().mockReturnValue({ loader: 'ts' });
@@ -367,17 +454,12 @@ describe('LifecycleProvider', () => {
             provider.onLoad(hook2, 'b');
             provider.create().setup(build);
 
-            const loadCallback = build.onLoad.mock.calls[0][1];
-            await loadCallback({ path: '/file.ts' } as any);
+            await callRegistered(build.onLoad, 1, { path: '/file.ts' } as any);
 
-            // Verify hook2 receives the loader from hook1
-            expect(hook2).toHaveBeenCalledWith(expect.objectContaining({
-                loader: 'ts'
-            }));
+            expect(hook2).toHaveBeenLastCalledWith(expect.objectContaining({ loader: 'ts' }));
         });
 
-        test('handles hooks returning undefined', async () => {
-            filesModel.getSnapshot.mockReturnValue(null);
+        test('handles hooks returning undefined without breaking pipeline', async () => {
             xJet.mock(readFile).mockResolvedValue('content');
 
             const hook1 = xJet.fn<any, any, any>().mockReturnValue(undefined);
@@ -387,17 +469,46 @@ describe('LifecycleProvider', () => {
             provider.onLoad(hook2, 'b');
             provider.create().setup(build);
 
-            const loadCallback = build.onLoad.mock.calls[0][1];
-            const result = await loadCallback({ path: '/file.ts' } as any);
+            const result = await callRegistered(build.onLoad, 1, { path: '/file.ts' } as any);
 
-            // Content should remain unchanged by hook1
-            expect(hook2).toHaveBeenCalledWith(expect.objectContaining({
-                contents: 'content',
-                loader: 'default'
-            }));
-
+            expect(hook2).toHaveBeenCalledWith(expect.objectContaining({ contents: 'content', loader: 'default' }));
             expect(result.contents).toBe('content');
             expect(result.loader).toBe('js');
+        });
+
+        test('captures thrown errors from load hooks and continues pipeline', async () => {
+            xJet.mock(readFile).mockResolvedValue('content');
+
+            const error = new Error('load hook failed');
+            const hook1 = xJet.fn<any, any, any>().mockRejectedValue(error);
+            const hook2 = xJet.fn<any, any, any>().mockReturnValue({ loader: 'ts' });
+
+            provider.onLoad(hook1, 'a');
+            provider.onLoad(hook2, 'b');
+            provider.create().setup(build);
+
+            const result = await callRegistered(build.onLoad, 1, { path: '/file.ts' } as any);
+
+            expect(hook2).toHaveBeenCalled();
+            expect(result.errors).toHaveLength(1);
+            expect(result.errors[0].detail).toBe(error);
+            expect(result.loader).toBe('ts');
+        });
+
+        test('aggregates errors and warnings from load hooks', async () => {
+            xJet.mock(readFile).mockResolvedValue('content');
+
+            const hook1 = xJet.fn<any, any, any>().mockReturnValue({ errors: [ 'e1' ], warnings: [ 'w1' ] });
+            const hook2 = xJet.fn<any, any, any>().mockReturnValue({ errors: [ 'e2' ], warnings: [ 'w2' ] });
+
+            provider.onLoad(hook1, 'a');
+            provider.onLoad(hook2, 'b');
+            provider.create().setup(build);
+
+            const result = await callRegistered(build.onLoad, 1, { path: '/file.ts' } as any);
+
+            expect(result.errors).toEqual([ 'e1', 'e2' ]);
+            expect(result.warnings).toEqual([ 'w1', 'w2' ]);
         });
     });
 
@@ -415,30 +526,20 @@ describe('LifecycleProvider', () => {
             provider.onStart(startHook);
             provider.onLoad(loadHook);
             provider.onEnd(endHook);
-
             provider.create().setup(build);
 
-            // Execute start hook
-            const startCallback = build.onStart.mock.calls[0][0];
-            await startCallback();
+            await callRegistered(build.onStart, 0);
+            await callRegistered(build.onLoad, 1, { path: '/file.ts' } as any);
+            await callRegistered(build.onEnd, 0, { errors: [] });
 
-            // Execute load hook
-            const loadCallback = build.onLoad.mock.calls[0][1];
-            await loadCallback({ path: '/file.ts' } as any);
+            const sharedStage = expect.objectContaining({ customData: 'test-data' });
+            expect(loadHook).toHaveBeenCalledWith(expect.objectContaining({ stage: sharedStage }));
+            expect(endHook).toHaveBeenCalledWith(expect.objectContaining({ stage: sharedStage }));
 
-            // Execute end hook
-            const endCallback = build.onEnd.mock.calls[0][0];
-            await endCallback({ errors: [] });
-
-            // Verify all hooks received the same stage object
+            // Verify it's the exact same object reference, not just equal shape
             const startStage = startHook.mock.calls[0][0].stage;
-            const loadStage = loadHook.mock.calls[0][0].stage;
-            const endStage = endHook.mock.calls[0][0].stage;
-
-            expect(loadStage.customData).toBe('test-data');
-            expect(endStage.customData).toBe('test-data');
-            expect(loadStage).toBe(startStage);
-            expect(endStage).toBe(startStage);
+            expect(loadHook.mock.calls[0][0].stage).toBe(startStage);
+            expect(endHook.mock.calls[0][0].stage).toBe(startStage);
         });
 
         test('all hooks receive same argv reference', async () => {
@@ -449,21 +550,16 @@ describe('LifecycleProvider', () => {
             provider.onStart(startHook);
             provider.onLoad(loadHook);
             provider.onEnd(endHook);
-
             provider.create().setup(build);
 
-            const startCallback = build.onStart.mock.calls[0][0];
-            await startCallback();
+            await callRegistered(build.onStart, 0);
+            await callRegistered(build.onLoad, 1, { path: '/file.ts' } as any);
+            await callRegistered(build.onEnd, 0, { errors: [] });
 
-            const loadCallback = build.onLoad.mock.calls[0][1];
-            await loadCallback({ path: '/file.ts' } as any);
-
-            const endCallback = build.onEnd.mock.calls[0][0];
-            await endCallback({ errors: [] });
-
-            expect(startHook.mock.calls[0][0].argv).toBe(argv);
-            expect(loadHook.mock.calls[0][0].argv).toBe(argv);
-            expect(endHook.mock.calls[0][0].argv).toBe(argv);
+            const expectedContext = expect.objectContaining({ argv });
+            expect(startHook).toHaveBeenCalledWith(expectedContext);
+            expect(loadHook).toHaveBeenCalledWith(expectedContext);
+            expect(endHook).toHaveBeenCalledWith(expectedContext);
         });
 
         test('all hooks receive same variantName', async () => {
@@ -476,25 +572,18 @@ describe('LifecycleProvider', () => {
             provider.onResolve(resolveHook);
             provider.onLoad(loadHook);
             provider.onEnd(endHook);
-
             provider.create().setup(build);
 
-            const startCallback = build.onStart.mock.calls[0][0];
-            await startCallback();
+            await callRegistered(build.onStart, 0);
+            await callRegistered(build.onResolve, 1, { path: './file.ts' } as any);
+            await callRegistered(build.onLoad, 1, { path: '/file.ts' } as any);
+            await callRegistered(build.onEnd, 0, { errors: [] });
 
-            const resolveCallback = build.onResolve.mock.calls[0][1];
-            await resolveCallback({ path: './file.ts' } as any);
-
-            const loadCallback = build.onLoad.mock.calls[0][1];
-            await loadCallback({ path: '/file.ts' } as any);
-
-            const endCallback = build.onEnd.mock.calls[0][0];
-            await endCallback({ errors: [] });
-
-            expect(startHook.mock.calls[0][0].variantName).toBe(variantName);
-            expect(resolveHook.mock.calls[0][0].variantName).toBe(variantName);
-            expect(loadHook.mock.calls[0][0].variantName).toBe(variantName);
-            expect(endHook.mock.calls[0][0].variantName).toBe(variantName);
+            const expectedContext = expect.objectContaining({ variantName });
+            expect(startHook).toHaveBeenCalledWith(expectedContext);
+            expect(resolveHook).toHaveBeenCalledWith(expectedContext);
+            expect(loadHook).toHaveBeenCalledWith(expectedContext);
+            expect(endHook).toHaveBeenCalledWith(expectedContext);
         });
     });
 });
