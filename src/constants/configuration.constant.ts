@@ -5,27 +5,6 @@
 import type { PartialBuildConfigType } from '@interfaces/configuration.interface';
 
 /**
- * Default path to the TypeScript configuration file.
- *
- * @remarks
- * This constant defines the standard location for the TypeScript compiler configuration.
- * The value is marked as `const` to ensure type narrowing to the literal string `'tsconfig.json'`
- * rather than the broader `string` type.
- *
- * This path is used as the default value for the `tsconfig` option in esbuild configuration
- * and for TypeScript service initialization when no custom path is provided.
- *
- * @example
- * ```ts
- * const service = new TypescriptService(TSCONFIG_PATH);
- * ```
- *
- * @since 2.0.0
- */
-
-export const TSCONFIG_PATH = 'tsconfig.json' as const;
-
-/**
  * Default build configuration shared across all variants.
  * Provides sensible defaults for common build settings including TypeScript compilation and esbuild options.
  *
@@ -91,7 +70,6 @@ export const DEFAULTS_COMMON_CONFIG: PartialBuildConfigType = Object.freeze({
             format: 'cjs',
             outdir: 'dist',
             platform: 'browser',
-            tsconfig: TSCONFIG_PATH,
             absWorkingDir: process.cwd()
         })
     })
