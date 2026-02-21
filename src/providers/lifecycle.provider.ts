@@ -526,12 +526,14 @@ export class LifecycleProvider {
      *
      * @remarks
      * This method calculates the build duration from the start time and executes hooks in two phases:
-     * 1. **End hooks**: Execute for all builds with a result context containing build result and duration;
-     *    errors and warnings are aggregated into the return value. Each captured error is attributed
+     * 1. **End hooks**: Execute for all builds with a result context containing build result and duration.
+     *    Errors and warnings are seeded from `buildResult.errors` and `buildResult.warnings` so existing
+     *    build diagnostics are preserved alongside hook-generated ones. Each captured error is attributed
      *    to its hook's registered name via `pluginName` on the `PartialMessage`.
      * 2. **Success hooks**: Execute only if `buildResult.errors.length === 0` with the same result context.
-     *    Errors thrown by success hooks are captured into the return value, attributed to the variant name,
-     *    but return values from success hooks are intentionally ignored — they are meant for side effects only.
+     *    Errors thrown by success hooks are captured and attributed to their registered hook name via
+     *    `pluginName`. Return values from success hooks are intentionally ignored — they are meant for
+     *    side effects only.
      *
      * Both hook phases share the same pre-built hook context object, constructed once before
      * any iteration begins.
@@ -544,8 +546,8 @@ export class LifecycleProvider {
      */
 
     private async executeEndHooks(context: LifecycleContextInterface, buildResult: BuildResult): Promise<OnEndResult> {
-        const errors: Array<PartialMessage> = [];
-        const warnings: Array<PartialMessage> = [];
+        const errors: Array<PartialMessage> = buildResult.errors;
+        const warnings: Array<PartialMessage> = buildResult.warnings;
         const duration = Date.now() - context.stage.startTime.getTime();
         const hookContext = { buildResult, duration, ...context };
 
