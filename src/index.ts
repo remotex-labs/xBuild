@@ -344,13 +344,14 @@ declare global {
     /**
      * Inline evaluation macro that executes code at build time and replaces it with the result.
      *
+     * @template T - The return type of the callback function
      * @param callback - Expression to evaluate at build time
      *
-     * @returns String representation of the evaluated result
+     * @returns The evaluated result with its original type, or `undefined` on evaluation failure
      *
      * @remarks
      * Executes the provided callback during the build process (not at runtime) and
-     * replaces the macro call with the stringified result. This enables:
+     * replaces the macro call with the evaluated result. This enables:
      * - Injecting build-time environment variables
      * - Computing values during compilation
      * - Generating code from external sources
@@ -363,10 +364,11 @@ declare global {
      * - Errors during evaluation cause build failure
      *
      * **Return value handling**:
-     * - Primitives are stringified directly
-     * - Objects/arrays are JSON.stringified
+     * - The result preserves the original return type from the callback
+     * - Primitives (string, number, boolean) are properly typed
+     * - Objects and arrays maintain their structure and types
      * - Functions are toString()'d (use carefully)
-     * - `undefined` becomes the string `'undefined'`
+     * - Returns `undefined` if evaluation fails or callback returns undefined
      *
      * **Common use cases**:
      * - Environment variable injection
@@ -377,6 +379,7 @@ declare global {
      * @example Environment variable injection
      * ```ts
      * const apiUrl = $$inline(() => process.env.API_URL);
+     * // Type: string | undefined
      * // Becomes: const apiUrl = "https://api.example.com";
      * ```
      *
@@ -387,7 +390,7 @@ declare global {
      *   timestamp: $$inline(() => new Date().toISOString()),
      *   commit: $$inline(() => process.env.GIT_COMMIT)
      * };
-     * // Values computed once at build time
+     * // Each value retains its type (string | undefined)
      * ```
      *
      * @example Computed configuration
@@ -396,6 +399,7 @@ declare global {
      *   const cpus = require('os').cpus().length;
      *   return Math.max(1, cpus - 1);
      * });
+     * // Type: number | undefined
      * // Computes optimal worker count during build
      * ```
      *
@@ -405,7 +409,7 @@ declare global {
      *   betaFeatures: $$inline(() => process.env.ENABLE_BETA === 'true'),
      *   debugMode: $$inline(() => process.env.NODE_ENV !== 'production')
      * };
-     * // Boolean values computed at build time
+     * // Boolean values computed at build time, typed as boolean | undefined
      * ```
      *
      * @see {@link astInlineCallExpression} for evaluation implementation
@@ -413,7 +417,7 @@ declare global {
      * @since 2.0.0
      */
 
-    function $$inline<T>(callback: () => T): string | undefined;
+    function $$inline<T>(callback: () => T): T | undefined;
 
     /**
      * Pre-configuration CLI arguments snapshot (bootstrap argv).
