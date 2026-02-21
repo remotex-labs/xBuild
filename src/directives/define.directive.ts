@@ -101,17 +101,27 @@ export function transformToFunction(fnName: string, node: Node, sourceFile: Sour
  * @param sourceFile - The source file containing the node
  * @param prefix - The declaration prefix (e.g., `'function '` or `'export function '`)
  *
- * @returns A string containing the function declaration
+ * @returns A string containing the function declaration, prefixed with `async` if the
+ * original node carried the `async` modifier
  *
  * @remarks
  * This function extracts the components of a function-like node and reconstructs them
  * as a proper function declaration:
+ * - **Async**: Detected from the node's `modifiers` array via `ts.SyntaxKind.AsyncKeyword`
+ *   and prepended before the declaration prefix, yielding `async function name()` form
  * - **Parameters**: Extracted with full type annotations
  * - **Return type**: Preserved if present in the original
  * - **Body**: Transformed using {@link getFunctionBody} to handle arrow function syntax
  *
  * The transformation preserves all type information, making it suitable for TypeScript
  * projects that rely on type safety in conditional compilation scenarios.
+ *
+ * @example Async arrow function
+ * ```ts
+ * const node = parseExpression('async (x: number): Promise<number> => x * 2');
+ * const result = transformFunctionLikeNode('double', node, sourceFile, 'export function ');
+ * // 'async export function double(x: number): Promise<number> { return x * 2; }'
+ * ```
  *
  * @example Arrow function with return type
  * ```ts
@@ -136,11 +146,13 @@ export function transformToFunction(fnName: string, node: Node, sourceFile: Sour
 function transformFunctionLikeNode(
     fnName: string, node: ArrowFunction | FunctionExpression, sourceFile: SourceFile, prefix: string
 ): string {
+    const isAsync = node.modifiers?.some(m => m.kind === ts.SyntaxKind.AsyncKeyword) ?? false;
+    const asyncPrefix = isAsync ? 'async ' : '';
     const params = node.parameters.map(p => p.getText(sourceFile)).join(', ');
     const returnType = node.type ? `: ${ node.type.getText(sourceFile) }` : '';
     const body = getFunctionBody(node, sourceFile);
 
-    return `${ prefix }${ fnName }(${ params })${ returnType } ${ body }`;
+    return `${ asyncPrefix }${ prefix }${ fnName }(${ params })${ returnType } ${ body }`;
 }
 
 /**
@@ -202,19 +214,21 @@ function getFunctionBody(node: ArrowFunction | FunctionExpression, sourceFile: S
  * @param prefix - The prefix to prepend before the IIFE; defaults to `''`
  * @param suffix - The suffix to append after the IIFE; defaults to `'();'`
  *
- * @returns A string containing the IIFE expression
+ * @returns A string containing the IIFE expression, prefixed with `async` when the
+ * original function-like node carried the `async` modifier
  *
  * @remarks
  * This function wraps code in IIFE syntax for immediate execution in expression contexts.
  * The transformation strategy depends on the node type:
  *
  * **For function-like nodes** (arrow functions and function expressions):
+ * - Detects the `async` modifier via `ts.SyntaxKind.AsyncKeyword` and prepends `async`
+ *   before `prefix` when present
  * - Wraps directly: `(function)()` or `(() => value)()`
- * - Preserves the function as-is
- * - Note: `prefix` and `suffix` are not applied to function-like nodes
+ * - Preserves the function body as-is
  *
  * **For other node types** (expressions, statements):
- * - Wraps in an arrow function IIFE with explicit return
+ * - Wraps in a synchronous arrow function IIFE with explicit return
  * - Ensures the value is returned for use in expressions
  * - Applies `prefix` before and `suffix` after the IIFE
  *
@@ -223,6 +237,13 @@ function getFunctionBody(node: ArrowFunction | FunctionExpression, sourceFile: S
  *
  * Used when conditional macros appear in expression contexts where a function
  * declaration is not valid syntax.
+ *
+ * @example Async arrow function to IIFE
+ * ```ts
+ * const node = parseExpression('async () => await fetchData()');
+ * const result = transformToIIFE(node, sourceFile);
+ * // 'async (() => await fetchData())()'
+ * ```
  *
  * @example Arrow function to IIFE
  * ```ts
@@ -259,11 +280,15 @@ function getFunctionBody(node: ArrowFunction | FunctionExpression, sourceFile: S
 
 export function transformToIIFE(node: Node, sourceFile: SourceFile, prefix: string = '', suffix: string = '();'): string {
     if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
-        return `${ prefix }(${ node.getText(sourceFile) })${ suffix }`;
+        const isAsync = node.modifiers?.some(m => m.kind === ts.SyntaxKind.AsyncKeyword) ?? false;
+        const asyncPrefix = isAsync ? 'async ' : '';
+
+        return `${ asyncPrefix }${ prefix }(${ node.getText(sourceFile) })${ suffix }`;
     }
 
-    if(prefix) return `${ prefix }${ node.getText(sourceFile) }`;
-    else return `(() => { return ${ node.getText(sourceFile) }; })${ suffix }`;
+    if (prefix) return `${ prefix }${ node.getText(sourceFile) }`;
+
+    return `(() => { return ${ node.getText(sourceFile) }; })${ suffix }`;
 }
 
 /**
