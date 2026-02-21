@@ -214,16 +214,17 @@ export async function analyzeMacroMetadata(variant: VariantService, context: Bui
             metadata.filesWithMacros.add(resolvedFile);  // always register the file
             if (!fn) continue;
 
-            const isDefined = !!defines[define];
-            if ((directive === 'ifndef') === isDefined) {
-                metadata.disabledMacroNames.add(fn);
-            }
-
             if (!fn.startsWith(MACRO_PREFIX)) {
                 warnings.push({
                     text: `Macro function '${ fn }' not start with '${ MACRO_PREFIX }' prefix to avoid conflicts`,
                     location: getLineAndColumn(content, fn, file, matchIndex)
                 });
+            }
+
+            if(directive === 'inline') continue;
+            const isDefined = !!defines[define];
+            if ((directive === 'ifndef') === isDefined) {
+                metadata.disabledMacroNames.add(fn);
             }
         }
     }
