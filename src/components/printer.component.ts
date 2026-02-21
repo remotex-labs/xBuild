@@ -230,7 +230,7 @@ export function formatTypescriptDiagnostic(diagnostic: DiagnosticInterface, symb
     const diagnosticCode = codeColor(`TS${ diagnostic.code }`);
     const message = mutedColor(diagnostic.message);
 
-    return `\n${ INDENT }${ symbol } ${ location } ${ textColor(ARROW_SYMBOL) } ${ diagnosticCode } ${ textColor(DASH_SYMBOL) } ${ message }`;
+    return `${ INDENT }${ symbol } ${ location } ${ textColor(ARROW_SYMBOL) } ${ diagnosticCode } ${ textColor(DASH_SYMBOL) } ${ message }`;
 }
 
 /**
@@ -286,6 +286,7 @@ export function appendTypesError(buffer: Array<string>, error: TypesError, symbo
         return 1;
     }
 
+    buffer.push('');
     for (const diagnostic of error.diagnostics) {
         buffer.push(formatTypescriptDiagnostic(diagnostic, warnColor(symbol), xterm.deepOrange));
     }
@@ -763,6 +764,8 @@ export function logBuildEnd({ variantName, duration, buildResult, stage }: Resul
 
     logBuildIssues(errors, 'Errors');
     logBuildIssues(warnings, 'Warnings');
+
+    if(errors.length || warnings.length) console.log(''); // add space line
     logMacroReplacements(variantName, <MacrosStateInterface> stage);
 
     if (isSuccess) {
