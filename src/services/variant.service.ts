@@ -823,7 +823,6 @@ export class VariantService {
             : undefined;
 
         this.registerConfigHooks(config.lifecycle);
-        config.esbuild.tsconfig ??= 'tsconfig.json';
         config.esbuild.entryPoints = extractEntryPoints(
             this.typescriptModule.config.options.rootDir ?? process.cwd(), config.esbuild.entryPoints
         );
