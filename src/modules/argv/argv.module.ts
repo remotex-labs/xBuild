@@ -13,7 +13,6 @@ import type { UserExtensionInterface, ArgumentsInterface } from '@argv/interface
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { Injectable } from '@symlinks/symlinks.module';
-import { bannerComponent } from '@components/banner.component';
 import { CLI_DEFAULT_OPTIONS, CLI_USAGE_EXAMPLES } from '@argv/constants/argv.constant';
 
 /**
@@ -300,7 +299,6 @@ export class ArgvModule {
         const parser = yargs(hideBin(argv)).locale('en');
         const originalShowHelp = parser.showHelp;
         parser.showHelp = function (consoleFunction?: string | ((s: string) => void)): Argv<unknown> {
-            console.log(bannerComponent());
             this.group(Object.keys(CLI_DEFAULT_OPTIONS), 'xBuild Options:');
             this.group(Object.keys(userExtensions), 'user Options:');
 
