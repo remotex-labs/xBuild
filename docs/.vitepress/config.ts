@@ -22,7 +22,7 @@ export default defineVersionedConfig({
         ]
     ],
     versionsConfig: {
-        current: 'v1.6.x',
+        current: 'v2.x.x',
         versionSwitcher: false
     },
     themeConfig: {
@@ -33,17 +33,51 @@ export default defineVersionedConfig({
         },
 
         nav: [
-            { text: 'Home', link: '.' },
+            { text: 'Home', link: '/' },
+            { text: 'Guide', link: '/guide' },
             { component: 'VersionSwitcher' }
         ],
 
-        sidebar: [
-            { text: 'Guide', link: '.' },
-            { text: 'Hooks', link: './hooks' },
-            { text: 'serve', link: './serve' },
-            { text: 'Macros', link: './macros' },
-            { text: 'Configuration', link: './configuration' }
-        ],
+        sidebar: {
+            root: [
+                { text: 'Guide', link: '/guide' },
+                {
+                    text: 'Macros',
+                    collapsed: false,
+                    items: [
+                        { text: 'Ifdef', link: '/macros/ifdef' },
+                        { text: 'Ifndef', link: '/macros/ifndef' },
+                        { text: 'Inline', link: '/macros/inline' }
+                    ]
+                },
+                {
+                    text: 'Configuration',
+                    collapsed: false,
+                    items: [
+                        { text: 'Cli', link: '/configuration/cli' },
+                        { text: 'File', link: '/configuration/file' },
+                        { text: 'Serve', link: '/configuration/serve' },
+                        { text: 'runtime', link: '/configuration/lifecycle' },
+                        { text: 'Lifecycle', link: '/configuration/lifecycle' }
+                    ]
+                },
+                {
+                    text: 'Advanced',
+                    collapsed: false,
+                    items: [
+                        { text: 'Observables', link: '/advanced/observables' },
+                        { text: 'Programmatic', link: '/advanced/programmatic' }
+                    ]
+                }
+            ],
+            'v1.x.x': [
+                { text: 'Guide', link: '.' },
+                { text: 'Hooks', link: './hooks' },
+                { text: 'serve', link: './serve' },
+                { text: 'Macros', link: './macros' },
+                { text: 'Configuration', link: './configuration' }
+            ]
+        },
 
         socialLinks: [
             { icon: 'github', link: 'https://github.com/remotex-labs/xBuild' },
