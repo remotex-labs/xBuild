@@ -2,7 +2,7 @@
  * Type imports (removed at compile time)
  */
 
-import type { PluginBuild, Plugin, OnStartResult, OnEndResult } from 'esbuild';
+import type { PluginBuild, Plugin, OnStartResult, OnEndResult, PartialMessage } from 'esbuild';
 import type { OnEndType, OnLoadType, OnStartType } from './interfaces/lifecycle-provider.interface';
 import type { BuildResult, OnResolveResult, OnResolveArgs, OnLoadResult, OnLoadArgs } from 'esbuild';
 import type { OnResolveType, LifecycleContextInterface } from './interfaces/lifecycle-provider.interface';
@@ -176,8 +176,7 @@ export class LifecycleProvider {
      */
 
     onStart(handler?: OnStartType, name: string = this.variantName): void {
-        if (!handler) return;
-        this.startHooks.set(name, handler);
+        if (handler) this.startHooks.set(name, handler);
     }
 
     /**
@@ -216,8 +215,7 @@ export class LifecycleProvider {
      */
 
     onEnd(handler?: OnEndType, name: string = this.variantName): void {
-        if (!handler) return;
-        this.endHooks.set(name, handler);
+        if (handler) this.endHooks.set(name, handler);
     }
 
     /**
@@ -229,10 +227,11 @@ export class LifecycleProvider {
      * @remarks
      * Success hooks are a specialized subset of end hooks that only execute when the build
      * completes with zero errors. They receive a result context containing the build result,
-     * duration, and another state, and are guaranteed to run only after successful builds.
+     * duration, and stage state, and are guaranteed to run only after successful builds.
      *
      * If no handler is provided, this method does nothing. Success hooks execute after all
-     * regular end hooks have completed.
+     * regular end hooks have completed. Any errors thrown by success hooks are captured and
+     * appended to the aggregated end-hook error list.
      *
      * Common use cases:
      * - Deploying build artifacts
@@ -256,8 +255,7 @@ export class LifecycleProvider {
      */
 
     onSuccess(handler?: OnEndType, name: string = this.variantName): void {
-        if (!handler) return;
-        this.successHooks.set(name, handler);
+        if (handler) this.successHooks.set(name, handler);
     }
 
     /**
@@ -296,8 +294,7 @@ export class LifecycleProvider {
      */
 
     onResolve(handler?: OnResolveType, name: string = this.variantName): void {
-        if (!handler) return;
-        this.resolveHooks.set(name, handler);
+        if (handler) this.resolveHooks.set(name, handler);
     }
 
     /**
@@ -341,8 +338,7 @@ export class LifecycleProvider {
      */
 
     onLoad(handler?: OnLoadType, name: string = this.variantName): void {
-        if (!handler) return;
-        this.loadHooks.set(name, handler);
+        if (handler) this.loadHooks.set(name, handler);
     }
 
     /**
@@ -398,8 +394,8 @@ export class LifecycleProvider {
      * - Resolve hooks receive `ResolveContextInterface` with resolution arguments
      * - Load hooks receive `LoadContextInterface` with contents, loader, and load arguments
      *
-     * The returned plugin uses the provider's name and delegates hook execution to
-     * the internal execution methods.
+     * Handlers are bound at setup time using `Function.prototype.bind` with the shared
+     * lifecycle context, avoiding repeated closure allocations on each invocation.
      *
      * @example
      * ```ts
@@ -430,32 +426,53 @@ export class LifecycleProvider {
                 const context: LifecycleContextInterface = {
                     argv: this.argv,
                     variantName: this.variantName,
-                    stage: {
-                        startTime: new Date()
-                    }
+                    stage: { startTime: new Date() }
                 };
 
                 build.initialOptions.metafile = true;
+
                 if (this.startHooks.size > 0)
-                    build.onStart(async () => this.executeStartHooks(build, context));
+                    build.onStart(this.executeStartHooks.bind(this, context, build));
 
                 if (this.endHooks.size > 0 || this.successHooks.size > 0)
-                    build.onEnd(async (result) => this.executeEndHooks(result, context));
+                    build.onEnd(this.executeEndHooks.bind(this, context));
 
                 if (this.resolveHooks.size > 0)
-                    build.onResolve({ filter: /.*/ }, async (args) => this.executeResolveHooks(args, context));
+                    build.onResolve({ filter: /.*/ }, this.executeResolveHooks.bind(this, context));
 
                 if (this.loadHooks.size > 0)
-                    build.onLoad({ filter: /.*/ }, async (args) => this.executeLoadHooks(args, context));
+                    build.onLoad({ filter: /.*/ }, this.executeLoadHooks.bind(this, context));
             }
         };
     }
 
     /**
+     * Appends a caught error to the provided error list as a `PartialMessage`.
+     *
+     * @param errors - The error array to append to
+     * @param err - The thrown value to wrap
+     * @param names - The hook name to set as `pluginName` on the message, defaults to the variant name
+     *
+     * @remarks
+     * The `pluginName` field is populated so esbuild can attribute the error to the specific
+     * hook that threw, rather than the plugin as a whole. This makes error output more precise
+     * when multiple hooks are registered under different names.
+     *
+     * @since 2.0.0
+     */
+
+    private pushError(errors: Array<PartialMessage>, err: unknown, names: string = this.variantName): void {
+        errors.push({
+            detail: err,
+            pluginName: names
+        });
+    }
+
+    /**
      * Executes all registered start hooks and aggregates their results.
      *
-     * @param build - The esbuild plugin build object
      * @param context - Base lifecycle context containing variant name, arguments, and stage state
+     * @param build - The esbuild plugin build object
      * @returns Aggregated result containing all errors and warnings from start hooks
      *
      * @remarks
@@ -467,6 +484,11 @@ export class LifecycleProvider {
      * - Errors from all hooks are combined into a single array
      * - Warnings from all hooks are combined into a single array
      *
+     * Errors thrown by a hook are caught and appended to the error array rather than
+     * propagating, so all hooks always execute regardless of individual failures.
+     * Each captured error is attributed to its hook's registered name via `pluginName`
+     * on the `PartialMessage`, making the source of the failure identifiable in esbuild output.
+     *
      * The context object is passed through to later lifecycle stages for consistent
      * state management across the build.
      *
@@ -476,40 +498,45 @@ export class LifecycleProvider {
      * @since 2.0.0
      */
 
-    private async executeStartHooks(build: PluginBuild, context: LifecycleContextInterface): Promise<OnStartResult> {
+    private async executeStartHooks(context: LifecycleContextInterface, build: PluginBuild): Promise<OnStartResult> {
         context.stage.startTime = new Date();
-        const result: Required<OnStartResult> = {
-            errors: [],
-            warnings: []
-        };
+        const errors: Array<PartialMessage> = [];
+        const warnings: Array<PartialMessage> = [];
+        const hookContext = { build, ...context };
 
-        for (const hook of this.startHooks.values()) {
-            const hookResult = await hook({ build, ...context });
-            if (hookResult) {
-                if (hookResult.errors) result.errors.push(...hookResult.errors);
-                if (hookResult.warnings) result.warnings.push(...hookResult.warnings);
+        for (const [ name, hook ] of this.startHooks.entries()) {
+            try {
+                const result = await hook(hookContext);
+                if (result?.errors) errors.push(...result.errors);
+                if (result?.warnings) warnings.push(...result.warnings);
+            } catch (err) {
+                this.pushError(errors, err, name);
             }
         }
 
-        return result;
+        return { errors, warnings };
     }
 
     /**
      * Executes all registered end hooks and success hooks, aggregating their results.
      *
-     * @param buildResult - The final build result from esbuild
      * @param context - Base lifecycle context containing variant name, arguments, and stage state
+     * @param buildResult - The final build result from esbuild
      * @returns Aggregated result containing all errors and warnings from end hooks
      *
      * @remarks
      * This method calculates the build duration from the start time and executes hooks in two phases:
-     * 1. **End hooks**: Execute for all builds with a result context containing build result and duration,
-     *    errors and warnings are aggregated
-     * 2. **Success hooks**: Execute only if `buildResult.errors.length === 0` with the same result context
+     * 1. **End hooks**: Execute for all builds with a result context containing build result and duration.
+     *    Errors and warnings are seeded from `buildResult.errors` and `buildResult.warnings` so existing
+     *    build diagnostics are preserved alongside hook-generated ones. Each captured error is attributed
+     *    to its hook's registered name via `pluginName` on the `PartialMessage`.
+     * 2. **Success hooks**: Execute only if `buildResult.errors.length === 0` with the same result context.
+     *    Errors thrown by success hooks are captured and attributed to their registered hook name via
+     *    `pluginName`. Return values from success hooks are intentionally ignored — they are meant for
+     *    side effects only.
      *
-     * Success hooks do not contribute to the returned result object, as they execute after
-     * aggregation is complete. They are primarily used for side effects like deployment or
-     * notification rather than modifying the build result.
+     * Both hook phases share the same pre-built hook context object, constructed once before
+     * any iteration begins.
      *
      * @see {@link onEnd}
      * @see {@link onSuccess}
@@ -518,35 +545,40 @@ export class LifecycleProvider {
      * @since 2.0.0
      */
 
-    private async executeEndHooks(buildResult: BuildResult, context: LifecycleContextInterface): Promise<OnEndResult> {
-        const result: Required<OnEndResult> = {
-            errors: [],
-            warnings: []
-        };
-
+    private async executeEndHooks(context: LifecycleContextInterface, buildResult: BuildResult): Promise<OnEndResult> {
+        const errors: Array<PartialMessage> = buildResult.errors;
+        const warnings: Array<PartialMessage> = buildResult.warnings;
         const duration = Date.now() - context.stage.startTime.getTime();
-        for (const hook of this.endHooks.values()) {
-            const hookResult = await hook({ buildResult, duration, ...context });
-            if (hookResult) {
-                if (hookResult.errors) result.errors.push(...hookResult.errors);
-                if (hookResult.warnings) result.warnings.push(...hookResult.warnings);
+        const hookContext = { buildResult, duration, ...context };
+
+        for (const [ name, hook ] of this.endHooks.entries()) {
+            try {
+                const result = await hook(hookContext);
+                if (result?.errors) errors.push(...result.errors);
+                if (result?.warnings) warnings.push(...result.warnings);
+            } catch (err) {
+                this.pushError(errors, err, name);
             }
         }
 
         if (buildResult.errors.length === 0) {
-            for (const hook of this.successHooks.values()) {
-                await hook({ buildResult, duration, ...context });
+            for (const [ name, hook ] of this.successHooks.entries()) {
+                try {
+                    await hook(hookContext);
+                } catch (err) {
+                    this.pushError(errors, err, name);
+                }
             }
         }
 
-        return result;
+        return { errors, warnings };
     }
 
     /**
      * Executes all registered resolve hooks and merges their results.
      *
-     * @param args - The resolution arguments from esbuild
      * @param context - Base lifecycle context containing variant name, arguments, and stage state
+     * @param args - The resolution arguments from esbuild
      * @returns Merged resolution result from all hooks, or `null` if no hooks returned results
      *
      * @remarks
@@ -559,24 +591,23 @@ export class LifecycleProvider {
      * resolution to proceed. If any hook returns a result, that result becomes the base
      * for later merging.
      *
+     * Unlike start/end/load hooks, resolve hook errors are not caught — esbuild will surface
+     * them directly as build errors.
+     *
      * @see {@link onResolve}
      * @see {@link ResolveContextInterface}
      *
      * @since 2.0.0
      */
 
-    private async executeResolveHooks(args: OnResolveArgs, context: LifecycleContextInterface): Promise<OnResolveResult | null> {
+    private async executeResolveHooks(context: LifecycleContextInterface, args: OnResolveArgs): Promise<OnResolveResult | null> {
         let result: OnResolveResult | undefined;
+        const hookContext = { args, ...context };
 
         for (const hook of this.resolveHooks.values()) {
-            const hookResult = await hook({ args, ...context });
+            const hookResult = await hook(hookContext);
             if (!hookResult) continue;
-
-            if (!result) {
-                result = hookResult;
-            } else {
-                result = { ...result, ...hookResult };
-            }
+            result = result ? { ...result, ...hookResult } : hookResult;
         }
 
         return result ?? null;
@@ -585,8 +616,8 @@ export class LifecycleProvider {
     /**
      * Executes all registered load hooks in sequence, applying content transformations as a pipeline.
      *
-     * @param args - The load arguments from esbuild containing file path and namespace
      * @param context - Base lifecycle context containing variant name, arguments, and stage state
+     * @param args - The load arguments from esbuild containing file path and namespace
      * @returns Load result with final transformed contents and loader type
      *
      * @remarks
@@ -597,19 +628,15 @@ export class LifecycleProvider {
      * 4. Each hook's output becomes the input for the next hook's context
      *
      * Content loading priority:
-     * - First attempts to load from TypeScript language service snapshot (if available)
+     * - First attempts to load from TypeScript language service snapshot (if available),
+     *   accessed via optional chaining on `contentSnapshot`
      * - Falls back to reading the file from disk using `fs/promises`
      *
      * The loader starts as `'default'` and can be changed by any hook in the pipeline.
-     * The final contents and loader are returned to esbuild for processing.
-     *
-     * @example
-     * ```ts
-     * // Hook 1: Load custom syntax
-     * // Hook 2: Transform to TypeScript
-     * // Hook 3: Add imports
-     * // Result: Fully transformed TypeScript ready for compilation
-     * ```
+     * Errors thrown by individual hooks are caught and appended to the error list, attributed to
+     * the hook's registered name via `pluginName` on the `PartialMessage`, so the pipeline continues
+     * running for subsequent hooks and the failing hook is clearly identifiable in esbuild output.
+     * The final contents, loader, errors, and warnings are returned to esbuild for processing.
      *
      * @see {@link onLoad}
      * @see {@link LoadContextInterface}
@@ -618,33 +645,30 @@ export class LifecycleProvider {
      * @since 2.0.0
      */
 
-    private async executeLoadHooks(args: OnLoadArgs, context: LifecycleContextInterface): Promise<OnLoadResult | null> {
-        let contents: string | Uint8Array;
+    private async executeLoadHooks(context: LifecycleContextInterface, args: OnLoadArgs): Promise<OnLoadResult | null> {
+        const errors: Array<PartialMessage> = [];
+        const warnings: Array<PartialMessage> = [];
         let loader: OnLoadResult['loader'] = 'default';
-        const result: Required<OnEndResult> = {
-            errors: [],
-            warnings: []
-        };
 
         const filePath = resolve(args.path);
-        const snapshotObject = this.filesModel.getSnapshot(filePath);
+        const snapshot = this.filesModel.getSnapshot(filePath);
+        let contents: string | Uint8Array = snapshot?.contentSnapshot
+            ? snapshot.contentSnapshot.text
+            : await readFile(filePath, 'utf8');
 
-        if (snapshotObject && snapshotObject.contentSnapshot) {
-            contents = snapshotObject.contentSnapshot.text;
-        } else {
-            contents = await readFile(filePath, 'utf8');
-        }
-
-        for (const hook of this.loadHooks.values()) {
-            const hookResult = await hook({ contents, loader, args, ...context });
-            if (hookResult) {
-                if (hookResult.contents !== undefined) contents = hookResult.contents;
-                if (hookResult.loader) loader = hookResult.loader;
-                if (hookResult.errors) result.errors.push(...hookResult.errors);
-                if (hookResult.warnings) result.warnings.push(...hookResult.warnings);
+        for (const [ name, hook ] of this.loadHooks.entries()) {
+            try {
+                const result = await hook({ contents, loader, args, ...context });
+                if (!result) continue;
+                if (result.contents !== undefined) contents = result.contents;
+                if (result.loader) loader = result.loader;
+                if (result.errors) errors.push(...result.errors);
+                if (result.warnings) warnings.push(...result.warnings);
+            } catch (err) {
+                this.pushError(errors, err, name);
             }
         }
 
-        return { contents, loader, ...result };
+        return { contents, loader, errors, warnings };
     }
 }

@@ -62,12 +62,11 @@ import { VMRuntimeError } from '@errors/vm-runtime.error';
  */
 
 export function normalizeMessageToError(msg: Message | esBuildError): Error {
-    if(msg instanceof xBuildBaseError) return msg;
+    if (msg instanceof xBuildBaseError)
+        return msg;
+
     if (msg.detail instanceof xBuildBaseError || msg.detail instanceof TypesError)
         return msg.detail;
-
-    if (msg.detail && ('errors' in msg.detail || msg.detail instanceof AggregateError))
-        return new VMRuntimeError(msg.detail, { withFrameworkFrames: true });
 
     if (msg.detail instanceof Error)
         return new VMRuntimeError(msg.detail, { withFrameworkFrames: true });
