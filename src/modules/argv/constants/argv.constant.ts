@@ -5,31 +5,6 @@
 import type { Options } from 'yargs';
 
 /**
- * Default path to the TypeScript configuration file.
- *
- * @remarks
- * This constant defines the standard location for TypeScript compiler configuration.
- * Used as the default value for the `--tsconfig` CLI option when no custom path is provided.
- *
- * The tsconfig file controls TypeScript compilation settings including:
- * - Compiler options (target, module, strict mode)
- * - Include/exclude patterns
- * - Path mappings and module resolution
- * - Declaration file generation settings
- *
- * @example
- * ```ts
- * // Used internally as default
- * const tsconfig = options.tsconfig ?? TSCONFIG_PATH;
- * // Resolves to: 'tsconfig.json'
- * ```
- *
- * @since 2.0.0
- */
-
-export const TSCONFIG_PATH = 'tsconfig.json' as const;
-
-/**
  * Default path to the xBuild configuration file.
  *
  * @remarks
@@ -186,8 +161,7 @@ export const CLI_DEFAULT_OPTIONS: Record<string, Options> = {
     tsconfig: {
         describe: 'Path to TypeScript configuration file',
         alias: 'tsc',
-        type: 'string',
-        default: TSCONFIG_PATH
+        type: 'string'
     },
     minify: {
         describe: 'Minify the build output',
