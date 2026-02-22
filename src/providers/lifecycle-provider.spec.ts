@@ -1,4 +1,10 @@
 /**
+ * Import will remove at compile time
+ */
+
+import type { Message } from 'esbuild';
+
+/**
  * Imports
  */
 
@@ -230,10 +236,9 @@ describe('LifecycleProvider', () => {
 
             const result = await callRegistered(build.onEnd, 0, buildResult);
 
-            expect(result.errors).toEqual([ 'end-err' ]);
-            expect(result.warnings).toEqual([ 'end-warn' ]);
-            expect(result.errors).toBe(buildResult.errors);
-            expect(result.warnings).toBe(buildResult.warnings);
+            expect(result).toBeUndefined();
+            expect(buildResult.errors).toEqual([ 'end-err' ]);
+            expect(buildResult.warnings).toEqual([ 'end-warn' ]);
         });
 
         test('skips success hooks on build failure', async () => {
@@ -250,46 +255,52 @@ describe('LifecycleProvider', () => {
         test('success hook return value is ignored', async () => {
             const endHook = xJet.fn<any, any, any>().mockResolvedValue({ warnings: [ 'end-warn' ] });
             const successHook = xJet.fn<any, any, any>().mockResolvedValue({ warnings: [ 'success-warn' ] });
+            const buildResult = { errors: [], warnings: [] };
 
             provider.onEnd(endHook);
             provider.onSuccess(successHook);
             provider.create().setup(build);
 
-            const result = await callRegistered(build.onEnd, 0, { errors: [], warnings: [] });
+            const result = await callRegistered(build.onEnd, 0, buildResult);
 
-            expect(result.warnings).toEqual([ 'end-warn' ]);
+            expect(result).toBeUndefined();
+            expect(buildResult.warnings).toEqual([ 'end-warn' ]);
         });
 
         test('captures thrown errors from end hooks and continues to next hook', async () => {
             const error = new Error('end hook failed');
             const hook1 = xJet.fn<any, any, any>().mockRejectedValue(error);
             const hook2 = xJet.fn<any, any, any>().mockResolvedValue({ warnings: [ 'warn1' ] });
+            const buildResult: { errors: Array<Message>, warnings: Array<Message> } = { errors: [], warnings: [] };
 
             provider.onEnd(hook1, 'a');
             provider.onEnd(hook2, 'b');
             provider.create().setup(build);
 
-            const result = await callRegistered(build.onEnd, 0, { errors: [], warnings: [] });
+            const result = await callRegistered(build.onEnd, 0, buildResult);
 
             expect(hook2).toHaveBeenCalled();
-            expect(result.errors).toHaveLength(1);
-            expect(result.errors[0].detail).toBe(error);
-            expect(result.errors[0].pluginName).toBe('a');
-            expect(result.warnings).toEqual([ 'warn1' ]);
+            expect(result).toBeUndefined();
+            expect(buildResult.errors).toHaveLength(1);
+            expect(buildResult.errors[0].detail).toBe(error);
+            expect(buildResult.errors[0].pluginName).toBe('a');
+            expect(buildResult.warnings).toEqual([ 'warn1' ]);
         });
 
         test('captures thrown errors from success hooks into result errors', async () => {
             const error = new Error('success hook failed');
             const successHook = xJet.fn<any, any, any>().mockRejectedValue(error);
+            const buildResult: { errors: Array<Message>, warnings: Array<Message> } = { errors: [], warnings: [] };
 
             provider.onSuccess(successHook, 'my-success');
             provider.create().setup(build);
 
-            const result = await callRegistered(build.onEnd, 0, { errors: [], warnings: [] });
+            const result = await callRegistered(build.onEnd, 0, buildResult);
 
-            expect(result.errors).toHaveLength(1);
-            expect(result.errors[0].detail).toBe(error);
-            expect(result.errors[0].pluginName).toBe('my-success');
+            expect(result).toBeUndefined();
+            expect(buildResult.errors).toHaveLength(1);
+            expect(buildResult.errors[0].detail).toBe(error);
+            expect(buildResult.errors[0].pluginName).toBe('my-success');
         });
 
         test('preserves existing buildResult errors and warnings in returned result', async () => {
@@ -301,11 +312,9 @@ describe('LifecycleProvider', () => {
 
             const result = await callRegistered(build.onEnd, 0, buildResult);
 
-            // result is the same array reference as buildResult.errors/warnings, mutated in place
-            expect(result.errors).toBe(buildResult.errors);
-            expect(result.warnings).toBe(buildResult.warnings);
-            expect(result.errors).toEqual([ 'build-err', 'hook-err' ]);
-            expect(result.warnings).toEqual([ 'build-warn', 'hook-warn' ]);
+            expect(result).toBeUndefined();
+            expect(buildResult.errors).toEqual([ 'build-err', 'hook-err' ]);
+            expect(buildResult.warnings).toEqual([ 'build-warn', 'hook-warn' ]);
         });
 
         test('calculates duration correctly', async () => {
