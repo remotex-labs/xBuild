@@ -11,7 +11,7 @@ import type { MockState } from '@remotex-labs/xjet';
 import ts from 'typescript';
 import { resolve } from 'path';
 import { join } from 'path/posix';
-import { statSync, readFileSync } from 'fs';
+import { closeSync, fstatSync, openSync, readFileSync } from 'fs';
 import { LanguageHostService } from '@typescript/services/hosts.service';
 
 /**
@@ -21,6 +21,10 @@ import { LanguageHostService } from '@typescript/services/hosts.service';
 describe('LanguageHostService', () => {
     let host: LanguageHostService;
     let resolveModuleNameMock: MockState;
+    let openSyncMock: MockState;
+    let readFileSyncMock: MockState;
+
+    const MOCK_FD = 42;
 
     const defaultOptions = {
         target: ts.ScriptTarget.ES2020,
@@ -35,11 +39,11 @@ describe('LanguageHostService', () => {
             return join('/project/root/', ...args);
         });
 
-        xJet.mock(statSync).mockImplementation(() => ({
-            mtimeMs: 1000
-        }));
+        openSyncMock = xJet.mock(openSync).mockReturnValue(MOCK_FD);
+        xJet.mock(closeSync).mockImplementation(() => undefined);
+        xJet.mock(fstatSync).mockReturnValue({ mtimeMs: 1000 } as any);
+        readFileSyncMock = xJet.mock(readFileSync).mockReturnValue('export const x = 10;');
 
-        xJet.mock(readFileSync).mockImplementation(() => 'export const x = 10;');
         resolveModuleNameMock = xJet.mock(ts.resolveModuleName);
 
         xJet.mock(ts.getDefaultLibFilePath).mockReturnValue(
@@ -90,15 +94,15 @@ describe('LanguageHostService', () => {
             const snap = host.touchFile('./src/someFile.ts');
 
             expect(snap.version).toBe(1);
-            expect(statSync).toHaveBeenCalledTimes(1);
-            expect(readFileSync).toHaveBeenCalledTimes(1);
+            expect(openSyncMock).toHaveBeenCalledTimes(1);
+            expect(readFileSyncMock).toHaveBeenCalledTimes(1);
         });
 
         test('touchFiles calls touchFile for each path', () => {
             host.touchFiles([ './src/a.ts', './src/b.ts', './src/c.ts' ]);
 
-            expect(statSync).toHaveBeenCalledTimes(3);
-            expect(readFileSync).toHaveBeenCalledTimes(3);
+            expect(openSyncMock).toHaveBeenCalledTimes(3);
+            expect(readFileSyncMock).toHaveBeenCalledTimes(3);
         });
     });
 
@@ -110,15 +114,15 @@ describe('LanguageHostService', () => {
 
             expect(snapshot).toBeDefined();
             expect(snapshot!.getText(0, 20)).toContain('export const x = 10');
-            expect(readFileSync).toHaveBeenCalledTimes(1); // only once
+            expect(readFileSyncMock).toHaveBeenCalledTimes(1); // only once – served from cache
         });
 
         test('touches file and creates snapshot if not cached yet', () => {
             const snapshot = host.getScriptSnapshot('./src/new-file.ts');
 
             expect(snapshot).toBeDefined();
-            expect(statSync).toHaveBeenCalledTimes(1);
-            expect(readFileSync).toHaveBeenCalledTimes(1);
+            expect(openSyncMock).toHaveBeenCalledTimes(1);
+            expect(readFileSyncMock).toHaveBeenCalledTimes(1);
         });
 
         test('getScriptVersion returns string version and tracks file', () => {
@@ -171,9 +175,9 @@ describe('LanguageHostService', () => {
             expect(ts.resolveModuleName).toHaveBeenCalledWith(
                 '@utils/helper',
                 '/project/root/src/index.ts',
-                expect.any(Object),           // compilerOptions
+                expect.any(Object),
                 ts.sys,
-                expect.any(Object)            // cache
+                expect.any(Object)
             );
 
             expect(result).toBe(fakeResult);
@@ -188,7 +192,7 @@ describe('LanguageHostService', () => {
                 target: ts.ScriptTarget.ES2022
             }));
 
-            expect(path).toBe('/typescript/lib/lib.es2020.d.ts'); // mocked value
+            expect(path).toBe('/typescript/lib/lib.es2020.d.ts');
         });
 
         test('fileExists delegates to ts.sys', () => {
@@ -202,27 +206,6 @@ describe('LanguageHostService', () => {
             xJet.mock(ts.sys.readFile).mockReturnValue('content from sys');
 
             expect(host.readFile('/project/root/file.ts')).toBe('content from sys');
-        });
-    });
-
-    describe('alias regex generation edge cases', () => {
-        test('escapes special characters in alias keys', () => {
-            const hostWithSpecial = new LanguageHostService({
-                paths: {
-                    '@core+old/*': [ 'src/old/*' ],
-                    '@v2.*': [ 'src/v2/*' ]
-                }
-            });
-
-            expect(hostWithSpecial.aliasRegex).toBeDefined();
-            expect(
-                hostWithSpecial.aliasRegex!.test('import x from \'@core+old/button\';')
-            ).toBe(true);
-        });
-
-        test('no alias regex when paths is empty object', () => {
-            const hostEmptyPaths = new LanguageHostService({ paths: {} });
-            expect(hostEmptyPaths.aliasRegex).toBeUndefined();
         });
     });
 

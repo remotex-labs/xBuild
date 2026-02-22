@@ -9,9 +9,9 @@ import type { FileSnapshotInterface, ScriptSnapshotType } from './interfaces/fil
  */
 
 import ts from 'typescript';
-import { readFileSync, statSync } from 'fs';
 import { resolve } from '@components/path.component';
 import { Injectable } from '@symlinks/symlinks.module';
+import { closeSync, fstatSync, openSync, readFileSync } from 'fs';
 
 /**
  * In-memory cache that maintains lightweight snapshots of file contents (as TypeScript `IScriptSnapshot`)
@@ -103,18 +103,26 @@ export class FilesModel {
     /**
      * Ensures the file is tracked and returns an up-to-date snapshot state.
      *
-     * - If mtime hasn't changed → returns existing state (fast path)
-     * - If mtime changed or a file is new → reads content and creates fresh `ScriptSnapshot`
-     * - If a file cannot be read (deleted / permission / etc.) → clears snapshot and bumps version
-     *
-     * @param path - filesystem path (relative or absolute)
-     * @returns shallow copy of the current (possibly just updated) snapshot entry
+     * @param path - Filesystem path (relative or absolute)
+     * @returns Shallow copy of the current (possibly just updated) snapshot entry
      *
      * @remarks
+     * This method implements incremental file tracking with three possible outcomes:
+     *
+     * **Fast path (no changes):**
+     * - mtime hasn't changed → returns existing state without I/O
+     *
+     * **Update path (file changed):**
+     * - mtime changed or file is new → reads content and creates fresh `ScriptSnapshot`
+     * - Increments version number for TypeScript language service invalidation
+     *
+     * **Error path (file unavailable):**
+     * - File cannot be read (deleted/permission denied) → clears snapshot and bumps version
+     * - Version increment only occurs if there was previous content (prevents silent no-ops)
+     *
      * Always returns a shallow copy to prevent accidental mutation of internal state.
      *
-     * In case of I/O errors, the version is incremented only when there was meaningful
-     * previous content or the entry was already versioned (prevents silent no-op).
+     * Typically used in watch mode to notify TypeScript of file changes without full rebuilds.
      *
      * @example
      * ```ts
@@ -134,26 +142,10 @@ export class FilesModel {
 
     touchFile(path: string): FileSnapshotInterface {
         const resolvedPath = this.resolve(path);
-        let entry = this.snapshotsByPath.get(resolvedPath);
-
-        if (!entry) {
-            entry = { version: 0, mtimeMs: 0, contentSnapshot: undefined };
-            this.snapshotsByPath.set(resolvedPath, entry);
-        }
+        const entry = this.snapshotsByPath.get(resolvedPath) ?? this.createEntry(resolvedPath);
 
         try {
-            const stats = statSync(resolvedPath);
-            const currentMtimeMs = stats.mtimeMs;
-            if (currentMtimeMs === entry.mtimeMs) {
-                return { ...entry };
-            }
-
-            const content = readFileSync(resolvedPath, 'utf-8');
-            const newSnapshot = content ? <ScriptSnapshotType>ts.ScriptSnapshot.fromString(content) : undefined;
-
-            entry.version++;
-            entry.mtimeMs = currentMtimeMs;
-            entry.contentSnapshot = newSnapshot;
+            this.syncEntry(resolvedPath, entry);
         } catch {
             /**
              * Currently, the catch block only increments the version if the snapshot exists, otherwise silently ignores errors.
@@ -188,5 +180,81 @@ export class FilesModel {
         this.resolvedPathCache.set(path, resolved);
 
         return resolved;
+    }
+
+    /**
+     * Creates a new snapshot entry for a resolved file path and registers it in the cache.
+     *
+     * @param resolvedPath - Normalized absolute file path
+     * @returns A new {@link FileSnapshotInterface} with initial state (version 0, no content)
+     *
+     * @remarks
+     * This method initializes a new file tracking entry with default values:
+     * - `version`: 0 (will increment on first read)
+     * - `mtimeMs`: 0 (will update on first sync)
+     * - `contentSnapshot`: undefined (will populate on first sync)
+     *
+     * The entry is immediately added to {@link snapshotsByPath} to prevent duplicate creation.
+     *
+     * Called internally by {@link touchFile} when encountering a previously unseen file path.
+     *
+     * @since 2.1.5
+     */
+
+    private createEntry(resolvedPath: string): FileSnapshotInterface {
+        const entry: FileSnapshotInterface = { version: 0, mtimeMs: 0, contentSnapshot: undefined };
+        this.snapshotsByPath.set(resolvedPath, entry);
+
+        return entry;
+    }
+
+    /**
+     * Synchronizes a snapshot entry with the current file system state.
+     *
+     * @param resolvedPath - Normalized absolute path to the file
+     * @param entry - The snapshot entry to update
+     *
+     * @remarks
+     * This method performs efficient incremental updates:
+     *
+     * **Optimization check:**
+     * - Compares current mtime with cached mtime
+     * - Returns immediately if file hasn't changed (fast path)
+     *
+     * **Update logic:**
+     * - Reads file content only when mtime differs
+     * - Increments version for TypeScript invalidation
+     * - Updates mtime to current value
+     * - Creates TypeScript `ScriptSnapshot` from content
+     *
+     * **File descriptor handling:**
+     * - Opens file in read mode (`'r'`)
+     * - Ensures file descriptor closure via `finally` block
+     * - Throws on read errors (handled by caller)
+     *
+     * Empty file content results in `undefined` snapshot rather than empty snapshot,
+     * signaling that the file has no compilable content.
+     *
+     * @throws Will propagate file system errors (ENOENT, EACCES, etc.) to caller
+     *
+     * @since 2.1.5
+     */
+
+    private syncEntry(resolvedPath: string, entry: FileSnapshotInterface): void {
+        const fd = openSync(resolvedPath, 'r');
+
+        try {
+            const { mtimeMs } = fstatSync(fd);
+            if (mtimeMs === entry.mtimeMs) return;
+            const content = readFileSync(fd, 'utf-8');
+
+            entry.version++;
+            entry.mtimeMs = mtimeMs;
+            entry.contentSnapshot = content
+                ? <ScriptSnapshotType> ts.ScriptSnapshot.fromString(content)
+                : undefined;
+        } finally {
+            closeSync(fd);
+        }
     }
 }
