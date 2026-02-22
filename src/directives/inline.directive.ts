@@ -99,7 +99,6 @@ export async function evaluateCode(code: string, state: StateInterface, node: No
         });
 
         if (result === null) return 'undefined';
-        if (typeof result === 'string') return result;
         if (typeof result === 'number' || typeof result === 'boolean') return String(result);
 
         return JSON.stringify(result);
