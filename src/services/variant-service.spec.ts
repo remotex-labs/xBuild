@@ -2,6 +2,7 @@
  * Import will remove at compile time
  */
 
+import type { Message, Plugin } from 'esbuild';
 import type { MockState } from '@remotex-labs/xjet';
 import type { BuildConfigInterface } from '@interfaces/configuration.interface';
 
@@ -9,8 +10,8 @@ import type { BuildConfigInterface } from '@interfaces/configuration.interface';
  * Imports
  */
 
+import { build } from 'esbuild';
 import { readFileSync } from 'fs';
-import { build, type Plugin } from 'esbuild';
 import { mkdir, writeFile } from 'fs/promises';
 import { TypesError } from '@errors/types.error';
 import { xBuildError } from '@errors/xbuild.error';
@@ -538,6 +539,7 @@ describe('VariantService', () => {
             new VariantService(variantName, lifecycle, buildConfig.variants.production as any, argv);
             emitBundleSpy.mockRejectedValue(new Error('Emit failed'));
             let endCallback: any;
+            const buildResult: { errors: Array<Message>, warnings: Array<Message> } = { errors: [], warnings: [] };
 
             plugin.setup({
                 initialOptions: {},
@@ -547,9 +549,10 @@ describe('VariantService', () => {
                 onLoad: xJet.fn()
             } as any);
 
-            return endCallback({ errors: [], warnings: [] }).then((result: any) => {
-                expect(result.warnings).toHaveLength(1);
-                expect(result.warnings[0].detail).toBeInstanceOf(Error);
+            return endCallback(buildResult).then((result: any) => {
+                expect(result).toBeUndefined();
+                expect(buildResult.warnings).toHaveLength(1);
+                expect(buildResult.warnings[0].detail).toBeInstanceOf(Error);
             });
         });
 
