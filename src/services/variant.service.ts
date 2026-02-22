@@ -3,9 +3,9 @@
  */
 
 import type { LifecycleProvider } from '@providers/lifecycle.provider';
+import type { BuildOptions, OnStartResult, BuildResult } from 'esbuild';
 import type { DiagnosticInterface } from '@typescript/typescript.module';
 import type { VariantBuildInterface } from '@interfaces/configuration.interface';
-import type { BuildOptions, OnStartResult, BuildResult, Message } from 'esbuild';
 import type { UnsubscribeType } from '@observable/interfaces/observable.interface';
 import type { ResultContextInterface } from '@providers/interfaces/lifecycle-provider.interface';
 import type { ConfigSubscriptionInterface } from '@services/interfaces/variant-service.interface';
@@ -509,8 +509,8 @@ export class VariantService {
                 if (errors.length > 0) throw error;
 
                 return {
-                    errors: error.errors as Array<Message>,
-                    warnings: error.warnings as Array<Message>
+                    errors: error?.errors ?? [],
+                    warnings: error?.warnings ?? []
                 } as BuildResult;
             }
 
