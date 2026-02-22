@@ -5,6 +5,7 @@ xBuild supports updating configuration at runtime (without using the CLI).
 ## Exported APIs
 
 From `@remotex-labs/xbuild`:
+
 - `overwriteConfig(config)`: replace the whole active config.
 - `patchConfig(config)`: merge partial config into current config.
 
@@ -55,6 +56,7 @@ patchConfig({
 Variant services subscribe to configuration changes.
 
 On update, xBuild:
+
 - reloads merged variant config
 - re-registers lifecycle hooks
 - updates esbuild options

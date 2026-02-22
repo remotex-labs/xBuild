@@ -22,9 +22,11 @@ serve?: {
 ## Fields
 
 Required:
+
 - `dir`: folder to serve.
 
 Optional:
+
 - `start`: auto-start server after build.
 - `host`: bind host.
 - `port`: bind port.

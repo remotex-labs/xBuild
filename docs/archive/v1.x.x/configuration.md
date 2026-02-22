@@ -76,21 +76,25 @@ const config: Array<xBuildConfig> = [
 export default config;
 ```
 
-### Properties
+## Properties
 
-#### `dev: boolean | string[]`
+### `dev: boolean | string[]`
+
 Build and run entry point(s) for development.
 
-#### `watch: boolean`
+### `watch: boolean`
+
 Enable watch mode for file changes during development.
 
-#### `moduleTypeOutDir?: string`
+### `moduleTypeOutDir?: string`
+
 Controls where the generated `package.json` will be saved to declare the module format.
 
 - If `format` is `esm`, writes: `{ "type": "module" }`
 - If `format` is `cjs`, writes: `{ "type": "commonjs" }`
 
 Example:
+
 ```ts
 {
   esbuild: {
@@ -101,34 +105,44 @@ Example:
 }
 ```
 
-#### `declaration: boolean`
+### `declaration: boolean`
+
 Emit TypeScript declaration (`.d.ts`) files.
 
-#### `bundleDeclaration: boolean`
+### `bundleDeclaration: boolean`
+
 Whether to bundle all declaration files into one output file.
 
-#### `declarationOutDir?: string`
+### `declarationOutDir?: string`
+
 Overrides the output directory for `.d.ts` files. Falls back to `tsconfig.json`'s `outDir`.
 
-#### `buildOnError: boolean`
+### `buildOnError: boolean`
+
 Continue build even if TypeScript errors are present.
 
-#### `noTypeChecker: boolean`
+### `noTypeChecker: boolean`
+
 Skip TypeScript type checking completely.
 
-#### `esbuild: BuildOptions`
+### `esbuild: BuildOptions`
+
 The core esbuild options to control bundling, format, target, etc.
 
-#### `serve: ServeInterface`
+### `serve: ServeInterface`
+
 Serve output over HTTP(S). Can include custom request handlers.
 
-#### `hooks?: Partial<HooksInterface>`
+### `hooks?: Partial<HooksInterface>`
+
 Lifecycle hook functions to customize the build.
 
-#### `define: Record<string, unknown>`
+### `define: Record<string, unknown>`
+
 Compile-time global constants. Ideal for environment flags.
 
 Example:
+
 ```ts
 define: {
   'process.env.NODE_ENV': '"development"',
@@ -136,10 +150,12 @@ define: {
 }
 ```
 
-#### `banner?: { [type: string]: string | () => string }`
+### `banner?: { [type: string]: string | () => string }`
+
 Add a string to the top of every output file. See: [esbuild banner docs](https://esbuild.github.io/api/#banner)
 
-#### `footer?: { [type: string]: string | () => string }`
+### `footer?: { [type: string]: string | () => string }`
+
 Add a string to the bottom of every output file. See: [esbuild footer docs](https://esbuild.github.io/api/#footer)
 
 ---
@@ -173,18 +189,23 @@ const myHooks: HooksInterface = {
 ### Hook Types
 
 #### `onStart: OnStartType`
+
 Runs before the build starts. Useful for logging or setup.
 
 #### `onEnd: OnEndType`
+
 Runs after the build finishes. Ideal for post-processing or cleanup.
 
 #### `onLoad: OnLoadType`
+
 Called when esbuild loads a module. You can alter contents or loader.
 
 #### `onResolve: OnResolveType`
+
 Used to intercept and modify module resolution.
 
 #### `onSuccess: OnEndType`
+
 Alternative to `onEnd`, but only triggered when the build succeeds.
 
 ---

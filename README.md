@@ -12,11 +12,13 @@
 ## Installation
 
 Install `@remotex-labs/xbuild` globally using npm:
+
 ```bash
 npm install -g @remotex-labs/xbuild
 ```
 
 Or using Yarn:
+
 ```bash
 yarn global add @remotex-labs/xbuild
 ```
@@ -98,6 +100,7 @@ The `xBuild` configuration file allows you to customize various settings for the
 By default, xbuild uses `config.xbuild.ts` (`--config` change it). Here's how you can configure it:
 
 ### Example Configuration
+
 ```ts
 /**
  * Import will remove at compile time
@@ -161,6 +164,7 @@ export const config: xBuildConfig = {
 ```
 
 ## Using the ifdef Plugin
+
 The `ifdef` in `xBuild` allows to conditionally include or exclude code based on defined variables. Here's an example:
 
 ```ts
@@ -188,6 +192,7 @@ console.log(result);
 ```
 
 ### Setting Conditions in Configuration
+
 To enable these blocks during the build, define your conditions in the `xBuild` configuration file:
 
 ```ts
@@ -257,6 +262,7 @@ export const config: xBuildConfig = {
 ```
 
 ## Hooks
+
 The `LifecycleHooksInterface` interface provides a structure for lifecycle hooks to customize the build process.
 
 ```ts
@@ -270,6 +276,7 @@ export interface LifecycleHooksInterface {
 ```
 
 ## Links
+
 - [Documentation](https://remotex-labs.github.io/xBuild/)
 - [GitHub Repository](https://github.com/remotex-labs/xBuild)
 - [Issue Tracker](https://github.com/remotex-labs/xBuild/issues)

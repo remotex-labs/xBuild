@@ -7,6 +7,7 @@ xBuild uses observable subscriptions internally for reactive config updates.
 When configuration changes at runtime, active variant services are notified automatically.
 
 This enables:
+
 - hot reconfiguration without restart
 - variant-level updates while watch/build is running
 - controlled service re-init when required (for example `tsconfig` change)
@@ -22,6 +23,7 @@ This enables:
 You usually do not need to interact with observables directly.
 
 Use:
+
 - `overwriteConfig` for full replacement
 - `patchConfig` for incremental changes
 

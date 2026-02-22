@@ -1,6 +1,7 @@
 # Using the ifdef and macros
 
 To enable conditional code inclusion, add a `define` object to your xBuild configuration file:
+
 ```ts
 export default {
     esbuild: {
@@ -18,7 +19,7 @@ export default {
 ```
 
 The following example demonstrates how to use the ifdef preprocessor with conditional function definitions:
-> Note that `$$logger` will be deleted from all places in your code if the flag is not set in your configuration, 
+> Note that `$$logger` will be deleted from all places in your code if the flag is not set in your configuration,
 > keeping your production builds clean and optimized.
 
 ```ts
