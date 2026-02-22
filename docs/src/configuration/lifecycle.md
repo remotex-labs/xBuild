@@ -37,14 +37,17 @@ lifecycle: {
   }
 }
 ```
+
 ## Context Overview
 
 All hooks receive shared data:
+
 - `context.variantName`
 - `context.argv`
 - `context.stage`
 
 Hook-specific context:
+
 - `onStart`: `context.build`
 - `onResolve`: `context.args` (`OnResolveArgs`)
 - `onLoad`: `context.args`, `context.contents`, `context.loader`
@@ -83,4 +86,3 @@ lifecycle: {
 
 - `serve` hooks (`onRequest`, `onStart`) are server-level, not build lifecycle hooks.
 - See `./serve.md` for server behavior.
-

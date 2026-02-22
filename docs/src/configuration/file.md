@@ -50,6 +50,7 @@ export const config: xBuildConfig = {
 ## `serve`
 
 For full `serve` options and examples, see:
+
 - [`Serve Configuration`](./serve.md)
 
 ## `variants`
@@ -113,6 +114,7 @@ types: {
 ```
 
 Behavior:
+
 - `types: true` enables TS diagnostics.
 - If `failOnError` is `false`, diagnostics are reported as warnings and build can continue.
 - If `failOnError` is `true` (or not set), TS errors fail the build.
@@ -131,10 +133,12 @@ declaration: {
 ```
 
 Behavior:
+
 - Declaration generation runs only after a successful build.
 - `outDir` overrides declaration output directory.
 
 Bundle behavior:
+
 - `bundle` default is `true`.
 - When `bundle: true`, xBuild uses declaration bundling (`emitBundle`) and creates bundled `.d.ts` outputs from entry points.
 - When `bundle: false`, xBuild emits per-file declarations (`emit`).
@@ -165,6 +169,7 @@ define: {
 ## Lifecycle Hooks
 
 For complete lifecycle hook docs and context details, see:
+
 - [`Build Lifecycle Hooks`](./lifecycle.md)
 
 ## Export Style

@@ -4,7 +4,7 @@ outline: deep
 
 # Guide
 
-xBuild is a general-purpose build tool for JS/TS projects, powered by esbuild under the hood. 
+xBuild is a general-purpose build tool for JS/TS projects, powered by esbuild under the hood.
 Use it to bundle, type-check, serve, watch, and more.
 
 ## Features
@@ -34,6 +34,7 @@ yarn global add @remotex-labs/xbuild
 ```bash
 xbuild src/index.ts -o dist --bundle --format esm --minify
 ```
+
 > This bundles src/index.ts into dist/, in ESM format, minified.
 
 ### CLI tool

@@ -1,4 +1,5 @@
 # Lifecycle Hooks
+
 The `hooks` field in your `xbuild.config.ts` allows you to register lifecycle hook functions that customize the behavior of the build process.
 These hooks are optional and can be partially provided. Each one corresponds to a specific stage in the `esbuild` operation.
 
@@ -151,7 +152,6 @@ type PluginResultType = Promise<null | void> | null | void;
 ```
 
 Hooks can return `null`, `void`, or a `Promise` of either.
-
 
 ## See Also
 

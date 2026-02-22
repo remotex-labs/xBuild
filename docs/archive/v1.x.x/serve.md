@@ -40,24 +40,31 @@ const config = {
 ### Properties
 
 #### `active: boolean`
+
 Whether to enable the server. Equivalent to passing `-s` or `--serve` via CLI.
 
 #### `port: number`
+
 Port number for the server to listen on.
 
 #### `host: string`
+
 Hostname for the server (e.g., `"localhost"` or `"0.0.0.0"`).
 
 #### `keyfile?: string`
+
 Path to the SSL key file (for HTTPS support).
 
 #### `certfile?: string`
+
 Path to the SSL certificate file (for HTTPS support).
 
 #### `onRequest?: (req, res, next) => void`
+
 A custom request handler. Runs on every HTTP request. You must call `next()` to continue.
 
 #### `onStart?: () => void`
+
 Callback that runs once the server starts.
 
 ## CLI Activation
@@ -77,4 +84,3 @@ serve: {
   active: true
 }
 ```
-
