@@ -2,7 +2,7 @@
  * Type imports (removed at compile time)
  */
 
-import type { PluginBuild, Plugin, OnStartResult, OnEndResult, PartialMessage } from 'esbuild';
+import type { PluginBuild, Plugin, OnStartResult, PartialMessage, Message } from 'esbuild';
 import type { OnEndType, OnLoadType, OnStartType } from './interfaces/lifecycle-provider.interface';
 import type { BuildResult, OnResolveResult, OnResolveArgs, OnLoadResult, OnLoadArgs } from 'esbuild';
 import type { OnResolveType, LifecycleContextInterface } from './interfaces/lifecycle-provider.interface';
@@ -545,17 +545,16 @@ export class LifecycleProvider {
      * @since 2.0.0
      */
 
-    private async executeEndHooks(context: LifecycleContextInterface, buildResult: BuildResult): Promise<OnEndResult> {
-        const errors: Array<PartialMessage> = buildResult.errors;
-        const warnings: Array<PartialMessage> = buildResult.warnings;
+    private async executeEndHooks(context: LifecycleContextInterface, buildResult: BuildResult): Promise<void> {
+        const { errors, warnings } = buildResult;
         const duration = Date.now() - context.stage.startTime.getTime();
         const hookContext = { buildResult, duration, ...context };
 
         for (const [ name, hook ] of this.endHooks.entries()) {
             try {
                 const result = await hook(hookContext);
-                if (result?.errors) errors.push(...result.errors);
-                if (result?.warnings) warnings.push(...result.warnings);
+                if (result?.errors) errors.push(...result.errors as Array<Message>);
+                if (result?.warnings) warnings.push(...result.warnings as Array<Message>);
             } catch (err) {
                 this.pushError(errors, err, name);
             }
@@ -570,8 +569,6 @@ export class LifecycleProvider {
                 }
             }
         }
-
-        return { errors, warnings };
     }
 
     /**
