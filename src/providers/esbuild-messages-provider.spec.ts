@@ -66,7 +66,7 @@ describe('esbuild-messages.provider', () => {
                 detail: error
             } as any;
 
-            const result = normalizeMessageToError(msg);
+            const result = normalizeMessageToError(msg)!;
 
             expect(result).toBeInstanceOf(VMRuntimeError);
             expect(result.message).toContain('Generic error');
@@ -85,7 +85,7 @@ describe('esbuild-messages.provider', () => {
                 }
             } as any;
 
-            const result = normalizeMessageToError(msg);
+            const result = normalizeMessageToError(msg)!;
 
             expect(result).toBeInstanceOf(esBuildError);
             expect(result.message).toBe('Syntax error');
@@ -96,10 +96,10 @@ describe('esbuild-messages.provider', () => {
                 text: 'Build failed'
             } as any;
 
-            const result = normalizeMessageToError(msg);
+            const result = normalizeMessageToError(msg)!;
 
             expect(result).toBeInstanceOf(VMRuntimeError);
-            expect(result.message).toContain('Build failed');
+            expect(result.message).toContain('Build failed')!;
         });
 
         test('should handle empty message text', () => {
@@ -109,7 +109,7 @@ describe('esbuild-messages.provider', () => {
 
             const result = normalizeMessageToError(msg);
 
-            expect(result).toBeInstanceOf(Error);
+            expect(result).toBeUndefined();
         });
 
         test('should prioritize detail over location', () => {

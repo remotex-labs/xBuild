@@ -61,7 +61,7 @@ import { VMRuntimeError } from '@errors/vm-runtime.error';
  * @since 2.0.0
  */
 
-export function normalizeMessageToError(msg: Message | esBuildError): Error {
+export function normalizeMessageToError(msg: Message | esBuildError): Error | undefined {
     if (msg instanceof xBuildBaseError)
         return msg;
 
@@ -74,7 +74,8 @@ export function normalizeMessageToError(msg: Message | esBuildError): Error {
     if (msg.location)
         return new esBuildError(msg);
 
-    return new VMRuntimeError(new Error(msg.text));
+    if(msg.text)
+        return new VMRuntimeError(new Error(msg.text));
 }
 
 /**
@@ -123,7 +124,8 @@ export function normalizeMessageToError(msg: Message | esBuildError): Error {
 
 export function processEsbuildMessages(messages: Array<Message> = [], target: Array<Error>): void {
     for (const msg of messages) {
-        target.push(normalizeMessageToError(msg));
+        const error = normalizeMessageToError(msg);
+        if(error) target.push(error);
     }
 }
 
