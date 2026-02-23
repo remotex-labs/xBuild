@@ -3,6 +3,7 @@
  */
 
 import type { PartialMessage } from 'esbuild';
+import type { StackTraceInterface } from '@providers/interfaces/stack-provider.interface';
 
 /**
  * Imports
@@ -12,121 +13,91 @@ import { xBuildBaseError } from '@errors/base.error';
 import { getErrorMetadata, formatStack } from '@providers/stack.provider';
 
 /**
- * Custom error class for esbuild compilation errors with enhanced formatting and source code context.
+ * Normalized runtime error wrapper for esbuild diagnostics.
  *
  * @remarks
- * The `esBuildError` class extends {@link xBuildBaseError} to provide specialized handling for esbuild
- * {@link Message} objects. It automatically:
- * - Extracts and formats source code snippets from the error location
- * - Applies syntax highlighting to code context
- * - Displays helpful notes and suggestions from esbuild
- * - Generates enhanced stack traces with file locations
- * - Stores structured metadata in {@link StackInterface} format
+ * `esBuildError` converts an esbuild {@link PartialMessage} into an {@link xBuildBaseError}
+ * with framework-aware metadata and a formatted stack string.
  *
- * This class is designed to transform esbuild's error messages into human-readable, visually enhanced
- * output suitable for terminal display, making it easier to identify and fix build errors.
- *
- * **Key features:**
- * - Automatic source code reading from file system
- * - Contextual code display (3 lines before and after error)
- * - Syntax highlighting with color-coded error indicators
- * - Integration with esbuild's location and notes system
- * - Structured error metadata for programmatic access
+ * Construction behavior:
+ * - Uses `message.text` as the runtime error message (defaults to empty string)
+ * - Copies `message.id` to {@link id} (defaults to empty string)
+ * - Builds structured metadata via {@link getErrorMetadata}
+ * - Replaces `stack` using {@link formatStack}, including any diagnostic notes
  *
  * @example
  * ```ts
- * import { build } from 'esbuild';
- * import { esBuildError } from './esbuild.error';
- *
- * try {
- *   await build({
- *     entryPoints: ['src/index.ts'],
- *     bundle: true,
- *     outdir: 'dist'
- *   });
- * } catch (buildError) {
- *   if (buildError.errors) {
- *     for (const message of buildError.errors) {
- *       throw new esBuildError(message);
- *     }
- *   }
- * }
- * ```
- *
- * @example
- * ```ts
- * // Error with location information
- * const message: Message = {
- *   text: "Cannot find module 'lodash'",
- *   location: {
- *     file: 'src/app.ts',
- *     line: 5,
- *     column: 19
- *   },
- *   notes: [
- *     { text: 'You can mark the path "lodash" as external to exclude it' }
- *   ]
+ * const message = {
+ *   id: 'transform',
+ *   text: 'Unexpected token',
+ *   location: { file: 'src/index.ts', line: 1, column: 5 },
+ *   notes: [{ text: 'Check syntax near this token' }]
  * };
  *
  * const error = new esBuildError(message);
- * console.error(error); // Displays formatted error with code context
+ * console.error(error.id); // "transform"
+ * console.error(error.stack);
  * ```
  *
- * @see {@link StackInterface} for metadata structure
- * @see {@link xBuildBaseError} for base error functionality
- * @see {@link https://esbuild.github.io/api/#message-object | esbuild Message documentation}
+ * @see {@link xBuildBaseError}
+ * @see {@link getErrorMetadata}
+ * @see {@link formatStack}
  *
  * @since 2.0.0
  */
 
 export class esBuildError extends xBuildBaseError {
     /**
-     * Creates a new esbuild error with formatted output and metadata.
-     *
-     * @param message - The esbuild {@link Message} object containing error details
+     * Optional esbuild diagnostic identifier copied from `PartialMessage.id`.
      *
      * @remarks
-     * The constructor processes the esbuild message to:
-     * 1. Extract the error text for the base Error message
-     * 2. Read source code from the file system if a location is provided
-     * 3. Generate syntax-highlighted code snippets with context
-     * 4. Format any additional notes from esbuild
-     * 5. Create an enhanced stack trace
-     * 6. Store structured metadata in {@link errorMetadata}
+     * This value is useful for categorizing diagnostics by producer (for example,
+     * plugin- or phase-specific IDs). When absent in the source message, it defaults
+     * to an empty string.
      *
-     * The error name is always set to `'esBuildError'` and the stack is replaced
-     * with a custom formatted version that includes:
+     * @since 2.0.0
+     */
+
+    readonly id: string;
+
+    /**
+     * Creates a new esbuild error with formatted output and metadata.
+     *
+     * @param message - The esbuild {@link PartialMessage} containing diagnostic details
+     * @param options - Optional stack parsing/formatting options used when deriving metadata
+     *
+     * @remarks
+     * The constructor:
+     * 1. Initializes the base error with `message.text ?? ''`
+     * 2. Persists `message.id ?? ''` on {@link id}
+     * 3. If `message.detail` is an `Error`, uses its `message` and `stack` as runtime values
+     * 4. Builds structured metadata from either the original message or `detail` error
+     * 5. Produces formatted output (stack replacement for message-based diagnostics, or
+     *    formatted inspector output for `detail`-based diagnostics)
+     *
+     * The error name is always set to `'esBuildError'`. Formatted output includes:
      * - Error name and message with color coding
      * - Any diagnostic notes from esbuild
      * - Highlighted code snippet showing the error location
      * - Enhanced stack trace with file path and position
      *
-     * @example
-     * ```ts
-     * const message: Message = {
-     *   text: "Expected ';' but found '}'",
-     *   location: {
-     *     file: 'src/utils.ts',
-     *     line: 42,
-     *     column: 5
-     *   }
-     * };
-     *
-     * const error = new esBuildError(message);
-     * // error.stack contains formatted output with code context
-     * // error.metadata contains structured location data
-     * ```
-     *
-     * @see {@link Message} for esbuild message structure
      * @see {@link getErrorMetadata} for formatting logic
+     * @see {@link PartialMessage} for esbuild message structure
      *
      * @since 2.0.0
      */
 
-    constructor(message: PartialMessage) {
+    constructor(message: PartialMessage, options?: StackTraceInterface) {
         super(message.text ?? '', 'esBuildError');
 
-        this.errorMetadata = getErrorMetadata(message, { withFrameworkFrames: true });
-        this.stack = formatStack(this.errorMetadata, this.name, this.message, message.notes);
+        this.id = message.id ?? '';
+        if(message.detail instanceof Error) {
+            this.stack = message.detail.stack;
+            this.message = message.detail.message;
+            this.reformatStack(message.detail, options);
+        } else {
+            this.errorMetadata = getErrorMetadata(message, { withFrameworkFrames: true });
+            this.stack = formatStack(this.errorMetadata, this.name, this.message, message.notes);
+        }
     }
 }
