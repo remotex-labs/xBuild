@@ -25,6 +25,31 @@ describe('esBuildError', () => {
     });
 
     describe('constructor', () => {
+        test('should set id from message', () => {
+            const message: any = {
+                id: 'plugin-transform',
+                text: 'Unexpected token',
+                location: null,
+                notes: []
+            };
+
+            const error = new esBuildError(message);
+
+            expect(error.id).toBe('plugin-transform');
+        });
+
+        test('should default id to empty string when missing', () => {
+            const message: any = {
+                text: 'Unexpected token',
+                location: null,
+                notes: []
+            };
+
+            const error = new esBuildError(message);
+
+            expect(error.id).toBe('');
+        });
+
         test('should create error with message text', () => {
             const message: any = {
                 text: 'Unexpected token',
@@ -35,6 +60,17 @@ describe('esBuildError', () => {
             const error = new esBuildError(message);
 
             expect(error.message).toBe('Unexpected token');
+        });
+
+        test('should default message to empty string when text is missing', () => {
+            const message: any = {
+                location: null,
+                notes: []
+            };
+
+            const error = new esBuildError(message);
+
+            expect(error.message).toBe('');
         });
 
         test('should set error name to "esBuildError"', () => {
@@ -99,6 +135,42 @@ describe('esBuildError', () => {
 
             expect(error.stack).toContain('First note');
             expect(error.stack).toContain('Second note');
+        });
+
+        test('should use detail error message and stack when detail is Error', () => {
+            const detail = new Error('detail error message');
+            detail.stack = 'Error: detail error message\n    at detail.ts:1:1';
+
+            const message: any = {
+                id: 'detail-id',
+                text: 'outer text should be ignored',
+                detail,
+                location: null,
+                notes: []
+            };
+
+            const error = new esBuildError(message);
+
+            expect(error.id).toBe('detail-id');
+            expect(error.message).toBe('detail error message');
+            expect(error.stack).toBe(detail.stack);
+        });
+
+        test('should pass constructor options to stack metadata when detail is Error', () => {
+            const detail = new Error('detail error message');
+            const reformatStackSpy = xJet.spyOn((esBuildError as any).prototype, 'reformatStack');
+
+            const message: any = {
+                text: 'outer text',
+                detail,
+                location: null,
+                notes: []
+            };
+
+            const options = { withFrameworkFrames: false, withNativeFrames: true };
+            new esBuildError(message, options);
+
+            expect(reformatStackSpy).toHaveBeenCalledWith(detail, options);
         });
     });
 
