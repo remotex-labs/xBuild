@@ -174,6 +174,7 @@ describe('LifecycleProvider', () => {
             expect(hook2).toHaveBeenCalled();
             expect(result.errors).toHaveLength(1);
             expect(result.errors[0].detail).toBe(error);
+            expect(result.errors[0].id).toBe('startHook');
             expect(result.errors[0].pluginName).toBe('a');
             expect(result.warnings).toEqual([ 'warn1' ]);
         });
@@ -283,6 +284,7 @@ describe('LifecycleProvider', () => {
             expect(result).toBeUndefined();
             expect(buildResult.errors).toHaveLength(1);
             expect(buildResult.errors[0].detail).toBe(error);
+            expect(buildResult.errors[0].id).toBe('endHook');
             expect(buildResult.errors[0].pluginName).toBe('a');
             expect(buildResult.warnings).toEqual([ 'warn1' ]);
         });
@@ -300,6 +302,7 @@ describe('LifecycleProvider', () => {
             expect(result).toBeUndefined();
             expect(buildResult.errors).toHaveLength(1);
             expect(buildResult.errors[0].detail).toBe(error);
+            expect(buildResult.errors[0].id).toBe('endHook');
             expect(buildResult.errors[0].pluginName).toBe('my-success');
         });
 
@@ -364,7 +367,7 @@ describe('LifecycleProvider', () => {
 
             expect(hook1).toHaveBeenCalledWith(expectedContext);
             expect(hook2).toHaveBeenCalledWith(expectedContext);
-            expect(result).toEqual({ namespace: 'ns1', external: true });
+            expect(result).toEqual({ errors: [], namespace: 'ns1', external: true });
         });
 
         test('later resolve hook properties override earlier ones', async () => {
@@ -377,10 +380,10 @@ describe('LifecycleProvider', () => {
 
             const result = await callRegistered(build.onResolve, 1, { path: './file.ts' } as any);
 
-            expect(result).toEqual({ namespace: 'ns1', external: true });
+            expect(result).toEqual({ errors: [], namespace: 'ns1', external: true });
         });
 
-        test('returns null when all hooks return undefined or null', async () => {
+        test('returns base result when all hooks return undefined or null', async () => {
             const hook1 = xJet.fn<any, any, any>().mockResolvedValue(undefined);
             const hook2 = xJet.fn<any, any, any>().mockResolvedValue(null);
 
@@ -390,7 +393,7 @@ describe('LifecycleProvider', () => {
 
             const result = await callRegistered(build.onResolve, 1, { path: './file.ts' } as any);
 
-            expect(result).toBeNull();
+            expect(result).toEqual({ errors: [] });
         });
     });
 
@@ -534,6 +537,7 @@ describe('LifecycleProvider', () => {
             expect(hook2).toHaveBeenCalled();
             expect(result.errors).toHaveLength(1);
             expect(result.errors[0].detail).toBe(error);
+            expect(result.errors[0].id).toBe('loadHook');
             expect(result.errors[0].pluginName).toBe('a');
             expect(result.loader).toBe('ts');
         });
