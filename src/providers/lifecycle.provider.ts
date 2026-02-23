@@ -447,23 +447,27 @@ export class LifecycleProvider {
     }
 
     /**
-     * Appends a caught error to the provided error list as a `PartialMessage`.
+     * Appends a caught error to the provided error list as a normalized `PartialMessage`.
      *
      * @param errors - The error array to append to
+     * @param id - Logical source identifier for the failing hook phase (e.g. `startHook`, `endHook`)
      * @param err - The thrown value to wrap
-     * @param names - The hook name to set as `pluginName` on the message, defaults to the variant name
+     * @param names - The hook name to set as `pluginName`, defaults to the variant name
      *
      * @remarks
-     * The `pluginName` field is populated so esbuild can attribute the error to the specific
-     * hook that threw, rather than the plugin as a whole. This makes error output more precise
-     * when multiple hooks are registered under different names.
+     * Captured errors are normalized with:
+     * - `id` to identify which lifecycle phase produced the message
+     * - `pluginName` to attribute the failure to the registered hook name
+     * - `location: null` because these errors are runtime hook failures, not source-mapped diagnostics
      *
      * @since 2.0.0
      */
 
-    private pushError(errors: Array<PartialMessage>, err: unknown, names: string = this.variantName): void {
+    private pushError(errors: Array<PartialMessage>, id: string, err: unknown, names: string = this.variantName): void {
         errors.push({
+            id,
             detail: err,
+            location: null,
             pluginName: names
         });
     }
@@ -510,7 +514,7 @@ export class LifecycleProvider {
                 if (result?.errors) errors.push(...result.errors);
                 if (result?.warnings) warnings.push(...result.warnings);
             } catch (err) {
-                this.pushError(errors, err, name);
+                this.pushError(errors, 'startHook', err, name);
             }
         }
 
@@ -518,25 +522,20 @@ export class LifecycleProvider {
     }
 
     /**
-     * Executes all registered end hooks and success hooks, aggregating their results.
+     * Executes all registered end hooks and success hooks, mutating the provided `buildResult`.
      *
      * @param context - Base lifecycle context containing variant name, arguments, and stage state
-     * @param buildResult - The final build result from esbuild
-     * @returns Aggregated result containing all errors and warnings from end hooks
+     * @param buildResult - The final build result from esbuild (mutated in place)
      *
      * @remarks
-     * This method calculates the build duration from the start time and executes hooks in two phases:
-     * 1. **End hooks**: Execute for all builds with a result context containing build result and duration.
-     *    Errors and warnings are seeded from `buildResult.errors` and `buildResult.warnings` so existing
-     *    build diagnostics are preserved alongside hook-generated ones. Each captured error is attributed
-     *    to its hook's registered name via `pluginName` on the `PartialMessage`.
-     * 2. **Success hooks**: Execute only if `buildResult.errors.length === 0` with the same result context.
-     *    Errors thrown by success hooks are captured and attributed to their registered hook name via
-     *    `pluginName`. Return values from success hooks are intentionally ignored — they are meant for
-     *    side effects only.
+     * This method computes build duration and executes hooks in two phases:
+     * 1. **End hooks**: Always run. Returned `errors`/`warnings` are appended to `buildResult`.
+     *    Thrown errors are captured and normalized through {@link pushError} using `id: "endHook"`.
+     * 2. **Success hooks**: Run only when `buildResult.errors.length === 0` after end hooks.
+     *    Return values are ignored; thrown errors are captured as `endHook`-scoped messages.
      *
-     * Both hook phases share the same pre-built hook context object, constructed once before
-     * any iteration begins.
+     * Hook handlers share a single result context object that includes `duration`, `buildResult`,
+     * and the base lifecycle metadata.
      *
      * @see {@link onEnd}
      * @see {@link onSuccess}
@@ -556,7 +555,7 @@ export class LifecycleProvider {
                 if (result?.errors) errors.push(...result.errors as Array<Message>);
                 if (result?.warnings) warnings.push(...result.warnings as Array<Message>);
             } catch (err) {
-                this.pushError(errors, err, name);
+                this.pushError(errors, 'endHook', err, name);
             }
         }
 
@@ -565,7 +564,7 @@ export class LifecycleProvider {
                 try {
                     await hook(hookContext);
                 } catch (err) {
-                    this.pushError(errors, err, name);
+                    this.pushError(errors, 'endHook', err, name);
                 }
             }
         }
@@ -576,7 +575,7 @@ export class LifecycleProvider {
      *
      * @param context - Base lifecycle context containing variant name, arguments, and stage state
      * @param args - The resolution arguments from esbuild
-     * @returns Merged resolution result from all hooks, or `null` if no hooks returned results
+     * @returns Merged resolution result from all hooks, always including an `errors` array
      *
      * @remarks
      * This method executes all resolve hooks in registration order, passing each hook a resolve
@@ -584,9 +583,8 @@ export class LifecycleProvider {
      * Results are merged using object spreading, meaning later hooks can override properties
      * set by earlier hooks.
      *
-     * If no hooks return results, this method returns `null` to allow esbuild's default
-     * resolution to proceed. If any hook returns a result, that result becomes the base
-     * for later merging.
+     * The result is initialized as `{ errors: [] }` and used as the merge base. If all hooks
+     * return `undefined`/`null`, the method still returns this base result.
      *
      * Unlike start/end/load hooks, resolve hook errors are not caught — esbuild will surface
      * them directly as build errors.
@@ -597,17 +595,21 @@ export class LifecycleProvider {
      * @since 2.0.0
      */
 
-    private async executeResolveHooks(context: LifecycleContextInterface, args: OnResolveArgs): Promise<OnResolveResult | null> {
-        let result: OnResolveResult | undefined;
+    private async executeResolveHooks(context: LifecycleContextInterface, args: OnResolveArgs): Promise<OnResolveResult> {
+        let result: OnResolveResult = { errors: [] };
         const hookContext = { args, ...context };
 
-        for (const hook of this.resolveHooks.values()) {
-            const hookResult = await hook(hookContext);
-            if (!hookResult) continue;
-            result = result ? { ...result, ...hookResult } : hookResult;
+        for (const [ name, hook ] of this.resolveHooks.entries()) {
+            try {
+                const hookResult = await hook(hookContext);
+                if (!hookResult) continue;
+                result = { ...result, ...hookResult };
+            } catch (err) {
+                this.pushError(result.errors!, 'endResolve', err, name);
+            }
         }
 
-        return result ?? null;
+        return result;
     }
 
     /**
@@ -662,7 +664,7 @@ export class LifecycleProvider {
                 if (result.errors) errors.push(...result.errors);
                 if (result.warnings) warnings.push(...result.warnings);
             } catch (err) {
-                this.pushError(errors, err, name);
+                this.pushError(errors, 'loadHook', err, name);
             }
         }
 
