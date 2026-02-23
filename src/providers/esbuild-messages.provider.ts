@@ -69,7 +69,7 @@ export function normalizeMessageToError(msg: Message | esBuildError): Error | un
         return msg.detail;
 
     if (msg.detail instanceof Error)
-        return new VMRuntimeError(msg.detail, { withFrameworkFrames: true });
+        return new esBuildError(msg, { withFrameworkFrames: true });
 
     if (msg.location)
         return new esBuildError(msg);
