@@ -20,21 +20,21 @@ import { relative } from '@components/path.component';
 import { VMRuntimeError } from '@errors/vm-runtime.error';
 import { xterm } from '@remotex-labs/xansi/xterm.component';
 import { ConfigurationService } from '@services/configuration.service';
-import { enhancedBuildResult } from '@providers/esbuild-messages.provider';
 import { mutedColor, pathColor, textColor, warnColor } from '@components/color.component';
 import { errorColor, infoColor, keywordColor, okColor } from '@components/color.component';
+import { enhancedBuildResult, isBuildResultError } from '@providers/esbuild-messages.provider';
 
 /**
  * Constants
  */
 
-const INDENT = '   ';
-const KILOBYTE = 1024;
-const MEGABYTE = KILOBYTE * 1024;
-const DASH_SYMBOL = '—';
-const ARROW_SYMBOL = '→';
-const ERROR_SYMBOL = '×';
-const WARNING_SYMBOL = '•';
+export const INDENT = '   ';
+export const KILOBYTE = 1024;
+export const MEGABYTE = KILOBYTE * 1024;
+export const DASH_SYMBOL = '—';
+export const ARROW_SYMBOL = '→';
+export const ERROR_SYMBOL = '×';
+export const WARNING_SYMBOL = '•';
 
 /**
  * Creates a formatted prefix for action log messages.
@@ -512,7 +512,10 @@ export function logBuildOutputs(metafile: Metafile): void {
  */
 
 export function logError(issue: unknown): void {
-    if (issue instanceof AggregateError) {
+    if (issue instanceof xBuildBaseError) {
+        console.log(`\n${ INDENT }${ errorColor(ERROR_SYMBOL) } ${ issue }`);
+        logErrorMetadata(issue);
+    } else if (isBuildResultError(issue)) {
         for (const error of issue.errors) {
             logError(error);
         }
@@ -520,9 +523,6 @@ export function logError(issue: unknown): void {
         for (const diagnostic of issue.diagnostics) {
             logTypescriptDiagnostic(diagnostic, errorColor(ERROR_SYMBOL));
         }
-    } else if (issue instanceof xBuildBaseError) {
-        console.log(`\n${ INDENT }${ errorColor(ERROR_SYMBOL) } ${ issue }`);
-        logErrorMetadata(issue);
     } else if (issue instanceof Error) {
         logError(new VMRuntimeError(issue));
     } else {
