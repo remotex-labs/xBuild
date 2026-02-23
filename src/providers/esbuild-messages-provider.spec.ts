@@ -68,7 +68,7 @@ describe('esbuild-messages.provider', () => {
 
             const result = normalizeMessageToError(msg)!;
 
-            expect(result).toBeInstanceOf(VMRuntimeError);
+            expect(result).toBeInstanceOf(esBuildError);
             expect(result.message).toContain('Generic error');
         });
 
