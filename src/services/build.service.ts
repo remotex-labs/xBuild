@@ -636,12 +636,9 @@ export class BuildService {
         for (const name of Object.keys(this.config.variants)) {
             if (this.variants[name]) continue;
             const lifecycle = new LifecycleProvider(name, this.argv);
+            lifecycle.onEnd(this.onEndTrigger.bind(this), 'build-service');
             lifecycle.onStart(this.onStartTrigger.bind(this), 'build-service');
             this.variants[name] = new VariantService(name, lifecycle, this.config.variants[name], this.argv);
-
-            // This needs to run after the user registration lifecycle.
-            // If there’s an error in the user code, we’ll be able to display it properly.
-            lifecycle.onEnd(this.onEndTrigger.bind(this), 'build-service');
             lifecycle.onLoad(transformerDirective.bind({}, this.variants[name]), 'build-service');
         }
     }
