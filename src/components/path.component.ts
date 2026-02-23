@@ -1,7 +1,37 @@
+/**
+ * Import
+ */
+
 import * as path from 'path';
 import * as pathPosix from 'path/posix';
 
+/**
+ * Regular expression to match backslashes in file paths.
+ *
+ * @remarks
+ * Used by {@link toPosix} to convert Windows-style backslash path separators
+ * to POSIX-style forward slashes for cross-platform path normalization.
+ *
+ * Matches: `\`
+ *
+ * @since 2.0.0
+ */
+
 const BACKSLASH_RE = /\\/g;
+
+/**
+ * Regular expression to match consecutive forward slashes in file paths.
+ *
+ * @remarks
+ * Used by {@link toPosix} to normalize paths by collapsing multiple consecutive
+ * forward slashes into a single slash. This ensures consistent path formatting
+ * across different platforms and input sources.
+ *
+ * Matches: Two or more forward slashes (`//`, `///`, etc.)
+ *
+ * @since 2.0.0
+ */
+
 const DUPLICATE_SLASH_RE = /\/+/g;
 
 /**
@@ -155,7 +185,7 @@ export function join(...paths: Array<string>): string {
  * // '/home/user/project/src/components/Button.tsx'
  * ```
  *
- * @example Resolving with absolute path
+ * @example Resolving with an absolute path
  * ```ts
  * const absolutePath = resolve('/var/www', 'html', 'index.html');
  * // '/var/www/html/index.html'
@@ -235,7 +265,7 @@ export function dirname(p: string): string {
  * This function:
  * 1. Converts both paths to POSIX format using {@link toPosix}
  * 2. Computes the relative path using `path.posix.relative()`
- * 3. Returns `.` when the result is empty (indicating same location)
+ * 3. Returns `.` when the result is empty (indicating the same location)
  *
  * The relative path uses `..` to navigate up directories and includes only
  * the necessary segments to reach the destination from the source.
