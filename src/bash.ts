@@ -22,10 +22,10 @@ import { init } from '@components/interactive.component';
 import { collectFilesFromGlob } from '@components/glob.component';
 import { configFileProvider } from '@providers/config-file.provider';
 import { bannerComponent, prefix } from '@components/banner.component';
-import { keywordColor, mutedColor, pathColor } from '@components/color.component';
-import { logBuildStart, createActionPrefix } from '@components/printer.component';
 import { BuildService, overwriteConfig, ServerModule, WatchService } from './index';
 import { logError, logTypeDiagnostics, logBuildEnd } from '@components/printer.component';
+import { errorColor, keywordColor, mutedColor, pathColor } from '@components/color.component';
+import { logBuildStart, createActionPrefix, ERROR_SYMBOL } from '@components/printer.component';
 
 /**
  * Default glob patterns for excluding common non-source directories from entry point collection.
@@ -464,7 +464,20 @@ async function executeBuild(buildService: BuildService, args: ArgumentsInterface
             const diagnostics = await buildService.typeChack();
             logTypeDiagnostics(diagnostics);
         } else {
-            await buildService.build(args.build);
+            const result = await buildService.build(args.build);
+            Object.entries(result).forEach(([ name, variant ]) => {
+                if(!variant.errors.length) return;
+
+                const status = createActionPrefix('onEnd-hook', errorColor(ERROR_SYMBOL));
+                console.log(status, name);
+
+                variant.errors.forEach((error: Error & { id?: string }) => {
+                    if(error?.id && error?.id === 'endHook') {
+                        logError(error);
+                    }
+                });
+                console.log('');
+            });
         }
     } catch (error) {
         logError(error);
