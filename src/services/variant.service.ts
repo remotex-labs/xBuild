@@ -493,13 +493,14 @@ export class VariantService {
         if (!this.active) return;
         this.applyInjections();
 
+        const config = Object.assign({}, this.buildConfig.esbuild);
         this.dependenciesFile = await this.buildDependencyMap();
         if (this.buildConfig.esbuild.bundle === false) {
-            this.buildConfig.esbuild.entryPoints = this.dependenciesFile;
+            Object.assign(config, { entryPoints: this.dependenciesFile });
         }
 
         try {
-            const result = await build(this.buildConfig.esbuild);
+            const result = await build(config);
             await this.packageTypeComponent();
 
             return result;
