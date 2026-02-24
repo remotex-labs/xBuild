@@ -118,7 +118,7 @@ export const ORPHAN_COMMENT_REGEX = /(?:\/\*\*[\s\S]*?\*\/\s*)+(\/\*\*[\s\S]*?\*
 export const EXPORT_MODIFIER_REGEX = /^export\s+(?:default\s+)?/gm;
 
 /**
- * Matches trailing JSDoc comment blocks at the end of lines for removal.
+ * Matches single-line trailing JSDoc comment blocks at the end of lines for removal.
  *
  * @remarks
  * Matches JSDoc comment blocks that appear at the end of lines, including
@@ -127,7 +127,7 @@ export const EXPORT_MODIFIER_REGEX = /^export\s+(?:default\s+)?/gm;
  *
  * Pattern breakdown:
  * - `\s*` - Leading whitespace
- * - `\/\*\*[\s\S]*?\*\/` - JSDoc comment block (non-greedy)
+ * - `\/\*\*[^\\r\\n]*?\*\/` - Single-line JSDoc comment block (no line breaks)
  * - `\s*$` - Trailing whitespace and end of line
  *
  * @example
@@ -141,7 +141,7 @@ export const EXPORT_MODIFIER_REGEX = /^export\s+(?:default\s+)?/gm;
  * @since 2.0.0
  */
 
-export const TRAILING_COMMENT_REGEX = /\s*\/\*\*[\s\S]*?\*\/\s*$/g;
+export const TRAILING_COMMENT_REGEX = /(?<=[:;,{}\[\]()\w"'`])[ \t]*\/\*\*[^\r\n]*?\*\/[ \t]*$/gm;
 
 /**
  * Removes shebang line from the beginning of file content.
