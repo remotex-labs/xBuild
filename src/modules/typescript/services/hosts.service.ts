@@ -12,8 +12,8 @@ import type { FileSnapshotInterface } from '@typescript/models/interfaces/files-
 
 import ts from 'typescript';
 import { inject } from '@symlinks/symlinks.module';
-import { relative } from '@components/path.component';
 import { FilesModel } from '@typescript/models/files.model';
+import { relative, dirname } from '@components/path.component';
 
 /**
  * Implements a TypeScript Language Service host with file snapshot caching and module resolution.
@@ -501,7 +501,7 @@ export class LanguageHostService implements ts.LanguageServiceHost {
             if (!resolve) return match;
 
             const targetFile = resolve.replace(/\.tsx?$/, type);
-            const relativePath = relative(fileName, targetFile);
+            const relativePath = relative(dirname(fileName), targetFile);
 
             return match.replace(importPath, relativePath.startsWith('.') ? relativePath : './' + relativePath);
         });
