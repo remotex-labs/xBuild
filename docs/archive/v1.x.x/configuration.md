@@ -58,7 +58,7 @@ const config: Array<xBuildConfig> = [
             platform: 'node',
             packages: 'external',
             sourcemap: true,
-            sourceRoot: `https://github.com/remotex-lab/xmap/tree/v${ pkg.version }/`,
+            sourceRoot: `https://github.com/remotex-labs/xmap/tree/v${ pkg.version }/`,
             entryPoints: [ 'src/index.ts' ]
         }
     },

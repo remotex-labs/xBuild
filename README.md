@@ -133,7 +133,7 @@ export const config: xBuildConfig = {
             packages: 'external',
             sourcemap: true,
             external: [ './index.js' ],
-            sourceRoot: `https://github.com/remotex-lab/xBuild/tree/v${ pkg.version }/`,
+            sourceRoot: `https://github.com/remotex-labs/xBuild/tree/v${ pkg.version }/`,
             loader: {
                 '.html': 'text'
             }
@@ -227,7 +227,7 @@ export const config: xBuildConfig = {
             packages: 'external',
             sourcemap: true,
             external: [ './index.js' ],
-            sourceRoot: `https://github.com/remotex-lab/xBuild/tree/v${ pkg.version }/`,
+            sourceRoot: `https://github.com/remotex-labs/xBuild/tree/v${ pkg.version }/`,
             loader: {
                 '.html': 'text'
             }
