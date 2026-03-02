@@ -67,13 +67,13 @@
         "vitepress": "^2.0.0-alpha.15",
         "typescript": "^5.9.3",
         "markdownlint-cli": "^0.47.0",
-        "typescript-eslint": "^8.56.0",
-        "eslint-plugin-tsdoc": "^0.5.0",
+        "typescript-eslint": "^8.56.1",
+        "eslint-plugin-tsdoc": "^0.5.2",
         "eslint-plugin-perfectionist": "^5.6.0",
-        "@types/node": "^25.2.3",
-        "@remotex-labs/xjet": "^1.5.0",
+        "@types/node": "^25.3.3",
+        "@remotex-labs/xjet": "^1.5.4",
         "@viteplus/versions": "^2.0.6",
-        "@remotex-labs/xbuild": "2.1.4"
+        "@remotex-labs/xbuild": "2.1.6"
     },
     "dependencies": {
         "yargs": "^18.0.0",
