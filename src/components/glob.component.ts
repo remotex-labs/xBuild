@@ -58,10 +58,14 @@ export function parseGlobs(globs: Array<string>): ParseGlobInterface {
  *
  * @remarks
  * Uses early exit optimization - stops checking as soon as a match is found.
+ * A pattern is treated as a match when either:
+ * - The pattern string ends with the provided path
+ * - `matchesGlob(p, pattern)` returns true
  *
  * @example
  * ```ts
  * matchesAny('src/app.ts', ['**\/*.ts', '**\/*.js']); // true
+ * matchesAny('src/app.ts', ['prefix/src/app.ts']); // true (suffix check)
  * matchesAny('README.md', ['**\/*.ts', '**\/*.js']); // false
  * ```
  *
@@ -71,7 +75,7 @@ export function parseGlobs(globs: Array<string>): ParseGlobInterface {
 
 export function matchesAny(p: string, patterns: Array<string>): boolean {
     for (const pattern of patterns) {
-        if (matchesGlob(p, pattern)) return true;
+        if (pattern.endsWith(p) || matchesGlob(p, pattern)) return true;
     }
 
     return false;
