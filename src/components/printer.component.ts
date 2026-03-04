@@ -311,7 +311,9 @@ export function appendTypesError(buffer: Array<string>, error: TypesError, symbo
  */
 
 export function appendGenericIssue(buffer: Array<string>, issue: IssueType, symbol: string, color: typeof errorColor): void {
-    buffer.push(`\n${ INDENT }${ color(symbol) } ${ color.dim(issue.toString()) }`);
+    const title = `${ color(issue.name) }: ${ issue.message.slice(issue.name.length + 1) }`;
+    buffer.push(`\n${ INDENT }${ color(symbol) } ${ title }`);
+
     if (issue instanceof xBuildBaseError) {
         appendErrorMetadata(buffer, issue);
     }
@@ -514,7 +516,8 @@ export function logBuildOutputs(metafile: Metafile): void {
 
 export function logError(issue: unknown): void {
     if (issue instanceof xBuildBaseError) {
-        console.log(`\n${ INDENT }${ errorColor(ERROR_SYMBOL) } ${ issue }`);
+        const title = `${ errorColor(issue.name) }: ${ issue.message.slice(issue.name.length + 1) }`;
+        console.log(`\n${ INDENT }${ errorColor(ERROR_SYMBOL) } ${ title }`);
         logErrorMetadata(issue);
     } else if (isBuildResultError(issue)) {
         for (const error of issue.errors) {
