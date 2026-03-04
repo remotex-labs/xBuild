@@ -204,7 +204,7 @@ describe('analyze.directive', () => {
             'const $$flag = $$ifdef("DEBUG");',
             'let $$flag = $$ifdef("DEBUG");',
             'var $$flag = $$ifdef("DEBUG");'
-        )('detects macro declared with %s', (content, done) => {
+        )('detects macro declared with %s', ([ content ], done) => {
             variant.dependencies = { 'src/test.ts': 'src/test.ts' };
             variant.config.define = { DEBUG: true };
             filesModel.getOrTouchFile.mockReturnValue({ contentSnapshot: { text: content } });
@@ -221,7 +221,7 @@ describe('analyze.directive', () => {
             'const $$flag = $$ifdef("DISABLED");',
             'let $$flag = $$ifdef("DISABLED");',
             'var $$flag = $$ifdef("DISABLED");'
-        )('disables macro declared with %s when define is false', (content, done) => {
+        )('disables macro declared with %s when define is false', ([ content ], done) => {
             variant.dependencies = { 'src/test.ts': 'src/test.ts' };
             variant.config.define = { DISABLED: false };
             filesModel.getOrTouchFile.mockReturnValue({ contentSnapshot: { text: content } });
@@ -236,7 +236,7 @@ describe('analyze.directive', () => {
             'export const $$pub = $$ifdef("PUBLIC_API");',
             'export let $$pub = $$ifdef("PUBLIC_API");',
             'export var $$pub = $$ifdef("PUBLIC_API");'
-        )('detects macro declared with %s', (content, done) => {
+        )('detects macro declared with %s', ([ content ], done) => {
             variant.dependencies = { 'src/api.ts': 'src/api.ts' };
             variant.config.define = { PUBLIC_API: true };
             filesModel.getOrTouchFile.mockReturnValue({ contentSnapshot: { text: content } });
@@ -252,7 +252,7 @@ describe('analyze.directive', () => {
             'export const $$pub = $$ifdef("DISABLED");',
             'export let $$pub = $$ifdef("DISABLED");',
             'export var $$pub = $$ifdef("DISABLED");'
-        )('disables exported macro declared with %s when define is false', (content, done) => {
+        )('disables exported macro declared with %s when define is false', ([ content ], done) => {
             variant.dependencies = { 'src/api.ts': 'src/api.ts' };
             variant.config.define = { DISABLED: false };
             filesModel.getOrTouchFile.mockReturnValue({ contentSnapshot: { text: content } });
