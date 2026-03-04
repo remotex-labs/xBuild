@@ -27,6 +27,7 @@ import type { BuildResult } from 'esbuild';
  *
  * The normalized errors may include:
  * - {@link TypesError} for TypeScript type checking failures
+ * - {@link xBuildError} for text errors during build hooks
  * - {@link esBuildError} for esbuild compilation errors with location information
  * - {@link VMRuntimeError} for runtime errors during build hooks
  * - {@link xBuildBaseError} for custom build system errors
@@ -39,7 +40,7 @@ import type { BuildResult } from 'esbuild';
  *     new TypesError('Type checking failed', diagnostics)
  *   ],
  *   warnings: [
- *     new VMRuntimeError(new Error('Deprecation warning'))
+ *     new xBuildError('Deprecation warning')
  *   ],
  *   metafile: { ... },
  *   outputFiles: [ ... ],
