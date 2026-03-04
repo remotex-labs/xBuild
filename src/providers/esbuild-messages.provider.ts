@@ -10,9 +10,9 @@ import type { BuildResultInterface } from './interfaces/esbuild-messages-provide
  */
 
 import { TypesError } from '@errors/types.error';
+import { xBuildError } from '@errors/xbuild.error';
 import { xBuildBaseError } from '@errors/base.error';
 import { esBuildError } from '@errors/esbuild.error';
-import { VMRuntimeError } from '@errors/vm-runtime.error';
 
 /**
  * Converts an esbuild message to a normalized Error instance.
@@ -75,7 +75,7 @@ export function normalizeMessageToError(msg: Message | esBuildError): Error | un
         return new esBuildError(msg);
 
     if(msg.text)
-        return new VMRuntimeError(new Error(msg.text));
+        return new xBuildError(msg.text);
 }
 
 /**

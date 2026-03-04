@@ -12,7 +12,6 @@ import { readFileSync } from 'fs';
 import { TypesError } from '@errors/types.error';
 import { xBuildError } from '@errors/xbuild.error';
 import { esBuildError } from '@errors/esbuild.error';
-import { VMRuntimeError } from '@errors/vm-runtime.error';
 import { enhancedBuildResult } from '@providers/esbuild-messages.provider';
 import { processEsbuildMessages } from '@providers/esbuild-messages.provider';
 import { normalizeMessageToError } from '@providers/esbuild-messages.provider';
@@ -98,7 +97,7 @@ describe('esbuild-messages.provider', () => {
 
             const result = normalizeMessageToError(msg)!;
 
-            expect(result).toBeInstanceOf(VMRuntimeError);
+            expect(result).toBeInstanceOf(xBuildError);
             expect(result.message).toContain('Build failed')!;
         });
 
@@ -146,9 +145,9 @@ describe('esbuild-messages.provider', () => {
             processEsbuildMessages(messages, target);
 
             expect(target).toHaveLength(3);
-            expect(target[0]).toBeInstanceOf(VMRuntimeError);
-            expect(target[1]).toBeInstanceOf(VMRuntimeError);
-            expect(target[2]).toBeInstanceOf(VMRuntimeError);
+            expect(target[0]).toBeInstanceOf(xBuildError);
+            expect(target[1]).toBeInstanceOf(xBuildError);
+            expect(target[2]).toBeInstanceOf(xBuildError);
         });
 
         test('should handle empty messages array', () => {
@@ -177,7 +176,7 @@ describe('esbuild-messages.provider', () => {
 
             expect(target).toHaveLength(2);
             expect(target[0]).toBe(existingError);
-            expect(target[1]).toBeInstanceOf(VMRuntimeError);
+            expect(target[1]).toBeInstanceOf(xBuildError);
         });
 
         test('should process mixed message types', () => {
@@ -205,7 +204,7 @@ describe('esbuild-messages.provider', () => {
 
             expect(target).toHaveLength(3);
             expect(target[0]).toBeInstanceOf(esBuildError);
-            expect(target[1]).toBeInstanceOf(VMRuntimeError);
+            expect(target[1]).toBeInstanceOf(xBuildError);
             expect(target[2]).toBeInstanceOf(TypesError);
         });
 
@@ -252,9 +251,9 @@ describe('esbuild-messages.provider', () => {
             const result = enhancedBuildResult(source);
 
             expect(result.errors).toHaveLength(1);
-            expect(result.errors[0]).toBeInstanceOf(VMRuntimeError);
+            expect(result.errors[0]).toBeInstanceOf(xBuildError);
             expect(result.warnings).toHaveLength(1);
-            expect(result.warnings[0]).toBeInstanceOf(VMRuntimeError);
+            expect(result.warnings[0]).toBeInstanceOf(xBuildError);
             expect(result.metafile).toBe(source.metafile);
             expect(result.outputFiles).toBe(source.outputFiles);
             expect(result.mangleCache).toBe(source.mangleCache);
@@ -380,12 +379,12 @@ describe('esbuild-messages.provider', () => {
             const result = enhancedBuildResult(source);
 
             expect(result.errors).toHaveLength(3);
-            expect(result.errors[0]).toBeInstanceOf(VMRuntimeError);
+            expect(result.errors[0]).toBeInstanceOf(xBuildError);
             expect(result.errors[1]).toBeInstanceOf(xBuildError);
             expect(result.errors[2]).toBeInstanceOf(esBuildError);
 
             expect(result.warnings).toHaveLength(2);
-            expect(result.warnings[0]).toBeInstanceOf(VMRuntimeError);
+            expect(result.warnings[0]).toBeInstanceOf(xBuildError);
             expect(result.warnings[1]).toBeInstanceOf(TypesError);
         });
 
@@ -431,7 +430,7 @@ describe('esbuild-messages.provider', () => {
             expect(result.errors).toHaveLength(1);
             expect(result.errors[0]).toBeInstanceOf(esBuildError);
             expect(result.warnings).toHaveLength(1);
-            expect(result.warnings[0]).toBeInstanceOf(VMRuntimeError);
+            expect(result.warnings[0]).toBeInstanceOf(xBuildError);
             expect(result.metafile).toBeDefined();
             expect(result.outputFiles).toBeDefined();
             expect(result.mangleCache).toBeDefined();

@@ -13,6 +13,7 @@ import type { BuildContextInterface, ResultContextInterface } from '@providers/i
  */
 
 import { TypesError } from '@errors/types.error';
+import { xBuildError } from '@errors/xbuild.error';
 import { inject } from '@symlinks/symlinks.module';
 import { xBuildBaseError } from '@errors/base.error';
 import { prefix } from '@components/banner.component';
@@ -526,7 +527,7 @@ export function logError(issue: unknown): void {
     } else if (issue instanceof Error) {
         logError(new VMRuntimeError(issue));
     } else {
-        logError(new VMRuntimeError(new Error(String(issue))));
+        logError(new xBuildError(String(issue)));
     }
 }
 
