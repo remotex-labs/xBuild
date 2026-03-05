@@ -604,7 +604,7 @@ export async function astProcess(state: StateInterface, variant: string = 'unkno
  */
 
 export async function transformerDirective(variant: VariantService, context: LoadContextInterface): Promise<OnLoadResult | undefined> {
-    const { args, loader, stage, contents, variantName } = context;
+    const { args, loader, stage, contents, variantName, options, argv } = context;
     if (args.path.includes('node_modules')) return;
 
     if (contents.length < 1) return;
@@ -615,13 +615,17 @@ export async function transformerDirective(variant: VariantService, context: Loa
     if (!sourceFile) return;
 
     const state: StateInterface = {
-        variantName,
         stage: stage as MacrosStateInterface,
         errors: [],
         contents: contents.toString(),
         warnings: [],
         defines: variant.config.define ?? {},
-        sourceFile: sourceFile!
+        sourceFile: sourceFile!,
+        context: {
+            argv,
+            options,
+            variantName
+        }
     };
 
     let content = await astProcess(state, variant.name);

@@ -94,7 +94,7 @@ export async function evaluateCode(code: string, state: StateInterface, node: No
         const module = { exports: {} };
         const require = createRequire(state.sourceFile.fileName);
         const context = createSandboxContext(state.sourceFile.fileName, module, require);
-        context.variantName = state.variantName;
+        context.context = state.context;
 
         const result = await sandboxExecute(data.text, context, {
             filename: state.sourceFile.fileName

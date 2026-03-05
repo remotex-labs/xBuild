@@ -42,40 +42,6 @@ $$inline(expressionOrCallback)
 > To inspect real macro replacements, run build with `--verbose` or `-v`.
 > ![replacement](/images/replacement.png)
 
-## Inline Context
-
-`$$inline` callbacks run with a global `context` object in the sandbox.
-
-| Property              | Type                      | Description                                                        |
-|-----------------------|---------------------------|--------------------------------------------------------------------|
-| `context.variantName` | `string`                  | Current build variant (for example `development` or `production`). |
-| `context.argv`        | `Record<string, unknown>` | Provider CLI/config arguments.                                     |
-| `context.options`     | `BuildOptions`            | Active esbuild options for the current build.                      |
-
-This is declared in `global.d.ts`:
-
-```ts
-declare const context: import('@remotex-labs/xbuild').MacroContextInterface;
-```
-
-That declaration prevents TypeScript errors like:
-
-```bash
-src/index.ts:4:19 TS2304: Cannot find name 'context'.
-```
-
-Source:
-
-```ts
-const $$buildInfo = $$inline(() => {
-    return {
-        variant: context.variantName, // [!code focus]
-        minify: !!context.options.minify, // [!code focus]
-        hasDebugFlag: context.argv.debug === true // [!code focus]
-    };
-});
-```
-
 ## Example: Compile Information
 
 Source:

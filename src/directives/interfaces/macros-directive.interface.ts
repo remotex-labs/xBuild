@@ -3,7 +3,7 @@
  */
 
 import type { SourceFile } from 'typescript';
-import type { PartialMessage } from 'esbuild';
+import type { PartialMessage, BuildOptions } from 'esbuild';
 import type { MacrosStateInterface } from '@directives/interfaces/analyze-directive.interface';
 
 /**
@@ -58,6 +58,73 @@ import type { MacrosStateInterface } from '@directives/interfaces/analyze-direct
  */
 
 export type DefinesType = Record<string, unknown>;
+
+/**
+ * Build execution context available to macro transformation logic.
+ *
+ * @remarks
+ * Groups runtime build metadata and configuration needed by macros during AST processing:
+ * - `variantName`: active build variant identifier
+ * - `argv`: provider command-line/config arguments
+ * - `options`: effective esbuild `BuildOptions` for the current build
+ *
+ * This object is read by macro handlers to make variant-aware and build-aware decisions.
+ *
+ * @since 2.2.0
+ */
+
+export interface MacroContextInterface {
+    /**
+     * The current build variant name.
+     *
+     * @remarks
+     * Identifies which variant is being transformed (for example, `development`
+     * or `production`). This value is propagated through macro processing so
+     * diagnostics and generated output can be associated with the correct variant.
+     *
+     * @example
+     * ```ts
+     * $$inline(() => {
+     *     console.log(variantName);
+     * });
+     * ```
+     *
+     * @since 2.2.0
+     */
+
+    variantName: string;
+
+    /**
+     * Command-line arguments and configuration options passed to the provider.
+     *
+     * @remarks
+     * Contains all CLI options and flags passed when the provider was created.
+     * Available to all handlers for accessing build-specific configuration like
+     * debug flags, output paths, or custom settings.
+     *
+     * @example
+     * ```ts
+     * context.argv; // { debug: true, verbose: false, outdir: 'dist' }
+     * ```
+     *
+     * @since 2.2.0
+     */
+
+    argv: Record<string, unknown>;
+
+    /**
+     * esbuild configuration options used for this lifecycle execution.
+     *
+     * @remarks
+     * These options represent the active build configuration for the provider and
+     * are intended to be read by lifecycle handlers when build behavior depends on
+     * entry points, output settings, plugins, or other esbuild flags.
+     *
+     * @since 2.2.0
+     */
+
+    options: BuildOptions;
+}
 
 /**
  * Represents the complete state during macro transformation of a source file.
@@ -254,24 +321,20 @@ export interface StateInterface {
     sourceFile: SourceFile;
 
     /**
-     * The current build variant name.
+     * Build execution context available to macro transformation logic.
      *
      * @remarks
-     * Identifies which variant is being transformed (for example, `development`
-     * or `production`). This value is propagated through macro processing so
-     * diagnostics and generated output can be associated with the correct variant.
+     * Groups runtime build metadata and configuration needed by macros during AST processing:
+     * - `variantName`: active build variant identifier
+     * - `argv`: provider command-line/config arguments
+     * - `options`: effective esbuild `BuildOptions` for the current build
      *
-     * @example
-     * ```ts
-     * $$inline(() => {
-     *     console.log(variantName);
-     * });
-     * ```
+     * This object is read by macro handlers to make variant-aware and build-aware decisions.
      *
      * @since 2.2.0
      */
 
-    variantName: string;
+    context: MacroContextInterface
 }
 
 /**
