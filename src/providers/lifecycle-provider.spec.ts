@@ -329,7 +329,7 @@ describe('LifecycleProvider', () => {
             provider.create().setup(build);
 
             await callRegistered(build.onStart, 0);
-            await new Promise(r => setTimeout(r, 10));
+            await new Promise(r => setTimeout(r, 11));
             await callRegistered(build.onEnd, 0, { errors: [] });
 
             expect(endHook).toHaveBeenCalledWith(expect.objectContaining({ duration: expect.any(Number) }));
