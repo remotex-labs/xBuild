@@ -52,7 +52,6 @@ import type { PartialBuildConfigType } from '@interfaces/configuration.interface
  * // 'dist'
  * ```
  *
- * @see {@link TSCONFIG_PATH}
  * @see {@link PartialBuildConfigType}
  *
  * @since 2.0.0
