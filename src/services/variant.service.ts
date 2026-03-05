@@ -506,7 +506,7 @@ export class VariantService {
             return result;
         } catch (error: unknown) {
             if (isBuildResultError(error)) {
-                const errors = error.errors.filter(error => error.pluginName === '');
+                const errors = error.errors.filter(error => error.location);
                 if (errors.length > 0) throw error;
 
                 return {
@@ -514,9 +514,6 @@ export class VariantService {
                     warnings: error?.warnings ?? []
                 } as BuildResult;
             }
-
-            // lazily add new support for new error
-            throw error;
         }
     }
 
