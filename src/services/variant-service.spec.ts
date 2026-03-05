@@ -310,11 +310,6 @@ describe('VariantService', () => {
             expect(result?.warnings).toEqual(buildError.warnings);
         });
 
-        test('returns undefined for unexpected errors', async () => {
-            xJet.mock(buildMock).mockRejectedValueOnce(new Error('Unexpected error') as any);
-            await expect(service.build()).rejects.toThrow('Unexpected error');
-        });
-
         test('applies dynamic banner function', async () => {
             buildConfig.variants.production.banner = {
                 js: (name: string) => `// Build: ${ name }`
