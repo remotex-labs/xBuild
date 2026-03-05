@@ -2,8 +2,8 @@
  * Import will remove at compile time
  */
 
-import type { PluginBuild, OnStartResult, OnEndResult, OnResolveResult } from 'esbuild';
 import type { OnLoadResult, Loader, OnLoadArgs, BuildResult, OnResolveArgs } from 'esbuild';
+import type { PluginBuild, OnStartResult, OnEndResult, OnResolveResult, BuildOptions } from 'esbuild';
 
 /**
  * Represents a value that may be synchronous, asynchronous, void, null, or the specified type.
@@ -224,6 +224,19 @@ export interface LifecycleContextInterface {
      */
 
     variantName: string;
+
+    /**
+     * esbuild configuration options used for this lifecycle execution.
+     *
+     * @remarks
+     * These options represent the active build configuration for the provider and
+     * are intended to be read by lifecycle handlers when build behavior depends on
+     * entry points, output settings, plugins, or other esbuild flags.
+     *
+     * @since 2.2.0
+     */
+
+    options: BuildOptions;
 }
 
 /**

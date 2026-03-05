@@ -425,6 +425,7 @@ export class LifecycleProvider {
             setup: (build: PluginBuild): void => {
                 const context: LifecycleContextInterface = {
                     argv: this.argv,
+                    options: build.initialOptions,
                     variantName: this.variantName,
                     stage: { startTime: new Date() }
                 };

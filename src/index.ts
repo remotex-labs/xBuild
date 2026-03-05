@@ -73,6 +73,7 @@ import { ConfigurationService } from '@services/configuration.service';
 export type * from '@providers/interfaces/lifecycle-provider.interface';
 export type { ArgumentsInterface } from '@argv/interfaces/argv-module.interface';
 export type { ServerConfigurationInterface } from '@server/interfaces/server.interface';
+export type { MacroContextInterface } from '@directives/interfaces/macros-directive.interface';
 export type { DiagnosticInterface } from '@typescript/services/interfaces/typescript-service.interface';
 
 /**
