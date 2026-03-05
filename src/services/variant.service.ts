@@ -888,6 +888,9 @@ export class VariantService {
         this.active = true;
         this.buildConfig = this.initializeConfig(config);
 
+        if(config.esbuild.outdir && config.esbuild.outfile)
+            this.buildConfig.esbuild.outdir = undefined;
+
         if (config.esbuild.tsconfig && config.esbuild.tsconfig !== this.tsConfigPath) {
             this.typescriptModule.dispose(this.tsConfigPath);
             this.tsConfigPath = config.esbuild.tsconfig;
