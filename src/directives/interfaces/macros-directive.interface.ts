@@ -252,6 +252,26 @@ export interface StateInterface {
      */
 
     sourceFile: SourceFile;
+
+    /**
+     * The current build variant name.
+     *
+     * @remarks
+     * Identifies which variant is being transformed (for example, `development`
+     * or `production`). This value is propagated through macro processing so
+     * diagnostics and generated output can be associated with the correct variant.
+     *
+     * @example
+     * ```ts
+     * $$inline(() => {
+     *     console.log(variantName);
+     * });
+     * ```
+     *
+     * @since 2.2.0
+     */
+
+    variantName: string;
 }
 
 /**
