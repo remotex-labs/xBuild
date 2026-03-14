@@ -675,6 +675,8 @@ export class VariantService {
                 readFile(file, 'utf8').then(data => {
                     const dataObject = JSON.parse(data);
                     dataObject.sources = dataObject.sources.map((source: string) => {
+                        if(source.startsWith('http')) return source;
+
                         return join(distPath, source);
                     });
 
