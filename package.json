@@ -63,21 +63,21 @@
         "docs:preview": "vitepress preview docs"
     },
     "devDependencies": {
-        "eslint": "^10.0.2",
+        "eslint": "^10.0.3",
         "vitepress": "^2.0.0-alpha.15",
         "typescript": "^5.9.3",
-        "markdownlint-cli": "^0.47.0",
-        "typescript-eslint": "^8.56.1",
+        "markdownlint-cli": "^0.48.0",
+        "typescript-eslint": "^8.57.0",
         "eslint-plugin-tsdoc": "^0.5.2",
         "eslint-plugin-perfectionist": "^5.6.0",
-        "@types/node": "^25.3.3",
+        "@types/node": "^25.5.0",
         "@remotex-labs/xjet": "^1.5.4",
         "@viteplus/versions": "^2.0.6",
-        "@remotex-labs/xbuild": "2.1.6"
+        "@remotex-labs/xbuild": "2.2.1"
     },
     "dependencies": {
         "yargs": "^18.0.0",
-        "esbuild": "^0.27.2",
+        "esbuild": "^0.27.4",
         "@types/yargs": "^17.0.35",
         "@remotex-labs/xmap": "^4.0.4",
         "@remotex-labs/xansi": "^1.3.3"

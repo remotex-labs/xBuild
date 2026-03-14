@@ -17,17 +17,17 @@ import type { CommonBuildInterface, LifecycleHooksInterface } from '@interfaces/
 
 import ts from 'typescript';
 import { build } from 'esbuild';
-import { writeFile, mkdir } from 'fs/promises';
 import { TypesError } from '@errors/types.error';
 import { xBuildError } from '@errors/xbuild.error';
 import { inject } from '@symlinks/symlinks.module';
 import { deepMerge } from '@components/object.component';
+import { writeFile, mkdir, readFile } from 'fs/promises';
 import { Typescript } from '@typescript/typescript.module';
 import { analyzeDependencies } from '@services/transpiler.service';
-import { relative, resolve, join } from '@components/path.component';
 import { ConfigurationService } from '@services/configuration.service';
 import { extractEntryPoints } from '@components/entry-points.component';
 import { isBuildResultError } from '@providers/esbuild-messages.provider';
+import { relative, resolve, join, dirname } from '@components/path.component';
 
 /**
  * Manages a single build “variant” (e.g. `dev`, `prod`) end-to-end.
@@ -664,10 +664,26 @@ export class VariantService {
 
     private async end(context: ResultContextInterface): Promise<OnStartResult | undefined> {
         if (context.buildResult.errors?.length > 0) return;
-
         const result: OnStartResult = { errors: [], warnings: [] };
-        if (!this.buildConfig.declaration) return;
 
+        if(typeof context.buildResult.metafile?.outputs === 'object') {
+            const files = Object.keys(context.buildResult.metafile?.outputs);
+            for (const file of files) {
+                if(!file.endsWith('.map')) continue;
+
+                const distPath = dirname(file);
+                readFile(file, 'utf8').then(data => {
+                    const dataObject = JSON.parse(data);
+                    dataObject.sources = dataObject.sources.map((source: string) => {
+                        return join(distPath, source);
+                    });
+
+                    writeFile(file, JSON.stringify(dataObject), 'utf8');
+                });
+            }
+        }
+
+        if (!this.buildConfig.declaration) return;
         const decl = this.buildConfig.declaration;
         const shouldBundle = typeof decl === 'object' ? decl.bundle !== false : true;
         const outDir = typeof decl === 'object' ? decl.outDir : undefined;
