@@ -25,8 +25,8 @@ importers:
         version: 18.0.0
     devDependencies:
       '@remotex-labs/xbuild':
-        specifier: 2.2.1
-        version: 2.2.1
+        specifier: 2.2.2
+        version: 2.2.2
       '@remotex-labs/xjet':
         specifier: ^1.5.4
         version: 1.5.4
@@ -307,8 +307,8 @@ packages:
     resolution: {integrity: sha512-P5qKSYLA5508Wt/lh4gUsGW7VO30hL6alswS713WnrYzo5xGknG2O5OddD1Ae/dRzP8e0H1rBJuf1v1ztu3IFQ==}
     engines: {node: '>=20'}
 
-  '@remotex-labs/xbuild@2.2.1':
-    resolution: {integrity: sha512-/8h2gf++ashNx2YMDPvfaNzyGd2lsfaI3VkgHQs9gHWLn2yQb3YKx/aMRzc1bjzYXf7kJ4JBBSRm0P7xDeWdPQ==}
+  '@remotex-labs/xbuild@2.2.2':
+    resolution: {integrity: sha512-zt2EjuDDLbwkokUyCIPiCGc3tutPi0uoutM2jaiUkgYd+CwqsXo7bVsCsAYUUICjdUQdO/pG93opcbM/RNh8Ig==}
     engines: {node: '>=20'}
     hasBin: true
 
@@ -1709,7 +1709,7 @@ snapshots:
 
   '@remotex-labs/xansi@1.3.3': {}
 
-  '@remotex-labs/xbuild@2.2.1':
+  '@remotex-labs/xbuild@2.2.2':
     dependencies:
       '@remotex-labs/xansi': 1.3.3
       '@remotex-labs/xmap': 4.0.5
