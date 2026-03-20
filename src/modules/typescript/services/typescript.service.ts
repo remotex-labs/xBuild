@@ -490,8 +490,10 @@ export class TypescriptService {
         let config = ts.getParsedCommandLineOfConfigFile(
             this.configPath,
             {
+                sourceMap: false,
                 skipLibCheck: true,
                 stripInternal: true,
+                declarationMap: false,
                 emitDeclarationOnly: true
             },
             {
@@ -506,8 +508,11 @@ export class TypescriptService {
                     strict: true,
                     target: ts.ScriptTarget.ESNext,
                     module: ts.ModuleKind.NodeNext,
-                    declaration: true,
+                    sourceMap: false,
                     skipLibCheck: true,
+                    stripInternal: true,
+                    declarationMap: false,
+                    emitDeclarationOnly: true,
                     moduleResolution: ts.ModuleResolutionKind.NodeNext
                 },
                 errors: [],
