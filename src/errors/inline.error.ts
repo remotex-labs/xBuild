@@ -15,7 +15,7 @@ import { getErrorMetadata, formatStack } from '@providers/stack.provider';
  * - Applies syntax highlighting to code context
  * - Generates enhanced stack traces with file locations
  * - Supports line offset adjustment for accurate error positioning
- * - Stores structured metadata in {@link StackInterface} format
+ * - Stores structured metadata in {@link ResolveMetadataInterface} format
  *
  * This class is designed to transform standard Error objects into human-readable, visually enhanced
  * output suitable for terminal display, making it easier to identify and fix errors in source code.
@@ -51,7 +51,7 @@ import { getErrorMetadata, formatStack } from '@providers/stack.provider';
  * }
  * ```
  *
- * @see {@link StackInterface} for metadata structure
+ * @see {@link ResolveMetadataInterface} for metadata structure
  * @see {@link xBuildBaseError} for base error functionality
  * @see {@link getErrorMetadata} for metadata extraction logic
  * @see {@link formatStack} for stack formatting logic
@@ -111,7 +111,7 @@ export class InlineError extends xBuildBaseError {
     constructor(error: Error, lineOffset: number = 0) {
         super(error.message, 'InlineError');
 
-        this.errorMetadata = getErrorMetadata(error, {}, lineOffset);
+        this.errorMetadata = getErrorMetadata(error, { lineOffset });
         this.stack = formatStack(this.errorMetadata, this.name, this.message);
     }
 }
