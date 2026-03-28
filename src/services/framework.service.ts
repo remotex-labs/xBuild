@@ -2,7 +2,7 @@
  * Import will remove at compile time
  */
 
-import type { PositionInterface } from '@remotex-labs/xmap';
+import type { PositionInterface, FormatStackFrameInterface } from '@remotex-labs/xmap';
 
 /**
  * Imports
@@ -93,10 +93,12 @@ export class FrameworkService {
      * @returns `true` if the position is from the framework (contains "xJet"), otherwise `false`
      *
      * @see PositionInterface
-     * @since 1.0.0
+     * @see FormatStackFrameInterface
+     *
+     * @since 2.2.5
      */
 
-    isFrameworkFile(position: PositionInterface): boolean {
+    isFrameworkFile(position: PositionInterface | FormatStackFrameInterface): boolean {
         const { source, sourceRoot } = position;
         const lowerCaseSource = source?.toLowerCase();
 

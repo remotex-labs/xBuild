@@ -158,7 +158,7 @@ export function appendErrorMetadata(buffer: Array<string>, error: xBuildBaseErro
     if (!error.metadata?.formatCode) return;
 
     const codeLines = error.metadata.formatCode.split('\n');
-    const stackTrace = error.metadata.stacks.join('\n    ');
+    const stackTrace = error.metadata.stack.map((stack) => stack.format).join('\n    ');
 
     buffer.push('');
     for (const line of codeLines) {
@@ -204,7 +204,7 @@ export function logErrorMetadata(error: xBuildBaseError): void {
         .map(line => `${ INDENT }${ line }`)
         .join('\n');
 
-    const stackTrace = error.metadata.stacks.join('\n    ');
+    const stackTrace = error.metadata.stack.map(stack => stack.format).join('\n    ');
 
     console.log(`\n${ formattedCode }\n\n${ INDENT }Enhanced Stack Trace:\n    ${ stackTrace }`);
 }

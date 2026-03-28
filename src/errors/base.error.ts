@@ -2,7 +2,7 @@
  * Import will remove at compile time
  */
 
-import type { StackTraceInterface, StackInterface } from '@providers/interfaces/stack-provider.interface';
+import type { StackTraceInterface, ResolveMetadataInterface } from '@providers/interfaces/stack-provider.interface';
 
 /**
  * Imports
@@ -15,7 +15,7 @@ import { formatStack, getErrorMetadata } from '@providers/stack.provider';
  *
  * @remarks
  * The `xBuildBaseError` class extends the native `Error` class, adding functionality to:
- * - Parse and store structured stack trace metadata via {@link StackInterface}
+ * - Parse and store structured stack trace metadata via {@link ResolveMetadataInterface}
  * - Format stack traces with syntax highlighting and source mapping
  * - Provide enhanced console output through custom Node.js inspection
  *
@@ -39,8 +39,8 @@ import { formatStack, getErrorMetadata } from '@providers/stack.provider';
  *
  * @see {@link formatStack} for stack formatting
  * @see {@link getErrorMetadata} for stack parsing
- * @see {@link StackInterface} for the metadata structure
  * @see {@link StackTraceInterface} for formatting options
+ * @see {@link ResolveMetadataInterface} for the metadata structure
  *
  * @since 2.0.0
  */
@@ -62,7 +62,7 @@ export abstract class xBuildBaseError extends Error {
      * @since 2.0.0
      */
 
-    protected errorMetadata: StackInterface | undefined;
+    protected errorMetadata: ResolveMetadataInterface | undefined;
 
     /**
      * Pre-formatted stack trace string ready for display.
@@ -149,7 +149,7 @@ export abstract class xBuildBaseError extends Error {
      * @since 2.0.0
      */
 
-    get metadata(): StackInterface | undefined {
+    get metadata(): ResolveMetadataInterface | undefined {
         return this.errorMetadata;
     }
 
