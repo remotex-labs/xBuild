@@ -15,8 +15,8 @@ import type { xBuildConfigInterface } from '@providers/interfaces/config-file-pr
 import { rmSync } from 'fs';
 import { cwd } from 'process';
 import '@errors/uncaught.error';
+import { join } from '@remotex-labs/xmap';
 import { ArgvModule } from '@argv/argv.module';
-import { join } from '@components/path.component';
 import { inject } from '@symlinks/symlinks.module';
 import { init } from '@components/interactive.component';
 import { collectFilesFromGlob } from '@components/glob.component';

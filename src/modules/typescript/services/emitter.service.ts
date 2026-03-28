@@ -9,8 +9,8 @@ import type { CompilerOptions, Program, SourceFile, LanguageService } from 'type
  * Imports
  */
 
+import { dirname } from '@remotex-labs/xmap';
 import { mkdir, writeFile } from 'fs/promises';
-import { dirname } from '@components/path.component';
 import { xterm } from '@remotex-labs/xansi/xterm.component';
 import { calculateOutputPath, cleanContent } from '@typescript/components/transformer.component';
 

@@ -24,10 +24,10 @@ import { deepMerge } from '@components/object.component';
 import { writeFile, mkdir, readFile } from 'fs/promises';
 import { Typescript } from '@typescript/typescript.module';
 import { analyzeDependencies } from '@services/transpiler.service';
+import { relative, resolve, join, dirname } from '@remotex-labs/xmap';
 import { ConfigurationService } from '@services/configuration.service';
 import { extractEntryPoints } from '@components/entry-points.component';
 import { isBuildResultError } from '@providers/esbuild-messages.provider';
-import { relative, resolve, join, dirname } from '@components/path.component';
 
 /**
  * Manages a single build “variant” (e.g. `dev`, `prod`) end-to-end.
