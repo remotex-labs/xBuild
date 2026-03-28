@@ -568,6 +568,7 @@ async function startWatchMode(
     const watchService = new WatchService(ignorePatterns);
 
     init(async () => {
+        buildService.reload({ clearCache: true });
         await executeBuild(buildService, args);
     }, url);
 
@@ -577,7 +578,7 @@ async function startWatchMode(
 
         if(changedFiles.includes(args.config!)) {
             const config = await configFileProvider(args.config!);
-            buildService.reload(config);
+            buildService.reload({ config });
         }
 
         console.log(`\n${ prefix() } ${ mutedColor('Rebuilding') }: files (${ changedFiles.length })\n`);

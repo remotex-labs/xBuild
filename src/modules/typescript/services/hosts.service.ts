@@ -90,6 +90,20 @@ export class LanguageHostService implements ts.LanguageServiceHost {
 
     private alias: RegExp | undefined;
 
+    /**
+     * Cache for resolved module specifiers.
+     *
+     * @remarks
+     * Stores the absolute resolved file path for each module name so repeated lookups
+     * do not trigger TypeScript module resolution again. A value of `undefined` means
+     * the module could not be resolved and that result is cached too.
+     *
+     * This cache is keyed by the raw import specifier, so it is only safe when the
+     * same specifier is resolved in a compatible context.
+     *
+     * @since 2.3.0
+     */
+
     private aliasCache = new Map<string, string | undefined>();
 
     /**
@@ -214,6 +228,25 @@ export class LanguageHostService implements ts.LanguageServiceHost {
             s => s,
             this.compilerOptions
         );
+    }
+
+    /**
+     * Reloads all tracked file snapshots in the shared {@link FilesModel} cache.
+     *
+     * @remarks
+     * This method iterates over every currently tracked file path and touches each file again so
+     * the cache can refresh its stored modification time, version, and content snapshot when needed.
+     * It is useful in watch-mode or manual refresh scenarios where the underlying files may have changed
+     * and dependent services need to observe the updated state.
+     *
+     * @since 2.3.0
+     */
+
+    static reload(): void {
+        const filesCache = inject(FilesModel);
+        filesCache.getTrackedFilePaths().map(path => {
+            filesCache.touchFile(path);
+        });
     }
 
     /**

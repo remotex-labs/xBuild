@@ -3,11 +3,12 @@
  */
 
 import type { OnLoadResult, Message, PartialMessage } from 'esbuild';
+import type { BuildConfigInterface } from '@interfaces/configuration.interface';
+import type { ReloadOptionsInterface } from '@services/interfaces/build-service.interface';
 import type { BuildContextInterface } from '@providers/interfaces/lifecycle-provider.interface';
 import type { OnEndType, OnStartType } from '@providers/interfaces/lifecycle-provider.interface';
 import type { ResultContextInterface } from '@providers/interfaces/lifecycle-provider.interface';
 import type { BuildResultInterface } from '@providers/interfaces/esbuild-messages-provider.interface';
-import type { BuildConfigInterface, PartialBuildConfigType } from '@interfaces/configuration.interface';
 import type { DiagnosticInterface } from '@typescript/services/interfaces/typescript-service.interface';
 
 /**
@@ -21,6 +22,7 @@ import { LifecycleProvider } from '@providers/lifecycle.provider';
 import { transformerDirective } from '@directives/macros.directive';
 import { analyzeMacroMetadata } from '@directives/analyze.directive';
 import { ConfigurationService } from '@services/configuration.service';
+import { LanguageHostService } from '@typescript/services/hosts.service';
 import { enhancedBuildResult, isBuildResultError } from '@providers/esbuild-messages.provider';
 
 /**
@@ -262,32 +264,45 @@ export class BuildService {
      * Reloads the build configuration and updates variants accordingly.
      *
      * @param config - Optional new configuration to replace the current one
+     * @param clearCache - Whether to clear cached files and TypeScript language service state before reloading
      *
      * @remarks
      * The reload process:
-     * 1. Replaces configuration if provided
-     * 2. Compares new variant names with existing ones
-     * 3. Disposes variants no longer in configuration
-     * 4. Creates new variants from the updated configuration
-     * 5. Existing variants with matching names continue unchanged
+     * 1. Optionally clears cached file state and TypeScript language service data
+     * 2. Replaces configuration if provided
+     * 3. Compares new variant names with existing ones
+     * 4. Disposes variants no longer in configuration
+     * 5. Creates new variants from the updated configuration
+     * 6. Existing variants with matching names continue unchanged
      *
      * This is useful for hot-reloading configuration files without restarting the build process.
      *
      * @example
      * ```ts
-     * // Add a new staging variant
+     * // Reload with a new staging variant
      * buildService.reload({
-     *   variants: {
-     *     ...buildService.config.variants,
-     *     staging: { esbuild: { minify: true } }
+     *   config: {
+     *     variants: {
+     *       ...buildService.config.variants,
+     *       staging: { esbuild: { minify: true } }
+     *     }
      *   }
      * });
      * ```
      *
-     * @since 2.0.0
+     * @example
+     * ```ts
+     * // Reload and clear cached file/type-checking state first
+     * buildService.reload({
+     *   clearCache: true
+     * });
+     * ```
+     *
+     * @since 2.3.0
      */
 
-    reload(config?: PartialBuildConfigType): void {
+    reload({ config, clearCache = false }: ReloadOptionsInterface = {}): void {
+        if(clearCache) LanguageHostService.reload();
         if (config) this.configuration.reload(config);
         this.disposeVariants(this.compareKeys(this.config.variants, this.variants));
         this.parseVariants();
