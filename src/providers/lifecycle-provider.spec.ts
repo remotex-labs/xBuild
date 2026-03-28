@@ -9,7 +9,7 @@ import type { Message } from 'esbuild';
  */
 
 import { readFile } from 'fs/promises';
-import { join, resolve } from '@components/path.component';
+import { join, resolve } from '@remotex-labs/xmap';
 import { LifecycleProvider } from '@providers/lifecycle.provider';
 
 /**

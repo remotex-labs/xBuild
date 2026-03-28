@@ -14,8 +14,8 @@ import type { NamespaceExportsInterface } from '@typescript/services/interfaces/
  */
 
 import { mkdir, writeFile } from 'fs/promises';
+import { join, dirname } from '@remotex-labs/xmap';
 import { inject } from '@symlinks/symlinks.module';
-import { join, dirname } from '@components/path.component';
 import { GraphModel } from '@typescript/models/graph.model';
 import { HeaderDeclarationBundle } from '@typescript/constants/typescript.constant';
 

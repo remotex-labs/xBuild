@@ -10,9 +10,9 @@ import type { xBuildConfigInterface } from '@providers/interfaces/config-file-pr
 
 import { runInThisContext } from 'vm';
 import { createRequire } from 'module';
+import { resolve } from '@remotex-labs/xmap';
 import { readFileSync, existsSync } from 'fs';
 import { inject } from '@symlinks/symlinks.module';
-import { resolve } from '@components/path.component';
 import { buildFiles } from '@services/transpiler.service';
 import { configFileProvider } from './config-file.provider';
 

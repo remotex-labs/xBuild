@@ -14,10 +14,10 @@ import * as https from 'https';
 import { extname } from 'path';
 import { readFileSync } from 'fs';
 import html from './html/server.html';
+import { resolve, join } from '@remotex-labs/xmap';
 import { inject } from '@symlinks/symlinks.module';
 import { prefix } from '@components/banner.component';
 import { readdir, stat, readFile } from 'fs/promises';
-import { resolve, join } from '@components/path.component';
 import { xterm } from '@remotex-labs/xansi/xterm.component';
 import { FrameworkService } from '@services/framework.service';
 

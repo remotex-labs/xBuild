@@ -12,8 +12,8 @@ import type { xBuildConfigInterface } from '@providers/interfaces/config-file-pr
 import { existsSync } from 'fs';
 import { runInThisContext } from 'vm';
 import { createRequire } from 'module';
+import { resolve } from '@remotex-labs/xmap';
 import { inject } from '@symlinks/symlinks.module';
-import { resolve } from '@components/path.component';
 import { buildFiles } from '@services/transpiler.service';
 import { FilesModel } from '@typescript/models/files.model';
 import { FrameworkService } from '@services/framework.service';

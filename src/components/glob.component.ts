@@ -11,7 +11,7 @@ import type { ParseGlobInterface } from '@components/interfaces/glob-component.i
 import { cwd } from 'process';
 import { readdirSync } from 'fs';
 import { matchesGlob } from 'path';
-import { join } from '@components/path.component';
+import { join } from '@remotex-labs/xmap';
 
 /**
  * Separates glob patterns into include and exclude arrays.

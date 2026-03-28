@@ -9,7 +9,7 @@ import type { FileSnapshotInterface, ScriptSnapshotType } from './interfaces/fil
  */
 
 import ts from 'typescript';
-import { resolve } from '@components/path.component';
+import { resolve } from '@remotex-labs/xmap';
 import { Injectable } from '@symlinks/symlinks.module';
 import { closeSync, fstatSync, openSync, readFileSync } from 'fs';
 

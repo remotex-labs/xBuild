@@ -5,7 +5,7 @@
 import { matchesGlob } from 'path';
 import { stat, watch } from 'fs/promises';
 import { inject } from '@symlinks/symlinks.module';
-import { normalize, join } from '@components/path.component';
+import { normalize, join } from '@remotex-labs/xmap';
 import { FrameworkService } from '@services/framework.service';
 
 /**

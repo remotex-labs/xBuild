@@ -12,12 +12,12 @@ import type { BuildContextInterface, ResultContextInterface } from '@providers/i
  * Imports
  */
 
+import { relative } from '@remotex-labs/xmap';
 import { TypesError } from '@errors/types.error';
 import { xBuildError } from '@errors/xbuild.error';
 import { inject } from '@symlinks/symlinks.module';
 import { xBuildBaseError } from '@errors/base.error';
 import { prefix } from '@components/banner.component';
-import { relative } from '@components/path.component';
 import { VMRuntimeError } from '@errors/vm-runtime.error';
 import { xterm } from '@remotex-labs/xansi/xterm.component';
 import { ConfigurationService } from '@services/configuration.service';

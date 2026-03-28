@@ -17,7 +17,7 @@ import { createRequire } from 'module';
 import { InlineError } from '@errors/inline.error';
 import { inject } from '@symlinks/symlinks.module';
 import { sandboxExecute } from '@services/vm.service';
-import { dirname, relative } from '@components/path.component';
+import { dirname, relative } from '@remotex-labs/xmap';
 import { FrameworkService } from '@services/framework.service';
 import { buildFromString } from '@services/transpiler.service';
 

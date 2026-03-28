@@ -7,8 +7,8 @@ import * as https from 'https';
 import { readFileSync } from 'fs';
 import * as process from 'node:process';
 import * as fsPromises from 'fs/promises';
+import { join, resolve } from '@remotex-labs/xmap';
 import { ServerModule } from '@server/server.module';
-import { join, resolve } from '@components/path.component';
 
 /**
  * Tests

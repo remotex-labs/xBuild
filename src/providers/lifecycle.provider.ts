@@ -12,8 +12,8 @@ import type { OnResolveType, LifecycleContextInterface } from './interfaces/life
  */
 
 import { readFile } from 'fs/promises';
+import { resolve } from '@remotex-labs/xmap';
 import { inject } from '@symlinks/symlinks.module';
-import { resolve } from '@components/path.component';
 import { FilesModel } from '@typescript/models/files.model';
 
 /**

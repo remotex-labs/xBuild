@@ -10,8 +10,8 @@ import type { PositionInterface, FormatStackFrameInterface } from '@remotex-labs
 
 import { readFileSync } from 'fs';
 import { SourceService } from '@remotex-labs/xmap';
+import { resolve, toPosix } from '@remotex-labs/xmap';
 import { Injectable } from '@symlinks/symlinks.module';
-import { resolve, toPosix } from '@components/path.component';
 
 /**
  * Provides access to the framework's file paths and associated source maps.

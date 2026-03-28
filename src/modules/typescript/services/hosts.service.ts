@@ -12,8 +12,8 @@ import type { FileSnapshotInterface } from '@typescript/models/interfaces/files-
 
 import ts from 'typescript';
 import { inject } from '@symlinks/symlinks.module';
+import { relative, dirname } from '@remotex-labs/xmap';
 import { FilesModel } from '@typescript/models/files.model';
-import { relative, dirname } from '@components/path.component';
 
 /**
  * Implements a TypeScript Language Service host with file snapshot caching and module resolution.

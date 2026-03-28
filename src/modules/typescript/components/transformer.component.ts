@@ -9,7 +9,7 @@ import type { CompilerOptions } from 'typescript';
  */
 
 import ts from 'typescript';
-import { dirname, relative, toPosix } from '@components/path.component';
+import { dirname, relative, toPosix } from '@remotex-labs/xmap';
 
 /**
  * Matches Unix shebang lines at the beginning of files for removal during compilation.
