@@ -72,14 +72,14 @@
         "@types/node": "^25.5.0",
         "@remotex-labs/xjet": "^1.5.4",
         "@viteplus/versions": "^2.0.6",
-        "@remotex-labs/xbuild": "2.2.2"
+        "@remotex-labs/xbuild": "2.2.4"
     },
     "dependencies": {
         "yargs": "^18.0.0",
         "esbuild": "0.27.3",
         "typescript": "^5.9.3",
         "@types/yargs": "^17.0.35",
-        "@remotex-labs/xmap": "^4.0.4",
+        "@remotex-labs/xmap": "^5.1.0",
         "@remotex-labs/xansi": "^1.3.3"
     }
 }
