@@ -480,6 +480,7 @@ async function executeBuild(buildService: BuildService, args: ArgumentsInterface
         }
     } catch (error) {
         logError(error);
+        process.exitCode = 1;
     }
 }
 
