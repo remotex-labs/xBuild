@@ -404,6 +404,7 @@ export function appendIssue(buffer: Array<string>, issue: IssueType, symbol: str
 
 export function logBuildIssues(issues: Array<IssueType>, issueType: 'Errors' | 'Warnings'): void {
     if (issues.length === 0) return;
+    if(issueType === 'Errors') process.exitCode = 1;
 
     const isError = issueType === 'Errors';
     const symbol = isError ? ERROR_SYMBOL : WARNING_SYMBOL;
@@ -557,6 +558,7 @@ export function logTypeDiagnostic(name: string, diagnostics: Array<DiagnosticInt
     console.log(`${ status } ${ nameColor }`);
 
     if (hasErrors) {
+        process.exitCode = 1;
         console.log('');
         for (const diagnostic of diagnostics) {
             logTypescriptDiagnostic(diagnostic, errorColor(ERROR_SYMBOL));
