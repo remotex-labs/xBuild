@@ -206,7 +206,7 @@ export function handleKeypress(code: string, key: readline.Key, reload: () => vo
     if (!key?.name) return;
     if (key.sequence === KEY_MAPPINGS.QUIT || code === EXIT_SIGNALS.SIGINT || code === EXIT_SIGNALS.SIGQUIT) {
         console.log('\n👋 Exiting...');
-        exit(1);
+        exit(0);
     }
 
     switch (key.name) {
