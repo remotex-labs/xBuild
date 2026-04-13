@@ -302,7 +302,7 @@ export class BuildService {
      */
 
     reload({ config, clearCache = false }: ReloadOptionsInterface = {}): void {
-        if(clearCache) LanguageHostService.reload();
+        if (clearCache) LanguageHostService.reload();
         if (config) this.configuration.reload(config);
         this.disposeVariants(this.compareKeys(this.config.variants, this.variants));
         this.parseVariants();
@@ -407,7 +407,7 @@ export class BuildService {
     async typeChack(): Promise<Record<string, DiagnosticInterface[]>> {
         const result: Record<string, Array<DiagnosticInterface>> = {};
 
-        for(const variant of Object.values(this.variants)) {
+        for (const variant of Object.values(this.variants)) {
             result[variant.name] = await variant.check();
         }
 
@@ -481,19 +481,19 @@ export class BuildService {
         const errorList: Array<Error> = [];
         const results: Record<string, BuildResultInterface> = {};
         const buildPromises = Object.entries(this.variants).map(async ([ variantName, variantInstance ]) => {
-            if(names && !names.includes(variantName)) return;
+            if (names && !names.includes(variantName)) return;
 
             try {
                 const result = await variantInstance.build();
-                if(result) results[variantName] = enhancedBuildResult(result);
-            } catch(error) {
+                if (result) results[variantName] = enhancedBuildResult(result);
+            } catch (error) {
                 if (isBuildResultError(error) || error instanceof AggregateError) {
                     const result = enhancedBuildResult({
                         errors: error.errors as Array<Message>
                     });
 
                     errorList.push(...result.errors);
-                } else if(error instanceof Error) {
+                } else if (error instanceof Error) {
                     errorList.push(error);
                 } else {
                     errorList.push(new Error(String(error)));
@@ -502,7 +502,7 @@ export class BuildService {
         });
 
         await Promise.allSettled(buildPromises);
-        if(errorList.length) throw new AggregateError(errorList, 'Build failed');
+        if (errorList.length) throw new AggregateError(errorList, 'Build failed');
 
         return results;
     }
@@ -520,7 +520,7 @@ export class BuildService {
      */
 
     private onEndTrigger(context: ResultContextInterface): void {
-        if(this.onEndCallback) this.onEndCallback(context);
+        if (this.onEndCallback) this.onEndCallback(context);
     }
 
     /**
@@ -550,12 +550,12 @@ export class BuildService {
     private async onStartTrigger(context: BuildContextInterface): Promise<OnLoadResult> {
         try {
             const result = await analyzeMacroMetadata(this.variants[context.variantName], context);
-            if(this.onStartCallback) this.onStartCallback(context);
+            if (this.onStartCallback) this.onStartCallback(context);
 
             return result;
-        } catch(error) {
+        } catch (error) {
             const errors: Array<PartialMessage> = [];
-            if(error instanceof AggregateError) {
+            if (error instanceof AggregateError) {
                 for (const err of error.errors) {
                     errors.push({
                         detail: err,
@@ -645,7 +645,7 @@ export class BuildService {
      */
 
     private parseVariants(): void {
-        if(!this.config.variants)
+        if (!this.config.variants)
             throw new xBuildError('Variants are not defined in the configuration');
 
         for (const name of Object.keys(this.config.variants)) {
