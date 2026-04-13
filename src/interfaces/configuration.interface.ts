@@ -658,6 +658,36 @@ export interface VariantBuildInterface extends BaseBuildDefinitionInterface {
         BuildOptions,
         'plugins' | 'define' | 'banner' | 'footer'
     >;
+
+    /**
+     * Variants that must finish building before this variant starts.
+     *
+     * @remarks
+     * Use this field to express build ordering between variants when one output
+     * depends on another being completed first.
+     *
+     * You can provide:
+     * - a single variant name
+     * - an array of variant names
+     *
+     * The build system should resolve these dependencies before running the current
+     * variant and should also detect circular dependencies to avoid infinite loops.
+     *
+     * @example
+     * ```ts
+     * dependOn: 'types'
+     * ```
+     *
+     * @example
+     * ```ts
+     * dependOn: ['types', 'shared']
+     * ```
+     *
+     * @see {@link VariantsType}
+     * @since 2.4.0
+     */
+
+    dependOn?: string | Array<string>;
 }
 
 /**
