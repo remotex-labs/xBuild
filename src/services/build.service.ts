@@ -4,12 +4,12 @@
 
 import type { OnLoadResult, Message, PartialMessage } from 'esbuild';
 import type { BuildConfigInterface } from '@interfaces/configuration.interface';
-import type { ReloadOptionsInterface } from '@services/interfaces/build-service.interface';
 import type { BuildContextInterface } from '@providers/interfaces/lifecycle-provider.interface';
 import type { OnEndType, OnStartType } from '@providers/interfaces/lifecycle-provider.interface';
 import type { ResultContextInterface } from '@providers/interfaces/lifecycle-provider.interface';
 import type { BuildResultInterface } from '@providers/interfaces/esbuild-messages-provider.interface';
 import type { DiagnosticInterface } from '@typescript/services/interfaces/typescript-service.interface';
+import type { ReloadOptionsInterface, BuildTreeInterface } from '@services/interfaces/build-service.interface';
 
 /**
  * Imports
@@ -415,27 +415,36 @@ export class BuildService {
     }
 
     /**
-     * Executes the build process for all or specific variants.
+     * Executes the build process for all or specific variants,
+     * respecting `dependOn` ordering and running independent variants in parallel.
      *
      * @param names - Optional array of variant names to build (builds all if omitted)
      *
      * @returns Promise resolving to a map of variant names to their enhanced build results
      *
+     * @throws xBuildError - When a circular dependency is detected before any build starts
      * @throws AggregateError - When any variant build fails, containing all error details
      *
      * @remarks
      * The build process:
-     * 1. Filters variants if specific names are provided
-     * 2. Builds all variants in parallel
-     * 3. Collects results and errors from each variant
-     * 4. Enhances build results with additional metadata
-     * 5. Aggregates errors if any builds failed
-     * 6. Throws AggregateError if errors occurred
+     * 1. Validates the dependency graph — throws immediately on circular deps
+     * 2. Launches all requested variants concurrently
+     * 3. Each variant awaits its `dependOn` dependencies before running
+     * 4. Collects results and errors from each variant without stopping others
+     * 5. Enhances build results with additional metadata
+     * 6. Throws AggregateError if any builds failed
+     *
+     * **Dependency resolution**:
+     * - `dependOn` variants always finish before the dependent variant starts
+     * - A shared dependency (e.g. two variants both depending on `types`) builds
+     *   only once — subsequent dependents await the same running promise
+     * - Independent variants run fully in parallel
      *
      * **Error handling**:
      * - Build failures don't stop other variants from building
-     * - All errors are collected and thrown together after all builds are complete
-     * - Supports both esbuild errors and generic JavaScript errors
+     * - All errors are collected into {@link BuildTreeInterface.errors} and thrown
+     *   together after all builds complete
+     * - Supports both esbuild-specific errors and generic JavaScript errors
      *
      * **Result enhancement**:
      * Build results are processed by {@link enhancedBuildResult} to provide
@@ -459,52 +468,38 @@ export class BuildService {
      * // Only production and staging variants are built
      * ```
      *
-     * @example Handle individual variant errors
+     * @example With dependency ordering
      * ```ts
-     * try {
-     *   await buildService.build();
-     * } catch (error) {
-     *   if (error instanceof AggregateError) {
-     *     console.error(`${error.errors.length} variants failed`);
-     *   }
-     * }
+     * // Given: main dependOn shared, shared dependOn types
+     * // Build order: types → shared → main (dependencies first)
+     * const results = await buildService.build();
      * ```
      *
+     * @see {@link buildVariant} for per-variant execution and caching logic
+     * @see {@link BuildTreeInterface}
      * @see {@link enhancedBuildResult}
      * @see {@link BuildResultInterface}
      * @see {@link VariantService.build}
+     * @see {@link validateDependencies} for circular dependency detection
      *
-     * @since 2.0.0
+     * @since 2.4.0
      */
 
     async build(names?: Array<string>): Promise<Record<string, BuildResultInterface>> {
-        const errorList: Array<Error> = [];
-        const results: Record<string, BuildResultInterface> = {};
-        const buildPromises = Object.entries(this.variants).map(async ([ variantName, variantInstance ]) => {
-            if (names && !names.includes(variantName)) return;
+        const ctx: BuildTreeInterface = {
+            cache: new Map(),
+            errors: [],
+            results: {}
+        };
 
-            try {
-                const result = await variantInstance.build();
-                if (result) results[variantName] = enhancedBuildResult(result);
-            } catch (error) {
-                if (isBuildResultError(error) || error instanceof AggregateError) {
-                    const result = enhancedBuildResult({
-                        errors: error.errors as Array<Message>
-                    });
+        this.validateDependencies(names);
 
-                    errorList.push(...result.errors);
-                } else if (error instanceof Error) {
-                    errorList.push(error);
-                } else {
-                    errorList.push(new Error(String(error)));
-                }
-            }
-        });
+        const targets = names ?? Object.keys(this.variants);
+        await Promise.all(targets.map(name => this.buildVariant(name, ctx)));
 
-        await Promise.allSettled(buildPromises);
-        if (errorList.length) throw new AggregateError(errorList, 'Build failed');
+        if (ctx.errors.length) throw new AggregateError(ctx.errors, 'Build failed');
 
-        return results;
+        return ctx.results;
     }
 
     /**
@@ -656,5 +651,156 @@ export class BuildService {
             this.variants[name] = new VariantService(name, lifecycle, this.config.variants[name], this.argv);
             lifecycle.onLoad(transformerDirective.bind({}, this.variants[name]), 'build-service');
         }
+    }
+
+    /**
+     * Returns the normalized `dependOn` list for a variant.
+     *
+     * @param variantName - The variant to look up
+     *
+     * @returns Array of dependency variant names, empty if none defined
+     *
+     * @remarks
+     * Normalizes the `dependOn` field from the variant configuration into
+     * a consistent array form, since the field accepts either a single
+     * string or an array of strings.
+     *
+     * @see {@link buildVariant}
+     * @see {@link validateDependencies}
+     *
+     * @since 2.4.0
+     */
+
+    private getDependOn(variantName: string): Array<string> {
+        const { dependOn } = this.config.variants?.[variantName] ?? {};
+        if (!dependOn) return [];
+
+        return Array.isArray(dependOn) ? dependOn : [ dependOn ];
+    }
+
+    /**
+     * Validates the dependency graph for all or specific variants before building starts.
+     *
+     * @param names - Optional subset of variant names to validate (validates all if omitted)
+     *
+     * @throws xBuildError - When a circular dependency is detected, with the full cycle
+     * path included in the message (e.g. `Circular dependency detected: main → shared → main`)
+     *
+     * @remarks
+     * Performs a depth-first traversal of the dependency graph using two sets:
+     * - `visited` — variants fully processed, skipped on revisit
+     * - `inStack` — variants in the current traversal path, used to detect cycles
+     *
+     * Dependencies that exist in `dependOn` but have no matching variant instance
+     * in {@link variants} are silently skipped.
+     *
+     * Called by {@link build} before any variant starts, ensuring the entire
+     * graph is valid before any work begins.
+     *
+     * @see {@link build}
+     * @see {@link getDependOn}
+     *
+     * @since 2.4.0
+     */
+
+    private validateDependencies(names?: Array<string>): void {
+        const visited = new Set<string>();
+        const inStack = new Set<string>();
+
+        const visit = (name: string, chain: Array<string>): void => {
+            if (inStack.has(name))
+                throw new xBuildError(`Circular dependency detected: ${ [ ...chain, name ].join(' → ') }`);
+            if (visited.has(name)) return;
+
+            inStack.add(name);
+            for (const dep of this.getDependOn(name)) {
+                if (this.variants[dep]) visit(dep, [ ...chain, name ]);
+            }
+            inStack.delete(name);
+            visited.add(name);
+        };
+
+        for (const name of (names ?? Object.keys(this.variants))) visit(name, []);
+    }
+
+    /**
+     * Executes the build for a single variant after all its dependencies resolve.
+     *
+     * @param name - Variant name to build
+     * @param ctx - Isolated build context for this {@link build} invocation
+     *
+     * @remarks
+     * Called exclusively by {@link buildVariant} after the promise is registered
+     * in {@link BuildTreeInterface.cache}, preventing re-entry.
+     *
+     * Awaits all `dependOn` dependencies concurrently via `Promise.all` before
+     * running the variant. Dependencies missing from {@link variants} are silently skipped.
+     *
+     * Errors are pushed into {@link BuildTreeInterface.errors} rather than thrown,
+     * so all variants attempt to build even if a sibling fails. Handles both
+     * esbuild-specific errors via {@link isBuildResultError} and generic JavaScript errors.
+     *
+     * @see {@link buildVariant}
+     * @see {@link getDependOn}
+     * @see {@link isBuildResultError}
+     * @see {@link BuildTreeInterface}
+     * @see {@link enhancedBuildResult}
+     *
+     * @since 2.4.0
+     */
+
+    private async executeBuild(name: string, ctx: BuildTreeInterface): Promise<void> {
+        const deps = this.getDependOn(name).filter(dep => this.variants[dep]);
+        await Promise.all(deps.map(dep => this.buildVariant(dep, ctx)));
+
+        const instance = this.variants[name];
+        if (!instance) return;
+
+        try {
+            const result = await instance.build();
+            if (result) ctx.results[name] = enhancedBuildResult(result);
+        } catch (error) {
+            if (isBuildResultError(error) || error instanceof AggregateError) {
+                ctx.errors.push(
+                    ...enhancedBuildResult({ errors: error.errors as Array<Message> }).errors
+                );
+            } else {
+                ctx.errors.push(error instanceof Error ? error : new Error(String(error)));
+            }
+        }
+    }
+
+    /**
+     * Builds a single variant, first awaiting any `dependOn` dependencies.
+     *
+     * @param name - Variant name to build
+     * @param ctx - Isolated build context for this {@link build} invocation,
+     * carrying the promise cache, error list, and results map
+     *
+     * @returns Promise that resolves when the variant and all its dependencies finish
+     *
+     * @remarks
+     * Stores its promise in {@link BuildTreeInterface.cache} on first call so any
+     * subsequent caller depending on the same variant awaits the already-running
+     * promise rather than triggering a duplicate build.
+     *
+     * Delegates actual execution to {@link executeBuild} after registering the promise,
+     * ensuring the cache is populated before any async work begins.
+     *
+     * @see {@link build}
+     * @see {@link executeBuild}
+     * @see {@link BuildTreeInterface}
+     *
+     * @since 2.4.0
+     */
+
+    private buildVariant(name: string, ctx: BuildTreeInterface): Promise<void> {
+        const cached = ctx.cache.get(name);
+        if (cached) return cached;
+
+        const promise = this.executeBuild(name, ctx);
+        ctx.cache.set(name, promise);
+
+        return promise;
     }
 }
