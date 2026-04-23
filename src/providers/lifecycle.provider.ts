@@ -2,8 +2,8 @@
  * Type imports (removed at compile time)
  */
 
-import type { PluginBuild, Plugin, OnStartResult, PartialMessage, Message } from 'esbuild';
 import type { OnEndType, OnLoadType, OnStartType } from './interfaces/lifecycle-provider.interface';
+import type { PluginBuild, Plugin, OnStartResult, PartialMessage, Message, LogLevel } from 'esbuild';
 import type { BuildResult, OnResolveResult, OnResolveArgs, OnLoadResult, OnLoadArgs } from 'esbuild';
 import type { OnResolveType, LifecycleContextInterface } from './interfaces/lifecycle-provider.interface';
 
@@ -652,9 +652,25 @@ export class LifecycleProvider {
 
         const filePath = resolve(args.path);
         const snapshot = this.filesModel.getSnapshot(filePath);
-        let contents: string | Uint8Array = snapshot?.contentSnapshot
-            ? snapshot.contentSnapshot.text
-            : await readFile(filePath, 'utf8');
+        let contents: string | Uint8Array;
+
+        try {
+            contents = snapshot?.contentSnapshot
+                ? snapshot.contentSnapshot.text
+                : await readFile(filePath, 'utf8');
+        } catch {
+            // Todo add this as global way to ignore error & warning
+            const logOverride = context.options.logOverride as Record<string, LogLevel> | undefined;
+            if(logOverride?.['lifecycle-file-ignored'] !== 'silent') {
+                warnings.push({
+                    id: '',
+                    text: `${ args.path } ignored`,
+                    pluginName: 'lifecycle'
+                });
+            }
+
+            return { warnings, errors, loader };
+        }
 
         for (const [ name, hook ] of this.loadHooks.entries()) {
             try {
