@@ -69,7 +69,7 @@ describe('BuildService', () => {
 
         test('initializes with argv parameters', () => {
             const argv = { watch: true, minify: false };
-            new BuildService(undefined, argv);
+            new BuildService(argv);
 
             expect(subscribeSpy).toHaveBeenCalled();
         });
