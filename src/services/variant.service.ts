@@ -499,6 +499,14 @@ export class VariantService {
             Object.assign(config, { entryPoints: this.dependenciesFile });
         }
 
+        if(this.config.define && config.define) {
+            for(const [ key, value ] of Object.entries(this.config.define)) {
+                if(typeof value === 'function') {
+                    config.define[key] = JSON.stringify(value());
+                }
+            }
+        }
+
         try {
             const result = await build(config);
             await this.packageTypeComponent();
@@ -830,7 +838,7 @@ export class VariantService {
         }
 
         const defineFromConfig = config.define;
-        const define: Record<string, string> | undefined = defineFromConfig
+        const define = defineFromConfig
             ? Object.fromEntries(
                 Object.entries(defineFromConfig).map(([ key, value ]) => {
                     return [ key, JSON.stringify(typeof value === 'function' ? value() : value) ];
