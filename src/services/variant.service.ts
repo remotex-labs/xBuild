@@ -825,7 +825,7 @@ export class VariantService {
             throw new xBuildError(`Variant '${ this.name }' not found configuration`);
         }
 
-        if (!config.esbuild.entryPoints) {
+        if (!config.esbuild.entryPoints && !config.esbuild.stdin) {
             throw new xBuildError('Entry points are required in esbuild configuration');
         }
 
