@@ -962,8 +962,7 @@ export class VariantService {
     private async buildDependencyMap(): Promise<Record<string, string>> {
         const { esbuild } = this.buildConfig;
         const { metafile } = await analyzeDependencies(esbuild.entryPoints, {
-            loader: esbuild.loader,
-            platform: esbuild.platform
+            ...esbuild
         });
 
         const result: Record<string, string> = {};
