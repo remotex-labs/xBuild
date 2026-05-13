@@ -10,6 +10,8 @@ import type { CachedServiceInterface, DiagnosticInterface } from './interfaces/t
  */
 
 import ts from 'typescript';
+import { matchesGlob } from 'path';
+import { relative } from '@remotex-labs/xmap';
 import { Injectable } from '@symlinks/symlinks.module';
 import { BundlerService } from '@typescript/services/bundler.service';
 import { EmitterService } from '@typescript/services/emitter.service';
@@ -380,7 +382,15 @@ export class TypescriptService {
      */
 
     private shouldCheckFile(file: ts.SourceFile): boolean {
-        return file && !file.fileName.includes('node_modules') && !file.isDeclarationFile;
+        if(!file || file.fileName.includes('node_modules')) return false;
+        if(this.config.raw?.exclude) {
+            for (const pattern of this.config.raw.exclude) {
+                if (matchesGlob(relative(this.config.options.rootDir!, file.fileName), pattern))
+                    return false;
+            }
+        }
+
+        return !file.isDeclarationFile;
     }
 
     /**
