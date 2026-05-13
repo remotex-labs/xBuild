@@ -190,9 +190,10 @@ export class VariantService {
             this.getConfig(this.buildConfig, this.configService.getValue().common)!
         );
 
-        this.typescriptModule.languageHostService.touchFiles(
-            Object.values(<Record<string, string>>this.buildConfig.esbuild.entryPoints)
-        );
+        // todo optimize in case of glob
+        // this.typescriptModule.languageHostService.touchFiles(
+        //     Object.values(<Record<string, string>>this.buildConfig.esbuild.entryPoints)
+        // );
 
         this.lifecycle.onEnd(this.end.bind(this), `${ this.name }-core`);
         this.lifecycle.onStart(this.start.bind(this), `${ this.name }-core`);
