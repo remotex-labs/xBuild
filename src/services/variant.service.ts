@@ -191,7 +191,7 @@ export class VariantService {
         );
 
         this.typescriptModule.languageHostService.touchFiles(
-            Object.values(<Record<string, string>> this.buildConfig.esbuild.entryPoints)
+            Object.values(<Record<string, string>>this.buildConfig.esbuild.entryPoints)
         );
 
         this.lifecycle.onEnd(this.end.bind(this), `${ this.name }-core`);
@@ -458,7 +458,7 @@ export class VariantService {
      */
 
     async check(): Promise<DiagnosticInterface[]> {
-        if(!this.dependenciesFile)
+        if (!this.dependenciesFile)
             this.dependenciesFile = await this.buildDependencyMap();
 
         return this.typescriptModule.check(Object.values(this.dependenciesFile!));
@@ -493,7 +493,7 @@ export class VariantService {
         if (!this.active) return;
         this.applyInjections();
 
-        const config = Object.assign({}, this.buildConfig.esbuild);
+        const config: BuildOptions = Object.assign({}, this.buildConfig.esbuild);
         this.dependenciesFile = await this.buildDependencyMap();
         if (this.buildConfig.esbuild.bundle === false) {
             Object.assign(config, { entryPoints: this.dependenciesFile });
@@ -618,10 +618,10 @@ export class VariantService {
                 (d.category === ts.DiagnosticCategory.Error ? errors : warnings).push(d);
             }
 
-            if(errors.length)
+            if (errors.length)
                 result.errors?.push({ detail: error, location: undefined });
 
-            if(warnings.length)
+            if (warnings.length)
                 result.warnings?.push({ detail: warning, location: undefined });
         }
 
@@ -701,7 +701,7 @@ export class VariantService {
         try {
             if (shouldBundle) {
                 await this.typescriptModule.emitBundle(
-                    <Record<string, string>> this.buildConfig.esbuild.entryPoints, outDir
+                    <Record<string, string>>this.buildConfig.esbuild.entryPoints, outDir
                 );
             } else {
                 await this.typescriptModule.emit(outDir);
@@ -914,7 +914,7 @@ export class VariantService {
         this.active = true;
         this.buildConfig = this.initializeConfig(config);
 
-        if(config.esbuild.outdir && config.esbuild.outfile)
+        if (config.esbuild.outdir && config.esbuild.outfile)
             this.buildConfig.esbuild.outdir = undefined;
 
         if (config.esbuild.tsconfig && config.esbuild.tsconfig !== this.tsConfigPath) {
