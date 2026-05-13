@@ -832,9 +832,9 @@ export class VariantService {
         const defineFromConfig = config.define;
         const define: Record<string, string> | undefined = defineFromConfig
             ? Object.fromEntries(
-                Object.entries(defineFromConfig).map(
-                    ([ key, value ]) => [ key, JSON.stringify(value) ]
-                )
+                Object.entries(defineFromConfig).map(([ key, value ]) => {
+                    return [ key, JSON.stringify(typeof value === 'function' ? value() : value) ];
+                })
             )
             : undefined;
 
