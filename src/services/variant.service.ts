@@ -971,9 +971,8 @@ export class VariantService {
 
     private async buildDependencyMap(): Promise<Record<string, string>> {
         const { esbuild } = this.buildConfig;
-        const { metafile } = await analyzeDependencies(esbuild.entryPoints, {
-            ...esbuild
-        });
+        const analysisOptions: BuildOptions = { ...esbuild, plugins: undefined };
+        const { metafile } = await analyzeDependencies(esbuild.entryPoints, analysisOptions);
 
         const result: Record<string, string> = {};
         for (const file of Object.keys(metafile.inputs)) {
