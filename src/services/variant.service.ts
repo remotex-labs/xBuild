@@ -674,22 +674,21 @@ export class VariantService {
         if (context.buildResult.errors?.length > 0) return;
         const result: OnStartResult = { errors: [], warnings: [] };
 
-        if(typeof context.buildResult.metafile?.outputs === 'object') {
+        if (typeof context.buildResult.metafile?.outputs === 'object') {
             const files = Object.keys(context.buildResult.metafile?.outputs);
             for (const file of files) {
-                if(!file.endsWith('.map')) continue;
+                if (!file.endsWith('.map')) continue;
 
                 const distPath = dirname(file);
-                readFile(file, 'utf8').then(data => {
-                    const dataObject = JSON.parse(data);
-                    dataObject.sources = dataObject.sources.map((source: string) => {
-                        if(source.startsWith('http')) return source;
+                const data = await readFile(file, 'utf8');
+                const dataObject = JSON.parse(data);
+                dataObject.sources = dataObject.sources.map((source: string) => {
+                    if (source.startsWith('http')) return source;
 
-                        return join(distPath, source);
-                    });
-
-                    writeFile(file, JSON.stringify(dataObject), 'utf8');
+                    return join(distPath, source);
                 });
+
+                await writeFile(file, JSON.stringify(dataObject), 'utf8');
             }
         }
 
