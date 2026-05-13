@@ -607,6 +607,7 @@ describe('transformer.directive', () => {
                     languageHostService: {
                         touchFile: xJet.fn(),
                         aliasRegex: undefined,
+                        hasScriptSnapshot: xJet.fn().mockReturnValue(true),
                         resolveAliases: xJet.fn((content: string) => content)
                     }
                 }

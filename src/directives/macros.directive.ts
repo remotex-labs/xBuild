@@ -610,7 +610,10 @@ export async function transformerDirective(variant: VariantService, context: Loa
     if (contents.length < 1) return;
     if (!TS_JS_REGEX.test(args.path)) return;
 
+    const host = variant.typescript.languageHostService;
     const languageService = variant.typescript.languageService;
+    if (!host.hasScriptSnapshot(args.path)) host.touchFile(args.path);
+
     const sourceFile = languageService.getProgram()?.getSourceFile(args.path);
     if (!sourceFile) return;
 
