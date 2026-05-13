@@ -840,9 +840,11 @@ export class VariantService {
         const defineFromConfig = config.define;
         const define = defineFromConfig
             ? Object.fromEntries(
-                Object.entries(defineFromConfig).map(([ key, value ]) => {
-                    return [ key, JSON.stringify(typeof value === 'function' ? value() : value) ];
-                })
+                Object.entries(defineFromConfig).flatMap(([ key, value ]) =>
+                    typeof value === 'function'
+                        ? []
+                        : [[ key, JSON.stringify(value) ]]
+                )
             )
             : undefined;
 
