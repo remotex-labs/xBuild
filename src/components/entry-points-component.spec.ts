@@ -121,6 +121,6 @@ describe('extractEntryPoints', () => {
     });
 
     test('should throw error for undefined entry points', () => {
-        expect(() => extractEntryPoints(testDir, undefined as any)).toThrow('Unsupported entry points format');
+        expect(() => extractEntryPoints(testDir, 'asd' as any)).toThrow('Unsupported entry points format');
     });
 });

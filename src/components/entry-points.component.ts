@@ -70,7 +70,7 @@ import { collectFilesFromGlob } from '@components/glob.component';
  * @since 2.0.0
  */
 
-export function extractEntryPoints(baseDir: string, entryPoints: BuildOptions['entryPoints']): Record<string, string> {
+export function extractEntryPoints(baseDir: string, entryPoints: BuildOptions['entryPoints']): Record<string, string> | undefined {
     if (Array.isArray(entryPoints)) {
         let result: Record<string, string> = {};
 
@@ -85,6 +85,8 @@ export function extractEntryPoints(baseDir: string, entryPoints: BuildOptions['e
         return result;
     } else if (entryPoints && typeof entryPoints === 'object') {
         return entryPoints;
+    } else if (entryPoints === undefined) {
+        return undefined;
     }
 
     throw new xBuildError('Unsupported entry points format');
