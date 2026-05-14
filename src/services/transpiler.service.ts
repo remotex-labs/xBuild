@@ -249,6 +249,7 @@ export async function analyzeDependencies(entryPoint: BuildOptions['entryPoints'
             outdir: 'tmp',
             write: false, // Prevent writing output files
             bundle: true, // Bundle to analyze imports
+            outfile: undefined,
             metafile: true, // Generate a metafile to analyze dependencies
             packages: 'external',
             logLevel: 'silent',
