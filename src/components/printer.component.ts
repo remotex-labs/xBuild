@@ -13,6 +13,7 @@ import type { BuildContextInterface, ResultContextInterface } from '@providers/i
  */
 
 import { relative } from '@remotex-labs/xmap';
+import { DiagnosticCategory } from 'typescript';
 import { TypesError } from '@errors/types.error';
 import { xBuildError } from '@errors/xbuild.error';
 import { inject } from '@symlinks/symlinks.module';
@@ -550,21 +551,39 @@ export function logError(issue: unknown): void {
  */
 
 export function logTypeDiagnostic(name: string, diagnostics: Array<DiagnosticInterface>): void {
-    const hasErrors = diagnostics.length > 0;
-    const nameColor = hasErrors ? warnColor(name) : keywordColor(name);
-    const statusSymbol = hasErrors ? errorColor(ERROR_SYMBOL) : infoColor.dim(ARROW_SYMBOL);
+    const info = diagnostics.filter(d => d.category > DiagnosticCategory.Error);
+    const errors = diagnostics.filter(d => d.category === DiagnosticCategory.Error);
+    const warnings = diagnostics.filter(d => d.category === DiagnosticCategory.Warning);
+
+    const nameColor = errors.length > 0 ? warnColor(name) : keywordColor(name);
+    const statusSymbol = errors.length > 0 ? errorColor(ERROR_SYMBOL) : infoColor.dim(ARROW_SYMBOL);
     const status = createActionPrefix('completed', statusSymbol);
 
     console.log(`${ status } ${ nameColor }`);
 
-    if (hasErrors) {
+    if(errors.length > 0) {
         process.exitCode = 1;
-        console.log('');
-        for (const diagnostic of diagnostics) {
+        console.log(`\n ${ errorColor('Errors') } (${ errors.length })`);
+        for (const diagnostic of errors) {
             logTypescriptDiagnostic(diagnostic, errorColor(ERROR_SYMBOL));
         }
-        console.log('');
     }
+
+    if(warnings.length > 0) {
+        console.log(`\n ${ warnColor('Warnings') } (${ warnings.length })`);
+        for (const diagnostic of warnings) {
+            logTypescriptDiagnostic(diagnostic, warnColor(WARNING_SYMBOL));
+        }
+    }
+
+    if(info.length > 0) {
+        console.log(`\n ${ pathColor('Info') } (${ info.length })`);
+        for (const diagnostic of info) {
+            logTypescriptDiagnostic(diagnostic, pathColor(ARROW_SYMBOL));
+        }
+    }
+
+    console.log('');
 }
 
 /**
