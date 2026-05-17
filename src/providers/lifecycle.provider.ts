@@ -651,7 +651,7 @@ export class LifecycleProvider {
         let loader: OnLoadResult['loader'] = 'default';
 
         const filePath = resolve(args.path);
-        const snapshot = this.filesModel.getSnapshot(filePath);
+        const snapshot = this.filesModel.getOrTouchFile(filePath);
         let contents: string | Uint8Array;
 
         try {

@@ -28,7 +28,7 @@ describe('LifecycleProvider', () => {
         xJet.resetAllMocks();
 
         filesModel = {
-            getSnapshot: xJet.fn().mockReturnValue(null)
+            getOrTouchFile: xJet.fn().mockReturnValue(null)
         };
 
         provider = new LifecycleProvider(variantName, argv);
@@ -412,7 +412,7 @@ describe('LifecycleProvider', () => {
         });
 
         test('loads from filesModel snapshot when available', async () => {
-            filesModel.getSnapshot.mockReturnValue({ contentSnapshot: { text: 'snapshot content' } });
+            filesModel.getOrTouchFile.mockReturnValue({ contentSnapshot: { text: 'snapshot content' } });
 
             const hook = xJet.fn<any, any, any>()
                 .mockImplementation((context) => ({ contents: context.contents + ' modified' }));
@@ -423,7 +423,7 @@ describe('LifecycleProvider', () => {
             const args = { path: '/project/root/src/file.ts' } as any;
             const result = await callRegistered(build.onLoad, 1, args);
 
-            expect(filesModel.getSnapshot).toHaveBeenCalledWith('/project/root/src/file.ts');
+            expect(filesModel.getOrTouchFile).toHaveBeenCalledWith('/project/root/src/file.ts');
             expect(hook).toHaveBeenCalledWith(expect.objectContaining({
                 contents: 'snapshot content',
                 loader: 'default',
@@ -436,7 +436,7 @@ describe('LifecycleProvider', () => {
         });
 
         test('falls back to readFile when snapshot has no contentSnapshot', async () => {
-            filesModel.getSnapshot.mockReturnValue({ contentSnapshot: null });
+            filesModel.getOrTouchFile.mockReturnValue({ contentSnapshot: null });
             xJet.mock(readFile).mockResolvedValue('disk content');
 
             const hook = xJet.fn<any, any, any>().mockReturnValue({ loader: 'ts' });
