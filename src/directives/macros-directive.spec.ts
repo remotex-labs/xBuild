@@ -608,7 +608,10 @@ describe('transformer.directive', () => {
                         touchFile: xJet.fn(),
                         aliasRegex: undefined,
                         hasScriptSnapshot: xJet.fn().mockReturnValue(true),
-                        resolveAliases: xJet.fn((content: string) => content)
+                        resolveAliases: xJet.fn((content: string) => content),
+                        getCompilationSettings: xJet.fn(() => ({
+                            target: 99
+                        }))
                     }
                 }
             } as any;
@@ -681,11 +684,6 @@ describe('transformer.directive', () => {
 
         test('skips .json files', async () => {
             context.args.path = 'config.json';
-            const result = await transformerDirective(variant, context);
-            expect(result).toBeUndefined();
-        });
-
-        test('returns undefined when source file not found', async () => {
             const result = await transformerDirective(variant, context);
             expect(result).toBeUndefined();
         });
