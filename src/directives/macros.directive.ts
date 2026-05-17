@@ -8,28 +8,15 @@ import type { CallExpression, VariableStatement, ExpressionStatement } from 'typ
 import type { MacrosStateInterface } from '@directives/interfaces/analyze-directive.interface';
 import type { LoadContextInterface } from '@providers/interfaces/lifecycle-provider.interface';
 import type { SubstInterface, StateInterface } from '@directives/interfaces/macros-directive.interface';
-
+import ts from 'typescript';
 /**
  * Imports
  */
-
-import ts from 'typescript';
+import { createSourceFile } from 'typescript';
 import { esBuildError } from '@errors/esbuild.error';
 import { highlightCode } from '@remotex-labs/xmap/highlighter.component';
 import { astDefineVariable, astDefineCallExpression } from '@directives/define.directive';
 import { astInlineCallExpression, astInlineVariable } from '@directives/inline.directive';
-
-/**
- * Regular expression matching TypeScript and JavaScript file extensions.
- *
- * @remarks
- * Used to filter files that should undergo macro transformation. Only files
- * with `.ts` or `.js` extensions are processed by the transformer directive.
- *
- * @since 2.0.0
- */
-
-const TS_JS_REGEX = /\.(ts|js)$/;
 
 /**
  * Array of recognized macro function names for conditional compilation and inline evaluation.
@@ -279,7 +266,7 @@ export async function isVariableStatement(node: VariableStatement, replacements:
 export async function isCallExpression(
     node: ExpressionStatement, replacements: Set<SubstInterface>, state: StateInterface
 ): Promise<boolean> {
-    const callExpr = <CallExpression> node.expression;
+    const callExpr = <CallExpression>node.expression;
     if (!callExpr.expression || !ts.isIdentifier(callExpr.expression)) return false;
 
     const fnName = callExpr.expression.text;
@@ -297,7 +284,7 @@ export async function isCallExpression(
     }
 
     let replacement: string | false = false;
-    if (fnName == MACRO_FUNCTIONS[2])  {
+    if (fnName == MACRO_FUNCTIONS[2]) {
         await astInlineCallExpression(callExpr.arguments, state);
         replacement = 'undefined';
     } else replacement = astDefineCallExpression(callExpr, state);
@@ -608,14 +595,13 @@ export async function transformerDirective(variant: VariantService, context: Loa
     if (args.path.includes('node_modules')) return;
 
     if (contents.length < 1) return;
-    if (!TS_JS_REGEX.test(args.path)) return;
+    const ext = args.path.slice(args.path.lastIndexOf('.'));
+    if (![ '.js', '.ts' ].includes(ext)) return;
 
-    const host = variant.typescript.languageHostService;
-    const languageService = variant.typescript.languageService;
-    if (!host.hasScriptSnapshot(args.path)) host.touchFile(args.path);
-
-    const sourceFile = languageService.getProgram()?.getSourceFile(args.path);
-    if (!sourceFile) return;
+    const tsOptions = variant.typescript.languageHostService.getCompilationSettings();
+    const sourceFile = createSourceFile(
+        args.path, contents.toString(), tsOptions.target ?? ts.ScriptTarget.Latest, true
+    );
 
     const state: StateInterface = {
         stage: stage as MacrosStateInterface,
