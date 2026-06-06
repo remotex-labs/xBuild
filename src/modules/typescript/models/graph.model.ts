@@ -309,12 +309,13 @@ export class GraphModel {
      */
 
     private stripImportsExports(sourceFile: SourceFile, node: FileNodeInterface): string {
-        const aliasStatements: Array<string> = [];
+        const namespaceImports: Array<string> = [];
+        const aliasRenames: Array<[ original: string, local: string ]> = [];
         const keptStatements: Array<ts.Statement> = [];
 
         for (const stmt of sourceFile.statements) {
             if (ts.isImportDeclaration(stmt)) {
-                this.handleImport(stmt, node, aliasStatements);
+                this.handleImport(stmt, node, namespaceImports, aliasRenames);
                 continue;
             }
 
@@ -338,13 +339,12 @@ export class GraphModel {
         );
 
         let content = removeExportModifiers(cleanContent(printed));
-        for (const alias of aliasStatements) {
-            if(alias.includes(' as ')) {
-                const [ aliasName, aliasType ] = alias.split(' as ');
-                content = content.replace(new RegExp(`\\b${ aliasType }\\b`, 'g'), aliasName);
-            } else {
-                content = content.replace(new RegExp(`\\b${ alias }\\.`, 'g'), '');
-            }
+        for (const [ original, local ] of aliasRenames) {
+            content = content.replace(new RegExp(`\\b${ local }\\b`, 'g'), original);
+        }
+
+        for (const namespace of namespaceImports) {
+            content = content.replace(new RegExp(`\\b${ namespace }\\.`, 'g'), '');
         }
 
         return content;
@@ -355,12 +355,20 @@ export class GraphModel {
      *
      * @param stmt - import declaration AST node
      * @param node - graph node to update
-     * @param aliasStatements - mutable list of local alias names to clean later
+     * @param namespaceImports - mutable list of internal namespace-import names whose
+     *   `Name.` qualifier must be stripped after inlining
+     * @param aliasRenames - mutable list of internal `[ original, local ]` pairs for
+     *   re-aliased named imports whose local name must be rewritten to the original
      *
      * @since 2.0.0
      */
 
-    private handleImport(stmt: ts.ImportDeclaration, node: FileNodeInterface, aliasStatements: Array<string>): void {
+    private handleImport(
+        stmt: ts.ImportDeclaration,
+        node: FileNodeInterface,
+        namespaceImports: Array<string>,
+        aliasRenames: Array<[ original: string, local: string ]>
+    ): void {
         const { importClause, moduleSpecifier } = stmt;
         if (!importClause || !moduleSpecifier) return;
 
@@ -376,9 +384,13 @@ export class GraphModel {
             if(!namedBindings) return;
 
             if (ts.isNamespaceImport(namedBindings)) {
-                aliasStatements.push(namedBindings.name.text);
+                namespaceImports.push(namedBindings.name.text);
             } else if (ts.isNamedImports(namedBindings)) {
-                this.addNamedElements(aliasStatements, namedBindings.elements);
+                for (const element of namedBindings.elements) {
+                    if (element.propertyName) {
+                        aliasRenames.push([ element.propertyName.text, element.name.text ]);
+                    }
+                }
             }
 
             return;
