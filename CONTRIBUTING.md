@@ -1,175 +1,117 @@
-# Contributing to @remotex-labs/xbuild
+# Contributing to xBuild
 
-Thank you for your interest in contributing! Every bug report, documentation fix, and feature addition makes xBuild better for everyone.
+Thanks for your interest in contributing.
+Bug reports, fixes, features, and documentation improvements are all welcome.
+This guide explains how to set up the project and get a change merged.
 
-## Table of contents
+## Code of conduct
 
-- [Ways to contribute](#ways-to-contribute)
-- [Development setup](#development-setup)
-- [Branching](#branching)
-- [Commit convention](#commit-convention)
-- [Opening a pull request](#opening-a-pull-request)
-- [Tree-shaking rules](#tree-shaking-rules)
-
----
+By participating you agree to follow the [Contributor Covenant](https://www.contributor-covenant.org/version/2/1/code_of_conduct/). Be respectful and constructive in issues, pull requests, and reviews.
 
 ## Ways to contribute
 
-- 🐛 **Bug reports** — open an issue using the Bug Report template
-- 💡 **Feature requests** — open an issue using the Feature Request template
-- 📝 **Documentation** — typos, unclear examples, missing API docs
-- 🔧 **Code** — bug fixes and features. Open an issue first so we can agree on the approach before you write code
+- **Report a bug**: open a [bug report](https://github.com/remotex-labs/xBuild/issues/new?template=bug_report.md) with a minimal reproduction.
+- **Request a feature**: open a [feature request](https://github.com/remotex-labs/xBuild/issues/new?template=feature_request.md) describing the use case.
+- **Send a pull request**: fix a bug, add a feature, or improve the docs.
 
----
+Search [existing issues](https://github.com/remotex-labs/xBuild/issues) first to avoid duplicates.
 
 ## Development setup
 
-**Prerequisites**: Node.js ≥ 20, pnpm ≥ 9
-
-### 1. Fork the repository
-
-Click the **Fork** button at the top right of the [xBuild repository](https://github.com/remotex-labs/xBuild) on GitHub. This creates a copy of the repo under your own account.
-
-### 2. Clone your fork
+xBuild uses [pnpm](https://pnpm.io) and requires Node.js 22 or later.
 
 ```bash
-git clone https://github.com/<your-username>/xBuild.git
+git clone https://github.com/remotex-labs/xBuild.git
 cd xBuild
-```
-
-### 3. Add the upstream remote
-
-This lets you pull in future changes from the original repo:
-
-```bash
-git remote add upstream https://github.com/remotex-labs/xBuild.git
-```
-
-Verify you have both remotes:
-
-```bash
-git remote -v
-# origin    https://github.com/<your-username>/xBuild.git (fetch)
-# origin    https://github.com/<your-username>/xBuild.git (push)
-# upstream  https://github.com/remotex-labs/xBuild.git (fetch)
-# upstream  https://github.com/remotex-labs/xBuild.git (push)
-```
-
-### 4. Install dependencies and verify
-
-```bash
 pnpm install
-pnpm run ci
 ```
 
-### 5. Keep your fork up to date
+### Scripts
 
-Before starting any new work, sync your fork with upstream:
+| Command              | Description                                              |
+|----------------------|----------------------------------------------------------|
+| `pnpm build`         | Build the project to `dist/`.                            |
+| `pnpm dev`           | Build in watch mode.                                     |
+| `pnpm test`          | Run the test suite (xJet).                               |
+| `pnpm test:coverage` | Run tests with coverage.                                 |
+| `pnpm lint`          | Run markdownlint, ESLint, and the TypeScript type check. |
+| `pnpm build:clean`   | Remove `dist/` and rebuild from scratch.                 |
+| `pnpm docs:dev`      | Serve the VitePress docs locally.                        |
+| `pnpm docs:build`    | Build the docs.                                          |
 
-```bash
-git checkout master
-git fetch upstream
-git merge upstream/master
-git push origin master
-```
+Run `pnpm lint`, `pnpm test`, and `pnpm build` before opening a pull request. CI runs these as separate jobs.
 
----
+## Workflow
 
-## Branching
+1. Fork the repository and create a branch from `master`.
 
-Always create a new branch from an up-to-date `master`.
-Never commit directly to `master`.
+   ```bash
+   git checkout -b feature/short-description
+   ```
 
-| Prefix      | Use for                               |
-|-------------|---------------------------------------|
-| `docs/`     | Documentation only                    |
-| `test/`     | Test-only changes                     |
-| `chore/`    | Build, CI, tooling                    |
-| `bugfix/`   | Bug fixes                             |
-| `feature/`  | New features                          |
-| `refactor/` | Code changes with no behaviour change |
+2. Make your change, with tests and documentation.
+3. Verify everything passes:
 
-```bash
-git checkout master
-git fetch upstream
-git merge upstream/master
+   ```bash
+   pnpm lint
+   pnpm test
+   pnpm build
+   ```
 
-git checkout -b bugfix/parser-null-sources
-```
+4. Push your branch and open a pull request against `master`. Fill in the pull request template.
 
----
+Keep pull requests small and focused; they are easier to review and merge.
 
-## Commit convention
+## Commit messages
 
-Commits follow a `<scope>: <description>` format where scope is the affected file or area:
-
-| Scope      | When to use              |
-|------------|--------------------------|
-| `docs`     | Documentation only       |
-| `test`     | Adding or updating tests |
-| `chore`    | Build, CI, dependencies  |
-| `bugfix`   | Bug fix                  |
-| `feature`  | New feature              |
-| `refactor` | No behaviour change      |
-
-**Examples:**
+Follow the existing history: a lowercase area prefix, a colon, then an imperative summary.
 
 ```text
-parser.component: handle empty sources array without throwing
-highlighter.component: add JSX/TSX language support
-source.service: fix off-by-one in line position mapping
-docs: update SourceService examples in README
-chore: upgrade esbuild to 0.21
-test: add coverage for empty sourcemap edge case
+plugin: Add ifdef conditional inlining
+docs: Rewrite the configuration guide
+cli: Fix watch mode rebuild on rename
 ```
 
-**Rules:**
+- Use the imperative mood ("Add", not "Added" or "Adds").
+- Keep the first line at or under 72 characters.
+- Reference related issues in the body (for example, `Closes #123`).
 
-- Scope is the filename without extension, or a general area (`docs`, `chore`, `test`, `ci`)
-- Description is lowercase, no period at the end
-- Keep it short — 72 characters max
-- Use the body for context if the reason is not obvious:
+## Coding standards
 
-```text
-parser.component: handle empty sources array without throwing
+- Write **TypeScript** with explicit types; avoid `any`.
+- Document every exported symbol with **TSDoc**, including an `@since` tag. Keep the tag order consistent with the
+  rest of the codebase: description, `@param`, `@returns`, `@throws`, `@remarks`, `@example`, `@see`, `@since`.
+- Keep functions small, pure, and testable.
+- Match the surrounding style; `pnpm lint` enforces formatting, imports, and the type check.
 
-Previously threw when the sourcemap had no sources field.
-Now returns null position instead.
+## Tests
+
+Tests use **xJet**. Place a `*.spec.ts` file next to the code it covers, and assert the observable behavior of the unit.
+
+```ts
+import { bannerComponent } from './banner.component';
+
+(<any> globalThis).__VERSION = '1.0.0';
+
+describe('bannerComponent', () => {
+    test('renders the version', () => {
+        expect(bannerComponent()).toContain('1.0.0');
+    });
+});
 ```
 
----
+Cover edge cases: empty input, invalid configuration that should throw, and the boundaries of each option.
 
-## Opening a pull request
+## Documentation
 
-1. Push your branch to your fork:
+- Update the TSDoc for any public API you change.
+- Update the VitePress docs under `docs/src/` when behavior or the API changes.
+- Run `pnpm lint:md` to keep Markdown clean, and `pnpm docs:build` to check for broken links.
 
-```bash
-git push origin fix/parser-null-sources
-```
+## Versioning
 
-1. Go to your fork on GitHub and click **Compare & pull request**
-2. Make sure the base is set to `remotex-labs/xBuild` → `master`
-3. Fill in the PR template
-4. Make sure `pnpm run ci` passes locally before requesting review
-5. Keep PRs small and focused — one fix or feature per PR
+xBuild follows [Semantic Versioning](https://semver.org/): MAJOR for incompatible API changes, MINOR for backward-compatible features, and PATCH for backward-compatible fixes.
 
----
+## License
 
-## Tree-shaking rules
-
-xBuild ships a tree-shakeable ESM build.
-Please keep it that way:
-
-✅ **Do** — named exports only:
-
-```typescript
-export { parseStackTrace } from './components/parser.component';
-export type { ParsedFrame } from './models/frame.model';
-```
-
-❌ **Do not** — default exports or top-level side effects:
-
-```typescript
-export default { parseStackTrace, highlightCode };
-console.log('parser loaded');
-```
+By contributing, you agree that your contributions are licensed under the project's [Mozilla Public License 2.0](LICENSE).
