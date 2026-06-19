@@ -3,18 +3,17 @@
         "strict": true,
         "target": "ESNext",
         "module": "ESNext",
-        "rootDir": "src",
         "outDir": "dist",
+        "rootDir": "src",
+        "composite": false,
         "declaration": true,
         "skipLibCheck": true,
-        "importHelpers": true,
-        "isolatedModules": false,
-        "esModuleInterop": false,
+        "esModuleInterop": true,
+        "isolatedModules": true,
         "moduleDetection": "force",
         "moduleResolution": "bundler",
         "resolveJsonModule": true,
-        "allowSyntheticDefaultImports": true,
-        "forceConsistentCasingInFileNames": true,
+        "emitDeclarationOnly": true,
         "lib": [
             "DOM",
             "ESNext"
@@ -71,5 +70,8 @@
         "dist",
         "node_modules",
         "**/*.spec.ts"
+    ],
+    "references": [
+        { "path": "./tsconfig.spec.json" }
     ]
 }
