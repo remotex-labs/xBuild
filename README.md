@@ -4,11 +4,23 @@
 [![npm version](https://img.shields.io/npm/v/@remotex-labs/xbuild.svg)](https://www.npmjs.com/package/@remotex-labs/xbuild)
 [![downloads](https://img.shields.io/npm/dm/@remotex-labs/xbuild?label=npm%20downloads)](https://www.npmjs.com/package/@remotex-labs/xbuild)
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL_2.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
-[![Test CI](https://github.com/remotex-labs/xbuild/actions/workflows/test.yml/badge.svg)](https://github.com/remotex-labs/xBuild/actions/workflows/test.yml)
+[![Test CI](https://github.com/remotex-labs/xBuild/actions/workflows/ci.yml/badge.svg)](https://github.com/remotex-labs/xBuild/actions/workflows/ci.yml)
 [![Discord](https://img.shields.io/discord/1364348850696884234?logo=Discord&label=Discord)](https://discord.gg/psV9grS9th)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/remotex-labs/xBuild)
 
-`@remotex-labs/xbuild` is a versatile TypeScript toolchain build system
+`@remotex-labs/xbuild` is a versatile TypeScript toolchain build system. It wraps [esbuild](https://esbuild.github.io/)
+with a declarative configuration file, a watch-mode dev server, type checking, and a set of compile-time macros, so
+you can bundle, type-check, and serve TypeScript projects from a single CLI.
+
+## Key Features
+
+- **Declarative config**: describe builds in `config.xbuild.ts` with shared `common` settings and named `variants`.
+- **esbuild-powered**: bundle and minify to `cjs`, `esm`, or `iife` for `browser`, `node`, or `neutral` targets.
+- **Type checking**: type-check without emitting, or fail the build on TypeScript errors.
+- **Declarations**: generate `.d.ts` declaration files alongside the build output.
+- **Watch & serve**: rebuild on file changes and serve a folder during development.
+- **Compile-time macros**: `$$ifdef`, `$$ifndef`, and `$$inline` to conditionally include code or inline results at build time.
+- **Lifecycle hooks**: tap into `onStart`, `onEnd`, `onLoad`, `onResolve`, and `onSuccess`.
 
 ## Installation
 
@@ -276,9 +288,23 @@ export interface LifecycleHooksInterface {
 }
 ```
 
+## Documentation
+
+Full guides and the complete configuration reference live at
+**[remotex-labs.github.io/xBuild](https://remotex-labs.github.io/xBuild/)**.
+
+## Contributing
+
+Contributions are welcome!\
+Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
 ## Links
 
 - [Documentation](https://remotex-labs.github.io/xBuild/)
 - [GitHub Repository](https://github.com/remotex-labs/xBuild)
 - [Issue Tracker](https://github.com/remotex-labs/xBuild/issues)
 - [npm Package](https://www.npmjs.com/package/@remotex-labs/xbuild)
+
+## License
+
+This project is licensed under the Mozilla Public License 2.0 - see the [LICENSE](LICENSE) file for details.
