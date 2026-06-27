@@ -22,36 +22,17 @@
             "node"
         ],
         "paths": {
-            "@errors/*": [
-                "./src/errors/*"
+            "@modules/*": [
+                "./src/modules/*"
             ],
             "@services/*": [
                 "./src/services/*"
             ],
-            "@providers/*": [
-                "./src/providers/*"
-            ],
-            "@directives/*": [
-                "./src/directives/*"
-            ],
-            "@constants/*": [
-                "./src/constants/*"
-            ],
-            "@components/*": [
-                "./src/components/*"
-            ],
-
             "@interfaces/*": [
                 "./src/interfaces/*"
             ],
-            "@argv/*": [
-                "./src/modules/argv/*"
-            ],
-            "@server/*": [
-                "./src/modules/server/*"
-            ],
-            "@symlinks/*": [
-                "./src/modules/symlinks/*"
+            "@components/*": [
+                "./src/components/*"
             ],
             "@observable/*": [
                 "./src/modules/observable/*"
