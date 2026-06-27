@@ -72,7 +72,7 @@ describe('WatchService', () => {
         await service.start(callback);
 
         expect(watchSpy).toHaveBeenCalledWith('/root', { recursive: true });
-        expect(matchesGlobSpy).toHaveBeenCalledTimes(4);
+        expect(matchesGlobSpy).toHaveBeenCalledTimes(3);
         xJet.runOnlyPendingTimers();
         expect(callback).toHaveBeenCalledWith([ normalize('/file1.ts') ]);
     });

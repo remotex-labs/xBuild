@@ -4,17 +4,16 @@
 
 import { matchesGlob } from 'path';
 import { stat, watch } from 'fs/promises';
-import { inject } from '@symlinks/symlinks.module';
+import { inject } from '@services/symlinks.service';
 import { normalize, join } from '@remotex-labs/xmap';
 import { FrameworkService } from '@services/framework.service';
 
 /**
- * Provides a file-watching service that tracks changes in the framework's root directory.
+ * Watches the framework's root directory and emits files as they change.
  *
  * @remarks
- * This service sets up a recursive file system watcher, filters excluded files,
- * and debounces changes to optimize performance. It is mainly used for monitoring
- * source files or test files and triggering callbacks on changes.
+ * Sets up a recursive watcher, filters paths through the include and exclude globs,
+ * and debounces bursts of filesystem events so the callback receives one batch per quiet period.
  *
  * @example
  * ```ts
@@ -30,18 +29,11 @@ import { FrameworkService } from '@services/framework.service';
 
 export class WatchService {
     /**
-     * Glob patterns that **exclude** paths from being emitted.
+     * Glob patterns whose matches are excluded from emission.
      *
      * @remarks
-     * Patterns use **Node.js native glob semantics** via `matchesGlob`.
-     * Negation syntax (`!pattern`) is **not supported** and must be expressed
-     * through explicit include/exclude separation.
-     *
-     * Typical examples:
-     *
-     * - `**\/node_modules\/**`
-     * - `**\/dist\/**`
-     * - `**\/*.spec.ts`
+     * Patterns use Node.js native glob semantics via {@link matchesGlob}.
+     * Negation syntax (`!pattern`) is not supported and must be expressed through explicit include and exclude lists.
      *
      * @since 2.0.0
      */
@@ -49,25 +41,22 @@ export class WatchService {
     readonly excludes: Array<string>;
 
     /**
-     * Glob patterns that **allow** paths to be emitted.
+     * Glob patterns that allow a path to be emitted.
      *
      * @remarks
-     * A file must match **at least one** an include pattern to be considered.
-     * Defaults to `['**\/*']`, meaning all files are eligible unless excluded.
+     * A path must match at least one include pattern to be eligible.
+     * Defaults to `['**\/*']`, so every path is eligible unless an exclude pattern removes it.
      *
      * @since 2.0.0
      */
 
     readonly include: Array<string>;
 
-
     /**
-     * Timer used for debouncing file change events.
+     * Timer handle used to debounce file change events.
      *
      * @remarks
-     * When multiple file changes occur in quick succession, this timer ensures that
-     * the `handleChangedFiles` method is called only once after a short delay,
-     * preventing redundant executions and improving performance.
+     * Coalesces changes that arrive in quick succession into a single {@link handleChangedFiles} call after a short delay.
      *
      * @since 2.0.0
      */
@@ -78,11 +67,7 @@ export class WatchService {
      * Reference to the core {@link FrameworkService}.
      *
      * @remarks
-     * Injected via the {@link inject} helper, this service provides access to
-     * framework-level configuration such as the project root path, runtime
-     * environment, and shared utilities.
-     * It is used here for resolving relative paths and coordinating with the
-     * broader testing infrastructure.
+     * Injected via {@link inject}, this provides the project root path against which watched files are resolved.
      *
      * @see inject
      * @see FrameworkService
@@ -95,15 +80,11 @@ export class WatchService {
     /**
      * Creates a new {@link WatchService}.
      *
-     * @param excludes - Glob patterns to ignore.
+     * @param excludes - Glob patterns to ignore. Defaults to none.
      * @param include - Glob patterns to allow. Defaults to `['**\/*']`.
      *
      * @remarks
-     * Include and exclude rules are evaluated as:
-     *
-     * ```
-     * included AND NOT excluded
-     * ```
+     * A path is emitted when it matches an include pattern and no exclude pattern.
      *
      * @since 2.0.0
      */
@@ -114,17 +95,16 @@ export class WatchService {
     }
 
     /**
-     * Start the file watcher.
+     * Starts watching the framework root and reports changed files to the callback.
      *
-     * @param callback - Function to call with the changed file paths.
-     * Expects a callback that accepts an array of files.
-     * @returns A promise that resolves when the watcher is ready.
+     * @param callback - Receives the batch of changed file paths once events settle.
+     * @returns A promise that resolves when the watcher is closed.
      *
      * @remarks
-     * This method performs the following steps:
-     * 1. Sets up a recursive file system watcher on the framework's root directory.
-     * 2. On file changes, normalizes paths, filters excluded files, and schedules
-     *    handling of changed files with a debouncing to avoid excessive executions.
+     * For each filesystem event the path is normalized, then dropped if it is already queued in the current debounced
+     * window, excluded by a pattern, or not matched by any include pattern.
+     * Surviving paths that resolve to a file are queued and flushed to the callback once the events settle.
+     * A path whose `stat` fails is treated as deleted and still emitted.
      *
      * @example
      * ```ts
@@ -140,24 +120,28 @@ export class WatchService {
      */
 
     async start(callback: (files: Array<string>) => void): Promise<void> {
+        const rootPath = this.framework.rootPath;
         const changedFilesSet = new Set<string>();
-        const watcher = watch(this.framework.rootPath, { recursive: true });
+        const watcher = watch(rootPath, { recursive: true });
+
         for await (const { filename } of watcher) {
             if (!filename) continue;
 
             const fullPath = normalize(filename);
             if (fullPath.endsWith('~')) continue;
 
-            if (!this.include.some((pattern) => matchesGlob(fullPath, pattern))) continue;
-            if (this.excludes.some((pattern) => matchesGlob(fullPath, pattern))) continue;
+            if (changedFilesSet.has(fullPath)) {
+                this.debounce(() => this.handleChangedFiles(callback, changedFilesSet));
+                continue;
+            }
 
-            // Check if the path is a file (not a directory)
-            const absolutePath = join(this.framework.rootPath, fullPath);
+            if (this.excludes.some((pattern) => matchesGlob(fullPath, pattern))) continue;
+            if (!this.include.some((pattern) => matchesGlob(fullPath, pattern))) continue;
+
             try {
-                const stats = await stat(absolutePath);
-                if (!stats.isFile()) continue;
+                if (!(await stat(join(rootPath, fullPath))).isFile()) continue;
             } catch {
-                // File might have been deleted or doesn't exist yet
+                /* deleted or not yet readable - emit anyway */
             }
 
             changedFilesSet.add(fullPath);
@@ -166,14 +150,13 @@ export class WatchService {
     }
 
     /**
-     * Handles the changed files after debouncing.
+     * Flushes the queued changes to the callback.
      *
-     * @param callback - Function to call with the changed file paths. Expects a callback that accepts an array of files.
-     * @param changedFilesSet - Set of changed file paths containing normalized paths of modified files.
+     * @param callback - Receives the batch of changed file paths.
+     * @param changedFilesSet - Normalized paths accumulated since the last flush.
      *
      * @remarks
-     * Executes the callback with a copy of the changed files and then clears the set
-     * for the next batch of changes.
+     * Passes a snapshot of the queued paths to the callback, then clears the set for the next batch.
      *
      * @see start
      * @see debounce
@@ -181,21 +164,19 @@ export class WatchService {
      * @since 2.0.0
      */
 
-    private async handleChangedFiles(callback: (files: Array<string>) => void, changedFilesSet: Set<string>): Promise<void> {
-        callback?.([ ...changedFilesSet ]);
+    private handleChangedFiles(callback: (files: Array<string>) => void, changedFilesSet: Set<string>): void {
+        callback([ ...changedFilesSet ]);
         changedFilesSet.clear();
     }
 
     /**
-     * Debounce the execution of a function to limit how frequently it runs.
+     * Defers a function until no further calls arrive within the delay.
      *
-     * @param fn - The function to execute after the debounced delay.
-     * @param delay - Optional debounce delay in milliseconds (default is 150 ms).
+     * @param fn - The function to run once the delay elapses.
+     * @param delay - Debounce delay in milliseconds. Defaults to `150`.
      *
      * @remarks
-     * If multiple calls are made within the delay period, only the last one will execute.
-     * This is used in the file watcher to prevent excessive calls to handle file changes
-     * when multiple filesystem events occur in quick succession.
+     * Each call cancels the pending timer and starts a new one, so only the last call in a burst runs.
      *
      * @see debounceTimer
      * @see handleChangedFiles
