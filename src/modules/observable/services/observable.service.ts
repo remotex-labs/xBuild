@@ -1,17 +1,18 @@
 /**
- * Import will remove at compile time
+ * Type-only imports erased during TypeScript compilation.
  */
 
 import type { ObserverInterface, UnsubscribeType } from '@observable/observable.module';
 import type { NextType, ErrorType, CompleteType, OperatorFunctionType } from '@observable/observable.module';
 
 /**
- * Represents a push-based collection of values that can be observed over time
+ * A push-based stream of values that can be observed over time.
  *
- * This is the core type of lightweight observable implementation.
- * It allows subscription, safe error handling and operator chaining via pipe.
+ * @template T - Type of values emitted by this observable.
  *
- * @template T - Type of values emitted by this observable
+ * @remarks
+ * The core of the lightweight observable implementation: it supports subscription, safe error handling, and operator
+ * chaining through {@link pipe}. The subscription handler runs once per {@link subscribe} call.
  *
  * @example
  * ```ts
@@ -29,41 +30,30 @@ import type { NextType, ErrorType, CompleteType, OperatorFunctionType } from '@o
  * sub(); // triggers cleanup
  * ```
  *
- * @see {@link pipe}
- * @see {@link ObserverInterface}
- * @see {@link OperatorFunctionType}
+ * @see pipe
+ * @see ObserverInterface
+ * @see OperatorFunctionType
  *
  * @since 2.0.0
  */
 
 export class ObservableService<T = unknown> {
     /**
-     * Creates a new observable service with a subscription handler.
+     * Creates a new observable from a subscription handler.
      *
-     * @param handler - Function called when someone subscribes.
-     *                  It receives an observer and returns an optional cleanup function.
+     * @param handler - Run on each {@link subscribe} call; receives the observer and may return a cleanup function.
      *
      * @remarks
-     * The handler function is called immediately when {@link subscribe} is invoked.
-     * It receives the observer object and is responsible for:
-     * - Calling `observer.next()` to emit values
-     * - Calling `observer.error()` to emit errors
-     * - Calling `observer.complete()` to signal completion
-     * - Returning an optional cleanup function for resource management
-     *
-     * This design pattern allows for lazy initialization, external event binding and
-     * fine-grained control over subscription lifecycle.
+     * The handler drives the stream by calling `observer.next`, `observer.error`, and `observer.complete`, and may
+     * return a teardown for resource cleanup. Running per subscription enables lazy setup and external event binding.
      *
      * @example
      * ```ts
-     * const timerObservable = new ObservableService<number>((observer) => {
+     * const ticks = new ObservableService<number>((observer) => {
      *   let count = 0;
-     *   const intervalId = setInterval(() => {
-     *     observer.next?.(count++);
-     *   }, 1000);
+     *   const id = setInterval(() => observer.next?.(count++), 1000);
      *
-     *   // Return cleanup function
-     *   return () => clearInterval(intervalId);
+     *   return () => clearInterval(id);
      * });
      * ```
      *
@@ -76,34 +66,23 @@ export class ObservableService<T = unknown> {
     ) {}
 
     /**
-     * Subscribes to this observable and receives values, errors and completion
+     * Subscribes to this observable to receive values, errors, and completion.
      *
-     * @param observerOrNext - Either a full observer object or just the next handler
-     * @param error - Optional error handler
-     * @param complete - Optional completion handler
-     * @returns Unsubscribe function — call it to stop receiving values and clean up
+     * @param observerOrNext - A full observer object, or a `next` callback.
+     * @param error - Error handler, used when the first argument is a `next` callback.
+     * @param complete - Completion handler, used when the first argument is a `next` callback.
+     * @returns Unsubscribe function that stops delivery and runs the handler's cleanup.
      *
      * @remarks
-     * Supports three overload styles:
-     * 1. Single observer object
-     * 2. Separate next/error/complete callbacks
-     * 3. Only the next callback (error and complete are optional)
+     * If the handler throws synchronously, the error is routed to the observer and no-op unsubscribed is returned.
      *
      * @example
      * ```ts
-     * // Object style
-     * subscription = source.subscribe({
-     *   next: v => console.log(v),
-     *   error: e => console.error(e),
-     *   complete: () => console.log('completed')
-     * });
+     * // Observer object
+     * source.subscribe({ next: v => console.log(v), error: e => console.error(e) });
      *
-     * // Callback style
-     * subscription = source.subscribe(
-     *   v => console.log(v),
-     *   e => console.error(e),
-     *   () => console.log('completed')
-     * );
+     * // Positional callbacks
+     * source.subscribe(v => console.log(v), e => console.error(e), () => console.log('done'));
      * ```
      *
      * @since 2.0.0
@@ -135,16 +114,9 @@ export class ObservableService<T = unknown> {
     }
 
     /**
-     * Chains zero or more operators to transform this observable
+     * Returns this observable unchanged.
      *
-     * When called without arguments returns the same observable (identity).
-     * Each operator receives the previous observable and returns a new one.
-     *
-     * @remarks
-     * Type signatures are overloaded up to 5 explicit operators for best type inference.
-     * After that, a rest version is used with weaker type information (the result is `Observable<T>`).
-     *
-     * @returns New observable (or same when no operators given)
+     * @returns This observable.
      *
      * @since 2.0.0
      */
@@ -152,14 +124,8 @@ export class ObservableService<T = unknown> {
     pipe(): this;
 
     /**
-     * Chains one observable operator to transform the observable.
+     * Applies a single operator.
      *
-     * @template A - The output type of the first operator.
-     *
-     * @param op1 - First operator function to apply.
-     * @returns An observable transformed by the operator.
-     *
-     * @see {@link pipe} for implementation details
      * @since 2.0.0
      */
 
@@ -168,16 +134,8 @@ export class ObservableService<T = unknown> {
     ): ObservableService<A>;
 
     /**
-     * Chains two observable operators to transform the observable.
+     * Applies two operators in sequence.
      *
-     * @template A - The output type of the first operator.
-     * @template B - The output type of the second operator.
-     *
-     * @param op1 - First operator function to apply.
-     * @param op2 - Second operator function to apply.
-     * @returns An observable transformed by both operators in sequence.
-     *
-     * @see {@link pipe} for implementation details
      * @since 2.0.0
      */
 
@@ -186,18 +144,8 @@ export class ObservableService<T = unknown> {
     ): ObservableService<B>;
 
     /**
-     * Chains three observable operators to transform the observable.
+     * Applies three operators in sequence.
      *
-     * @template A - The output type of the first operator.
-     * @template B - The output type of the second operator.
-     * @template C - The output type of the third operator.
-     *
-     * @param op1 - First operator function to apply.
-     * @param op2 - Second operator function to apply.
-     * @param op3 - Third operator function to apply.
-     * @returns An observable transformed by all three operators in sequence.
-     *
-     * @see {@link pipe} for implementation details
      * @since 2.0.0
      */
 
@@ -208,20 +156,8 @@ export class ObservableService<T = unknown> {
     ): ObservableService<C>;
 
     /**
-     * Chains four observable operators to transform the observable.
+     * Applies four operators in sequence.
      *
-     * @template A - The output type of the first operator.
-     * @template B - The output type of the second operator.
-     * @template C - The output type of the third operator.
-     * @template D - The output type of the fourth operator.
-     *
-     * @param op1 - First operator function to apply.
-     * @param op2 - Second operator function to apply.
-     * @param op3 - Third operator function to apply.
-     * @param op4 - Fourth operator function to apply.
-     * @returns An observable transformed by all four operators in sequence.
-     *
-     * @see {@link pipe} for implementation details
      * @since 2.0.0
      */
 
@@ -233,22 +169,8 @@ export class ObservableService<T = unknown> {
     ): ObservableService<D>;
 
     /**
-     * Chains five observable operators to transform the observable.
+     * Applies five operators in sequence.
      *
-     * @template A - The output type of the first operator.
-     * @template B - The output type of the second operator.
-     * @template C - The output type of the third operator.
-     * @template D - The output type of the fourth operator.
-     * @template E - The output type of the fifth operator.
-     *
-     * @param op1 - First operator function to apply.
-     * @param op2 - Second operator function to apply.
-     * @param op3 - Third operator function to apply.
-     * @param op4 - Fourth operator function to apply.
-     * @param op5 - Fifth operator function to apply.
-     * @returns An observable transformed by all five operators in sequence.
-     *
-     * @see {@link pipe} for implementation details
      * @since 2.0.0
      */
 
@@ -261,24 +183,8 @@ export class ObservableService<T = unknown> {
     ): ObservableService<E>;
 
     /**
-     * Chains five or more observable operators to transform the observable.
+     * Applies five or more operators in sequence; the result type is inferred from the final operator.
      *
-     * @template A - The output type of the first operator.
-     * @template B - The output type of the second operator.
-     * @template C - The output type of the third operator.
-     * @template D - The output type of the fourth operator.
-     * @template E - The output type of the fifth operator.
-     * @template Ops - Tuple type of additional operator functions beyond the first five.
-     *
-     * @param op1 - First operator function to apply.
-     * @param op2 - Second operator function to apply.
-     * @param op3 - Third operator function to apply.
-     * @param op4 - Fourth operator function to apply.
-     * @param op5 - Fifth operator function to apply.
-     * @param operations - Additional operator functions to apply sequentially.
-     * @returns An observable transformed by all operators in sequence with the output type inferred from the final operator.
-     *
-     * @see {@link pipe} for implementation details
      * @since 2.0.0
      */
 
@@ -294,38 +200,19 @@ export class ObservableService<T = unknown> {
     >;
 
     /**
-     * Internal implementation of the pipe operator chain.
+     * Applies each operator left to right and returns the resulting observable.
      *
-     * @param operators - Array of operator functions to be reduced over the observable.
-     * @returns The final transformed observable, or the original observable if no operators are provided.
+     * @param operators - Operators to compose over this observable.
+     * @returns The transformed observable, or this observable when no operators are given.
      *
      * @remarks
-     * This is the concrete implementation that executes the operator chain using a reducer pattern.
-     * Each operator receives the current observable and returns a transformed observable, which becomes
-     * the input for the next operator. The chain begins with the current observable instance.
-     *
-     * If the operator array is empty, the method returns the current observable unchanged, allowing
-     * for safe calling of `pipe()` without arguments.
-     *
-     * Operators are applied sequentially from left to right, enabling composition of multiple
-     * transformations such as mapping, filtering, debouncing and other value manipulations.
+     * Reduces the operators over the current instance:
+     * each operator receives the previous observable and returns the next.
+     * With no operators, the instance is returned unchanged, so `pipe()` is always safe to call.
      *
      * @example
      * ```ts
-     * const source = new ObservableService<number>((observer) => {
-     *   observer.next?.(10);
-     *   observer.next?.(20);
-     * });
-     *
-     * // With operators
-     * const doubled = source.pipe(
-     *   (obs) => new ObservableService((observer) =>
-     *     obs.subscribe((v) => observer.next?.(v * 2))
-     *   )
-     * );
-     *
-     * // Without operators
-     * const same = source.pipe();
+     * const result = source.pipe(map(v => v * 2), filter(v => v > 10));
      * ```
      *
      * @see OperatorFunctionType
@@ -344,9 +231,15 @@ export class ObservableService<T = unknown> {
     }
 
     /**
-     * Converts subscribe arguments into a consistent ObserverInterface shape
+     * Normalizes subscribe arguments into an {@link ObserverInterface}.
      *
-     * @remarks Internal helper – not meant to be called directly
+     * @param observerOrNext - A full observer object, or a `next` callback.
+     * @param error - Error handler, used when the first argument is a `next` callback.
+     * @param complete - Completion handler, used when the first argument is a `next` callback.
+     * @returns The resolved observer.
+     *
+     * @remarks
+     * Internal helper. Wraps a `next` callback into an observer, or returns the given observer as-is.
      *
      * @since 2.0.0
      */

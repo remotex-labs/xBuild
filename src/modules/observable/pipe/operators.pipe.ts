@@ -5,36 +5,22 @@
 import { Observable } from '@observable/observable.module';
 
 /**
- * Transforms each emitted value using the provided transformation function.
+ * Maps each emitted value through a projection function.
  *
  * @template T - The input value type.
- * @template R - The output value type after transformation.
+ * @template R - The projected value type.
  *
- * @param project - Function that transforms each input value to an output value.
- * @returns An operator function that creates a new observable with transformed values.
+ * @param project - Transforms each source value into an output value.
+ * @returns An operator that emits the projected values.
  *
- * @throws Error - If the project function throws, the error is caught and emitted to the observer.
+ * @throws Error - Errors thrown by `project` are caught and routed to the observer's error handler.
  *
  * @remarks
- * The `map` operator applies a transformation function to every value emitted by the source
- * observable and emits the transformed values. Errors thrown by the project function are
- * automatically caught and passed to the observer's error handler.
- *
- * Common use cases:
- * - Converting data formats (string to number, object property extraction)
- * - Mathematical transformations (doubling, negation)
- * - Type conversions and casting
+ * Applies `project` to every value from the source and emits the result.
  *
  * @example
  * ```ts
- * const numbers = new Observable<number>((observer) => {
- *   observer.next?.(5);
- *   observer.next?.(10);
- * });
- *
- * const doubled = numbers.pipe(map((x) => x * 2));
- *
- * doubled.subscribe((value) => console.log(value)); // Outputs: 10, 20
+ * const doubled = numbers.pipe(map(x => x * 2));
  * ```
  *
  * @see Observable
@@ -63,61 +49,23 @@ export function map<T, R>(project: (value: T) => R) {
 }
 
 /**
- * Emits only values that are different from the previously emitted value.
+ * Emits a value only when it differs from the previously emitted one.
  *
  * @template T - The type of values being compared.
  *
- * @param compareFn - Optional comparison function to determine equality. Defaults to strict equality (`===`).
- * @returns An operator function that creates a new observable with only distinct consecutive values.
+ * @param compareFn - Equality test returning `true` when two values are equal. Defaults to strict equality (`===`).
+ * @returns An operator that suppresses consecutive duplicate values.
+ *
+ * @throws Error - Errors thrown by `compareFn` are caught and routed to the observer's error handler.
  *
  * @remarks
- * The `distinctUntilChanged` operator filters out consecutive duplicate values using the provided
- * comparison function. Only values that differ from the last emitted value are passed through.
- * This is particularly useful for reducing redundant emissions when state changes are minimal.
- *
- * The comparison function receives the previous and current values and should return `true`
- * if they are considered equal (and thus should be filtered), or `false` if they are different
- * (and thus should be emitted).
- *
- * Errors thrown by the comparison function are caught and emitted to the observer's error handler.
- *
- * Common use cases:
- * - Avoiding redundant updates (e.g., state management)
- * - Filtering out echoed or repeated sensor data
- * - Preventing unnecessary re-renders in UI frameworks
+ * The first value always passes through; each later value is emitted only when `compareFn` reports it as different
+ * from the last emitted value.
  *
  * @example
  * ```ts
- * const values = new Observable<number>((observer) => {
- *   observer.next?.(1);
- *   observer.next?.(1);
- *   observer.next?.(2);
- *   observer.next?.(2);
- *   observer.next?.(3);
- * });
- *
- * const distinct = values.pipe(distinctUntilChanged());
- *
- * distinct.subscribe((value) => console.log(value)); // Outputs: 1, 2, 3
- * ```
- *
- * @example
- * ```ts
- * // Custom comparison for objects
- * interface User { id: number; name: string; }
- *
- * const users = new Observable<User>((observer) => {
- *   observer.next?.({ id: 1, name: 'Alice' });
- *   observer.next?.({ id: 1, name: 'Alice' });
- *   observer.next?.({ id: 2, name: 'Bob' });
- * });
- *
- * const distinctUsers = users.pipe(
- *   distinctUntilChanged((prev, curr) => prev.id === curr.id)
- * );
- *
- * distinctUsers.subscribe((user) => console.log(user.name));
- * // Outputs: "Alice", "Bob"
+ * // Compare by identity field
+ * users.pipe(distinctUntilChanged((prev, curr) => prev.id === curr.id));
  * ```
  *
  * @see Observable
@@ -161,38 +109,21 @@ export function distinctUntilChanged<T>(
 }
 
 /**
- * Filters emitted values based on a predicate function.
+ * Emits only the values that satisfy a predicate.
  *
  * @template T - The type of values being filtered.
  *
- * @param predicate - Function that returns `true` if the value should pass through, `false` otherwise.
- * @returns An operator function that creates a new observable with only filtered values.
+ * @param predicate - Returns `true` to emit the value, `false` to drop it.
+ * @returns An operator that forwards only matching values.
+ *
+ * @throws Error - Errors thrown by `predicate` are caught and routed to the observer's error handler.
  *
  * @remarks
- * The `filter` operator only emits values that satisfy the predicate condition. Values that
- * do not match the condition are silently skipped. All other events (error, complete) are
- * passed through unchanged.
- *
- * Errors thrown by the predicate function are caught and passed to the observer's error handler.
- *
- * Common use cases:
- * - Filtering by value range (e.g., only positive numbers)
- * - Filtering by type or property (e.g., only objects with specific properties)
- * - Conditional emission based on complex logic
+ * Non-matching values are skipped; error and completion notifications pass through unchanged.
  *
  * @example
  * ```ts
- * const numbers = new Observable<number>((observer) => {
- *   observer.next?.(1);
- *   observer.next?.(2);
- *   observer.next?.(3);
- *   observer.next?.(4);
- *   observer.next?.(5);
- * });
- *
- * const evens = numbers.pipe(filter((x) => x % 2 === 0));
- *
- * evens.subscribe((value) => console.log(value)); // Outputs: 2, 4
+ * const evens = numbers.pipe(filter(x => x % 2 === 0));
  * ```
  *
  * @see Observable
@@ -222,44 +153,21 @@ export function filter<T>(predicate: (value: T) => boolean) {
 }
 
 /**
- * Performs a side effect for each emitted value without modifying the value.
+ * Runs a side effect for each value and forwards the value unchanged.
  *
- * @template T - The type of values being processed.
+ * @template T - The type of values passing through.
  *
- * @param sideEffect - Function to execute for each emitted value. The return value is ignored.
- * @returns An operator function that creates a new observable with the side effect applied.
+ * @param sideEffect - Invoked for each emitted value; its return value is ignored.
+ * @returns An operator that passes values through after running the side effect.
+ *
+ * @throws Error - Errors thrown by `sideEffect` are caught and routed to the observer's error handler.
  *
  * @remarks
- * The `tap` operator is used for debugging, logging, or triggering side effects without
- * altering the data flow. The provided function is called for each emitted value, and the
- * original value is passed through unchanged to the resulting observable.
- *
- * Errors thrown by the side effect function are caught and passed to the observer's error handler.
- * The original value is NOT emitted if the side effect throws an error.
- *
- * Common use cases:
- * - Logging values for debugging
- * - Triggering analytics or tracking events
- * - Updating external state or UI without changing the stream
- * - Performance monitoring
+ * Intended for logging, tracking, or other side effects. If `sideEffect` throws, the value is not emitted.
  *
  * @example
  * ```ts
- * const numbers = new Observable<number>((observer) => {
- *   observer.next?.(5);
- *   observer.next?.(10);
- * });
- *
- * const logged = numbers.pipe(
- *   tap((x) => console.log(`Processing: ${x}`))
- * );
- *
- * logged.subscribe((value) => console.log(`Received: ${value}`));
- * // Outputs:
- * // Processing: 5
- * // Received: 5
- * // Processing: 10
- * // Received: 10
+ * const logged = numbers.pipe(tap(x => console.log('value', x)));
  * ```
  *
  * @see Observable

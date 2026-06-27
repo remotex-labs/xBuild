@@ -1,5 +1,5 @@
 /**
- * Import will remove at compile time
+ * Type-only imports erased during TypeScript compilation.
  */
 
 import type { ObserverInterface } from '@observable/observable.module';
@@ -11,37 +11,21 @@ import type { ObserverInterface } from '@observable/observable.module';
 import { ObservableService } from '@observable/services/observable.service';
 
 /**
- * A subject that acts as both an observable and an observer.
+ * A multicast stream that is both an observable and an observer.
  *
  * @template T - The type of values emitted by the subject.
  *
  * @remarks
- * The `SubjectService` extends {@link Observable} to provide a multicast observable
- * that maintains a collection of active observers. Unlike a regular observable that executes
- * its handler once per subscription, a subject allows multiple subscribers to share the same
- * emission sequence and receive values emitted directly via {@link next}, {@link error},
- * and {@link complete} methods.
- *
- * This is particularly useful for:
- * - Event buses where multiple listeners need the same events
- * - Sharing a single data source across multiple subscribers
- * - Implementing pub-sub patterns
- *
- * When a subscriber unsubscribes, they are automatically removed from the observer's collection.
+ * Unlike {@link ObservableService}, which runs its handler once per subscriber, a subject shares a single emission
+ * sequence across all current observers. Values are pushed directly through {@link next}, {@link error}, and
+ * {@link complete}. Unsubscribing removes the observer from the active set.
  *
  * @example
  * ```ts
  * const subject = new SubjectService<number>();
- *
- * // Multiple subscribers
- * subject.subscribe((value) => console.log('Observer 1:', value));
- * subject.subscribe((value) => console.log('Observer 2:', value));
- *
- * // Emit values to all subscribers
- * subject.next(42); // Both observers receive 42
- * subject.next(100); // Both observers receive 100
- *
- * // Complete the subject
+ * subject.subscribe(v => console.log('A', v));
+ * subject.subscribe(v => console.log('B', v));
+ * subject.next(42); // both observers receive 42
  * subject.complete();
  * ```
  *
@@ -53,11 +37,10 @@ import { ObservableService } from '@observable/services/observable.service';
 
 export class SubjectService<T> extends ObservableService<T> {
     /**
-     * Tracks whether the subject has completed.
+     * Whether the subject has completed.
      *
      * @remarks
-     * Once the subject is completed, no further values or errors can be emitted,
-     * and new subscribers will immediately receive the complete notification.
+     * Once completed, emissions are ignored and new subscribers receive completion immediately.
      *
      * @since 2.0.0
      */
@@ -65,11 +48,7 @@ export class SubjectService<T> extends ObservableService<T> {
     protected isCompleted = false;
 
     /**
-     * Collection of all active observers subscribed to this subject.
-     *
-     * @remarks
-     * This set maintains references to all current observers. When {@link next}, {@link error},
-     * or {@link complete} is called, all observers in this collection are notified.
+     * The set of currently subscribed observers notified on each emission.
      *
      * @see ObserverInterface
      * @since 2.0.0
@@ -78,22 +57,11 @@ export class SubjectService<T> extends ObservableService<T> {
     private observers = new Set<ObserverInterface<T>>();
 
     /**
-     * Creates a new subject service with a shared observer management handler.
-     *
-     * @template T - The type of values emitted by the subject.
+     * Creates a subject that registers each subscriber in its observer set.
      *
      * @remarks
-     * The subject initializes with a handler function that manages the observer's collection.
-     * When a new subscriber is added via {@link subscribe}, the observer is added to the
-     * collection and a cleanup function is returned that removes the observer when unsubscribed.
-     *
-     * @example
-     * ```ts
-     * const subject = new SubjectService<string>();
-     * const unsub = subject.subscribe((value) => console.log(value));
-     * subject.next('hello'); // Observer receives 'hello'
-     * unsub(); // Remove observer from a subject
-     * ```
+     * The subscription handler adds the observer to the set and returns a teardown that removes it. Subscribing after
+     * completion delivers completion immediately and registers nothing.
      *
      * @since 2.0.0
      */
@@ -113,42 +81,15 @@ export class SubjectService<T> extends ObservableService<T> {
     }
 
     /**
-     * Emits a new value to all active observers.
+     * Emits a value to all current observers.
      *
-     * @template T - The type of values emitted by the subject.
+     * @param value - The value to emit.
      *
-     * @param value - The value to emit to all observers.
-     * @returns void
-     *
-     * @throws AggregateError - If one or more observer's `next` handler throws an error.
+     * @throws AggregateError - When one or more observer `next` handlers throw.
      *
      * @remarks
-     * This method calls the `next` handler on all current observers with the provided value.
-     * If an observer's next handler throws an error, it is caught and passed to that observer's
-     * error handler (if provided). All errors from handlers are collected and thrown together
-     * as an {@link AggregateError} after all observers have been notified.
-     *
-     * The observers are iterated over a snapshot of the collection to allow observers to
-     * unsubscribe during emission without affecting iteration.
-     *
-     * @example
-     * ```ts
-     * const subject = new SubjectService<number>();
-     *
-     * subject.subscribe((value) => console.log('A:', value));
-     * subject.subscribe((value) => {
-     *   if (value === 0) throw new Error('Zero not allowed');
-     *   console.log('B:', value);
-     * });
-     *
-     * try {
-     *   subject.next(0); // Observer B throws, wrapped in AggregateError
-     * } catch (err) {
-     *   if (err instanceof AggregateError) {
-     *     console.log(`${err.errors.length} observer(s) failed`);
-     *   }
-     * }
-     * ```
+     * No-op once completed. A throwing `next` handler is forwarded to that observer's `error` handler, and all
+     * failures are rethrown together as an {@link AggregateError}.
      *
      * @see AggregateError
      * @since 2.0.0
@@ -156,65 +97,30 @@ export class SubjectService<T> extends ObservableService<T> {
 
     next(value: T): void {
         if (this.isCompleted) return;
-        const errors: Array<unknown> = [];
 
-        for (const o of [ ...this.observers ]) {
+        this.broadcast('next', (observer) => {
             try {
-                o.next?.(value);
+                observer.next?.(value);
             } catch (err) {
-                errors.push(err);
                 try {
-                    o.error?.(err);
-                } catch {}
-            }
-        }
+                    observer.error?.(err);
+                } catch { /* ignore a secondary failure from the error handler */ }
 
-        if (errors.length > 0) {
-            throw new AggregateError(errors, `${ errors.length } observer(s) failed in next()`);
-        }
+                throw err;
+            }
+        });
     }
 
     /**
-     * Emits an error to all active observers.
+     * Emits an error to all current observers.
      *
-     * @param err - The error to emit to all observers.
-     * @returns void
+     * @param err - The error to emit.
      *
-     * @throws AggregateError - If one or more observer's `error` handler throws an error.
+     * @throws AggregateError - When one or more observer `error` handlers throw.
      *
      * @remarks
-     * This method calls the `error` handler on all current observers with the provided error.
-     * If an observer's error handler throws an error, it is caught and collected. All errors
-     * from handlers are thrown together as an {@link AggregateError} after all observers
-     * have been notified.
-     *
-     * If an observer does not provide an error handler, it is skipped without any effect.
-     *
-     * The observers are iterated over a snapshot of the collection to allow observers to
-     * unsubscribe during emission without affecting iteration.
-     *
-     * After an error is emitted, the subject behaves as completed (no further emissions allowed).
-     *
-     * @example
-     * ```ts
-     * const subject = new SubjectService<number>();
-     *
-     * subject.subscribe({
-     *   error: (err) => console.log('Observer A error:', err)
-     * });
-     *
-     * subject.subscribe({
-     *   error: () => { throw new Error('Handler failed'); }
-     * });
-     *
-     * try {
-     *   subject.error(new Error('Something went wrong'));
-     * } catch (err) {
-     *   if (err instanceof AggregateError) {
-     *     console.log(`${err.errors.length} observer(s) failed`);
-     *   }
-     * }
-     * ```
+     * No-op once completed. Observers without an `error` handler are skipped; handler failures are rethrown together
+     * as an {@link AggregateError}.
      *
      * @see AggregateError
      * @since 2.0.0
@@ -222,60 +128,19 @@ export class SubjectService<T> extends ObservableService<T> {
 
     error(err: unknown): void {
         if (this.isCompleted) return;
-        const errors: Array<unknown> = [];
 
-        for (const o of [ ...this.observers ]) {
-            try {
-                o.error?.(err);
-            } catch (e) {
-                errors.push(e);
-            }
-        }
-
-        if (errors.length > 0) {
-            throw new AggregateError(errors, `${ errors.length } observer(s) failed in error()`);
-        }
+        this.broadcast('error', (observer) => observer.error?.(err));
     }
 
     /**
-     * Signals completion to all observers and clears all subscriptions.
+     * Completes the subject, notifying observers and clearing all subscriptions.
      *
-     * @returns void
-     *
-     * @throws AggregateError - If one or more observer's `complete` handler throws an error.
+     * @throws AggregateError - When one or more observer `complete` handlers throw.
      *
      * @remarks
-     * This method calls the `complete` handler on all current observers, then clears the
-     * observers collection to prevent further emissions. If an observer's complete handler
-     * throws an error, it is caught and collected. All errors from handlers are thrown
-     * together as an {@link AggregateError} after all observers have been notified.
-     *
-     * If an observer does not provide a complete handler, it is skipped without any effect.
-     *
-     * The observers are iterated over a snapshot of the collection to allow safe completion.
-     * After completion, the subject will accept no further emissions and new subscribers
-     * will immediately receive the complete notification.
-     *
-     * @example
-     * ```ts
-     * const subject = new SubjectService<number>();
-     *
-     * subject.subscribe({
-     *   complete: () => console.log('Observer A completed')
-     * });
-     *
-     * subject.subscribe({
-     *   complete: () => { throw new Error('Handler failed'); }
-     * });
-     *
-     * try {
-     *   subject.complete();
-     * } catch (err) {
-     *   if (err instanceof AggregateError) {
-     *     console.log(`${err.errors.length} observer(s) failed`);
-     *   }
-     * }
-     * ```
+     * No-op if already completed. Observers are notified, the set is cleared, and the subject is marked completed even
+     * when a handler throws; failures are rethrown together as an {@link AggregateError}. Subsequent subscribers
+     * receive completion immediately.
      *
      * @see AggregateError
      * @since 2.0.0
@@ -283,21 +148,44 @@ export class SubjectService<T> extends ObservableService<T> {
 
     complete(): void {
         if (this.isCompleted) return;
+
+        try {
+            this.broadcast('complete', (observer) => observer.complete?.());
+        } finally {
+            this.observers.clear();
+            this.isCompleted = true;
+        }
+    }
+
+    /**
+     * Notifies every current observer, collecting any handler failures.
+     *
+     * @param method - Name of the emission, used in the thrown error message.
+     * @param notify - Applied to each observer in the snapshot.
+     *
+     * @throws AggregateError - When one or more observer handlers throw.
+     *
+     * @remarks
+     * Iterates a snapshot of the observer set so handlers may subscribe or unsubscribe during emission without
+     * disturbing iteration. Failures are gathered and rethrown together once every observer has been notified.
+     *
+     * @see AggregateError
+     * @since 2.6.0
+     */
+
+    private broadcast(method: string, notify: (observer: ObserverInterface<T>) => void): void {
         const errors: Array<unknown> = [];
 
-
-        for (const o of [ ...this.observers ]) {
+        for (const observer of [ ...this.observers ]) {
             try {
-                o.complete?.();
+                notify(observer);
             } catch (err) {
                 errors.push(err);
             }
         }
 
-        this.observers.clear();
-        this.isCompleted = true;
         if (errors.length > 0) {
-            throw new AggregateError(errors, `${ errors.length } observer(s) failed in complete()`);
+            throw new AggregateError(errors, `${ errors.length } observer(s) failed in ${ method }()`);
         }
     }
 }
