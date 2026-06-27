@@ -1,5 +1,5 @@
 /**
- * Import will remove at compile time
+ * Type-only imports erased during TypeScript compilation.
  */
 
 import type { PositionInterface, FormatStackFrameInterface } from '@remotex-labs/xmap';
@@ -9,23 +9,27 @@ import type { PositionInterface, FormatStackFrameInterface } from '@remotex-labs
  */
 
 import { readFileSync } from 'fs';
-import { SourceService } from '@remotex-labs/xmap';
-import { resolve, toPosix } from '@remotex-labs/xmap';
-import { Injectable } from '@symlinks/symlinks.module';
+import { Injectable } from '@services/symlinks.service';
+import { SourceService, resolve, toPosix } from '@remotex-labs/xmap';
 
 /**
- * Provides access to the framework's file paths and associated source maps.
+ * Provides the framework's well-known directories and its source-map registry.
  *
  * @remarks
- * This service manages the framework's source map files, including the main framework
- * file and any additional source files. It caches initialized {@link SourceService}
- * instances for performance.
+ * Exposes the three locations xBuild reasons about:
+ * - {@link rootPath} — the project root.
+ * - {@link distPath} — the build-output (dist) folder.
+ * - {@link sourcePath} — the source-code root (for example, `src`), which falls back to {@link rootPath}
+ *   when it has not been set.
+ *
+ * It also caches {@link SourceService} instances per file for source-map lookups and detects whether
+ * a stack position originates from the framework itself.
  *
  * @example
  * ```ts
- * const frameworkService = new FrameworkService();
- * console.log(frameworkService.rootPath);
- * const sourceMap = frameworkService.sourceMap(frameworkService.filePath);
+ * const framework = inject(FrameworkService);
+ * framework.sourcePath = 'src';                       // optional; defaults to rootPath
+ * const map = framework.getSourceMap(framework.filePath);
  * ```
  *
  * @since 2.0.0
@@ -36,7 +40,7 @@ import { Injectable } from '@symlinks/symlinks.module';
 })
 export class FrameworkService {
     /**
-     * Absolute path to the current file.
+     * Absolute path to this framework file.
      *
      * @readonly
      * @since 2.0.0
@@ -45,7 +49,7 @@ export class FrameworkService {
     readonly filePath: string;
 
     /**
-     * Absolute path to the distribution directory.
+     * Absolute path to the build-output (dist) directory.
      *
      * @readonly
      * @since 2.0.0
@@ -63,7 +67,18 @@ export class FrameworkService {
     readonly rootPath: string;
 
     /**
-     * Cached {@link SourceService} instances for additional source files.
+     * Configured source-code root, or `undefined` to fall back to {@link rootPath}.
+     *
+     * @remarks
+     * Backing field for {@link sourcePath}; always stored as an absolute, POSIX-style path.
+     *
+     * @since 2.6.0
+     */
+
+    private sourceDir?: string;
+
+    /**
+     * Cached {@link SourceService} instances, keyed by resolved file path.
      * @since 2.0.0
      */
 
@@ -73,24 +88,59 @@ export class FrameworkService {
      * Initializes a new {@link FrameworkService} instance.
      *
      * @remarks
-     * Sets up the main framework source map, as well as root and distribution paths.
+     * Resolves the root and dist directories and loads the framework file's own source map.
      *
      * @since 2.0.0
      */
 
     constructor() {
         this.filePath = import.meta.filename;
+        this.rootPath = toPosix(process.cwd());
+        this.distPath = toPosix(import.meta.dirname);
         this.setSourceFile(this.filePath);
-
-        this.rootPath = this.getRootDir();
-        this.distPath = this.getDistDir();
     }
 
     /**
-     * Determines whether a given {@link PositionInterface} refers to a framework file.
+     * Absolute path to the source-code root directory.
+     *
+     * @returns The configured source root, or {@link rootPath} when none has been set.
+     *
+     * @remarks
+     * Point this at the directory holding the source tree (for example, `src`); a value is resolved
+     * against {@link rootPath}. Leave it unset to treat the project root as the source root.
+     *
+     * @example
+     * ```ts
+     * framework.sourcePath = 'src';        // -> <rootPath>/src
+     * framework.sourcePath = undefined;    // -> rootPath
+     * ```
+     *
+     * @since 2.6.0
+     */
+
+    get sourcePath(): string {
+        return this.sourceDir ?? this.rootPath;
+    }
+
+    /**
+     * Sets the source-code root directory.
+     *
+     * @param dir - Source root, absolute or relative to {@link rootPath}; `undefined` resets it
+     *              so {@link sourcePath} falls back to {@link rootPath}.
+     *
+     * @since 2.6.0
+     */
+
+    set sourcePath(dir: string | undefined) {
+        this.sourceDir = dir ? resolve(this.rootPath, dir) : undefined;
+    }
+
+    /**
+     * Determines whether a stack position originates from a framework (xBuild) file.
      *
      * @param position - The position information to check
-     * @returns `true` if the position is from the framework (contains "xJet"), otherwise `false`
+     * @returns `true` when the position's source or source root belongs to xBuild,
+     *          excluding the user's `xbuild.config` file
      *
      * @see PositionInterface
      * @see FormatStackFrameInterface
@@ -100,10 +150,10 @@ export class FrameworkService {
 
     isFrameworkFile(position: PositionInterface | FormatStackFrameInterface): boolean {
         const { source, sourceRoot } = position;
-        const lowerCaseSource = source?.toLowerCase();
+        const normalizedSource = source?.toLowerCase();
 
         return Boolean(
-            (source && lowerCaseSource.includes('xbuild') && !lowerCaseSource.includes('xbuild.config')) ||
+            (normalizedSource && normalizedSource.includes('xbuild') && !normalizedSource.includes('xbuild.config')) ||
             (sourceRoot && sourceRoot.includes('xBuild'))
         );
     }
@@ -111,36 +161,30 @@ export class FrameworkService {
     /**
      * Retrieves a cached {@link SourceService} for a given file path.
      *
-     * @param path - Absolute path to the file
-     * @returns A {@link SourceService} instance if found, otherwise `undefined`
+     * @param path - File path (normalized before lookup)
+     * @returns The cached {@link SourceService}, or `undefined` when none is registered
      *
      * @remarks
-     * Paths are normalized before lookup. Only previously initialized source maps
-     * (via {@link setSource} or {@link setSourceFile}) are available in the cache.
+     * Only source maps registered via {@link setSource} or {@link setSourceFile} are available.
      *
      * @see SourceService
      * @since 2.0.0
      */
 
     getSourceMap(path: string): SourceService | undefined {
-        path = resolve(path);
-        if (this.sourceMaps.has(path))
-            return this.sourceMaps.get(path)!;
-
-        return undefined;
+        return this.sourceMaps.get(resolve(path));
     }
 
     /**
-     * Registers and initializes a new {@link SourceService} for a provided source map string.
+     * Registers a {@link SourceService} from a raw source-map string.
      *
-     * @param source - The raw source map content
-     * @param path - Absolute file path associated with the source map
-     * @returns A new or cached {@link SourceService} instance
+     * @param source - The raw source-map content
+     * @param path - File path associated with the source map (used as the cache key)
      *
-     * @throws Error if initialization fails
+     * @throws Error - When the source map cannot be parsed
      *
      * @remarks
-     * If a source map for the given path is already cached, the cached instance is returned.
+     * A source map with empty `mappings` is ignored. The path is normalized before caching.
      *
      * @see SourceService
      * @since 2.0.0
@@ -150,92 +194,72 @@ export class FrameworkService {
         const key = resolve(path);
 
         try {
-            return this.initializeSourceMap(source, key);
+            this.initializeSourceMap(source, key);
         } catch (error) {
-            throw new Error(
-                `Failed to initialize SourceService: ${ key }\n${ error instanceof Error ? error.message : String(error) }`
-            );
+            throw this.initializeError(key, error);
         }
     }
 
     /**
-     * Loads and initializes a {@link SourceService} for a file and its `.map` companion.
+     * Registers a {@link SourceService} from a file's adjacent `.map` companion.
      *
-     * @param path - Absolute path to the file
-     * @returns A new or cached {@link SourceService} instance
+     * @param path - File path whose `<path>.map` source map is loaded
      *
-     * @throws Error if the `.map` file cannot be read or parsed
+     * @throws Error - When the `.map` file cannot be read or parsed
      *
      * @remarks
-     * This method attempts to read the `.map` file located next to the provided file.
-     * If already cached, returns the existing {@link SourceService}.
+     * No-op for a falsy path or when the file is already cached. The path is normalized before caching.
      *
      * @see SourceService
      * @since 2.0.0
      */
 
     setSourceFile(path: string): void {
-        if(!path) return;
+        if (!path) return;
 
         const key = resolve(path);
-        const map = `${ path }.map`;
-
-        if (this.sourceMaps.has(key))
-            return;
+        if (this.sourceMaps.has(key)) return;
 
         try {
-            const sourceMapData = readFileSync(map, 'utf-8');
-
-            return this.initializeSourceMap(sourceMapData, key);
+            this.initializeSourceMap(readFileSync(`${ path }.map`, 'utf-8'), key);
         } catch (error) {
-            throw new Error(
-                `Failed to initialize SourceService: ${ key }\n${ error instanceof Error ? error.message : String(error) }`
-            );
+            throw this.initializeError(key, error);
         }
     }
 
     /**
-     * Retrieves the project root directory.
-     * @returns Absolute path to the project root
+     * Builds the error thrown when a {@link SourceService} fails to initialize.
      *
-     * @since 2.0.0
+     * @param key - Normalized file path being initialized
+     * @param error - The underlying failure
+     * @returns An {@link Error} describing the failed initialization
+     *
+     * @since 2.6.0
      */
 
-    private getRootDir(): string {
-        return toPosix(process.cwd());
+    private initializeError(key: string, error: unknown): Error {
+        return new Error(
+            `Failed to initialize SourceService: ${ key }\n${ error instanceof Error ? error.message : String(error) }`
+        );
     }
 
     /**
-     * Retrieves the distribution directory.
-     * @returns Absolute path to the distribution folder
+     * Creates and caches a {@link SourceService} for a source map.
      *
-     * @since 2.0.0
-     */
-
-    private getDistDir(): string {
-        return toPosix(import.meta.dirname);
-    }
-
-    /**
-     * Creates and caches a new {@link SourceService} instance for a given source map.
-     *
-     * @param source - Raw source map content
+     * @param source - Raw source-map content
      * @param path - Normalized file path used as the cache key
-     * @returns The newly created {@link SourceService} instance
      *
      * @remarks
-     * This method is only used internally by {@link setSource} and {@link setSourceFile}.
-     * The instance is cached in {@link sourceMaps} for reuse.
+     * Internal helper for {@link setSource} and {@link setSourceFile}. Source maps with empty
+     * `mappings` are skipped rather than cached.
      *
      * @see SourceService
      * @since 2.0.0
      */
 
     private initializeSourceMap(source: string, path: string): void {
-        if(source?.includes('"mappings": ""'))
-            return;
+        if (source?.includes('"mappings": ""')) return;
 
-        const sourceMap = new SourceService(source, path);
-        this.sourceMaps.set(path, sourceMap);
+        this.sourceMaps.set(path, new SourceService(source, path));
     }
 }

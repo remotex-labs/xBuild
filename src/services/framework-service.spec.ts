@@ -1,5 +1,5 @@
 /**
- * Import will remove at compile time
+ * Type-only imports erased during TypeScript compilation.
  */
 
 import type { MockState } from '@remotex-labs/xjet';
@@ -9,6 +9,7 @@ import type { MockState } from '@remotex-labs/xjet';
  */
 
 import { readFileSync } from 'fs';
+import { toPosix } from '@remotex-labs/xmap';
 import { FrameworkService } from '@services/framework.service';
 
 /**
@@ -18,11 +19,12 @@ import { FrameworkService } from '@services/framework.service';
 describe('FrameworkService', () => {
     let framework: FrameworkService;
     let readFileSyncMock: MockState;
+
     const fakeFilePath = '/project/root/src/framework.ts';
     const fakeMapPath = '/project/root/src/framework.ts.map';
     const fakeDistPath = '/project/root/dist';
 
-    // Dummy valid source map (minimal to pass parsing)
+    // Minimal valid source map (enough to pass parsing).
     const dummySourceMap = JSON.stringify({
         version: 3,
         sources: [ 'framework.ts' ],
@@ -31,7 +33,6 @@ describe('FrameworkService', () => {
     });
 
     beforeAll(() => {
-        // Mock import.meta
         xJet.spyOn(import.meta, 'filename').mockReturnValue(fakeFilePath);
         xJet.spyOn(import.meta, 'dirname').mockReturnValue(fakeDistPath);
         readFileSyncMock = xJet.mock(readFileSync).mockImplementation(((path: string): string => {
@@ -50,21 +51,39 @@ describe('FrameworkService', () => {
     });
 
     describe('constructor & paths', () => {
-        test('sets filePath, rootPath and distPath correctly', () => {
+        test('exposes filePath, distPath and rootPath', () => {
             expect(framework.filePath).toBe(fakeFilePath);
             expect(framework.distPath).toBe(fakeDistPath);
+            expect(framework.rootPath).toBe(toPosix(process.cwd()));
         });
 
-        test('initializes main source map for own file', () => {
-            const map = framework.getSourceMap(fakeFilePath);
-
-            expect(map).toBeDefined();
+        test('loads the source map for its own file', () => {
+            expect(framework.getSourceMap(fakeFilePath)).toBeDefined();
             expect(readFileSync).toHaveBeenCalledWith(fakeMapPath, 'utf-8');
         });
     });
 
+    describe('sourcePath', () => {
+        test('falls back to rootPath when unset', () => {
+            expect(framework.sourcePath).toBe(framework.rootPath);
+        });
+
+        test('resolves a relative directory against rootPath', () => {
+            framework.sourcePath = 'src';
+
+            expect(framework.sourcePath).toBe(`${ framework.rootPath }/src`);
+        });
+
+        test('resets to rootPath when set to undefined', () => {
+            framework.sourcePath = 'src';
+            framework.sourcePath = undefined;
+
+            expect(framework.sourcePath).toBe(framework.rootPath);
+        });
+    });
+
     describe('isFrameworkFile', () => {
-        test('returns true for positions from xJet framework files', () => {
+        test('returns true for a source inside xBuild', () => {
             expect(framework.isFrameworkFile(<any> {
                 source: '/project/root/node_modules/xbuild/index.ts',
                 sourceRoot: undefined
@@ -85,7 +104,7 @@ describe('FrameworkService', () => {
             })).toBe(false);
         });
 
-        test('returns false for xbuild.config files', () => {
+        test('returns false for the user xbuild.config file', () => {
             expect(framework.isFrameworkFile(<any> {
                 source: '/project/root/xbuild.config.ts',
                 sourceRoot: undefined
@@ -94,11 +113,11 @@ describe('FrameworkService', () => {
     });
 
     describe('getSourceMap', () => {
-        test('returns undefined for unregistered path', () => {
+        test('returns undefined for an unregistered path', () => {
             expect(framework.getSourceMap('/unregistered/file.ts')).toBeUndefined();
         });
 
-        test('returns cached SourceService for known path', () => {
+        test('returns the same cached instance for a known path', () => {
             const first = framework.getSourceMap(fakeFilePath);
             const second = framework.getSourceMap(fakeFilePath);
 
@@ -107,67 +126,52 @@ describe('FrameworkService', () => {
     });
 
     describe('setSource', () => {
-        test('initializes SourceService from raw source map string', () => {
-            const raw = JSON.stringify({
-                version: 3,
-                sources: [ 'custom.ts' ],
-                mappings: 'AAAA',
-                names: []
-            });
-
-            framework.setSource(raw, '/project/root/custom.ts');
+        test('registers a SourceService from a raw source-map string', () => {
+            framework.setSource(dummySourceMap, '/project/root/custom.ts');
 
             expect(framework.getSourceMap('/project/root/custom.ts')).toBeDefined();
         });
 
-        test('skips empty mappings', () => {
+        test('ignores a source map with empty mappings', () => {
             framework.setSource('{"mappings": ""}', '/project/root/empty.ts');
 
             expect(framework.getSourceMap('/project/root/empty.ts')).toBeUndefined();
         });
 
-        test('throws on invalid source map', () => {
+        test('throws on an invalid source map', () => {
             expect(() => framework.setSource('invalid', '/bad.ts'))
                 .toThrow(/Failed to initialize SourceService:.+?\/bad\.ts.*/);
         });
     });
 
     describe('setSourceFile', () => {
-        test('loads and initializes .map companion file', () => {
-            const fakeMap = JSON.stringify({
-                version: 3,
-                sources: [ 'index.ts' ],
-                mappings: 'AAAA',
-                names: []
-            });
+        test('loads and registers the adjacent .map companion', () => {
+            readFileSyncMock.mockReturnValueOnce(dummySourceMap);
+            framework.setSourceFile('/project/root/src/other.ts');
 
-            readFileSyncMock.mockReturnValueOnce(fakeMap);
-            framework.setSourceFile(fakeFilePath);
-
-            expect(readFileSyncMock).toHaveBeenCalledWith(fakeMapPath, 'utf-8');
-            expect(framework.getSourceMap(fakeFilePath)).toBeDefined();
+            expect(readFileSyncMock).toHaveBeenCalledWith('/project/root/src/other.ts.map', 'utf-8');
+            expect(framework.getSourceMap('/project/root/src/other.ts')).toBeDefined();
         });
 
-        test('throws when .map file missing', () => {
-            expect(() => framework.setSourceFile('fakeFilePath'))
-                .toThrow(/Failed to initialize SourceService: .+fakeFilePath.*/);
+        test('throws when the .map file is missing', () => {
+            expect(() => framework.setSourceFile('/missing/file.ts'))
+                .toThrow(/Failed to initialize SourceService: .+\/missing\/file\.ts.*/);
         });
 
-        test('does nothing if path is falsy', () => {
-            readFileSyncMock.mockReset();
+        test('does nothing for a falsy path', () => {
+            readFileSyncMock.mockClear();
             framework.setSourceFile('');
 
             expect(readFileSync).not.toHaveBeenCalled();
         });
 
-        test('reuses existing cached map', () => {
-            framework.setSourceFile(fakeFilePath); // first
+        test('reuses an already-cached map without re-reading', () => {
+            framework.setSourceFile(fakeFilePath);
+            readFileSyncMock.mockClear();
 
-            const readSpy = xJet.mock(readFileSync).mockClear();
+            framework.setSourceFile(fakeFilePath);
 
-            framework.setSourceFile(fakeFilePath); // second
-
-            expect(readSpy).not.toHaveBeenCalled();
+            expect(readFileSyncMock).not.toHaveBeenCalled();
         });
     });
 });
