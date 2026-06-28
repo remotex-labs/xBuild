@@ -1,80 +1,34 @@
 /**
- * Import will remove at compile time
+ * Type-only imports erased during TypeScript compilation.
  */
 
 import type { Options } from 'yargs';
 import type { Platform } from 'esbuild';
 
 /**
- * User-defined command-line options that extend the base xBuild CLI.
+ * User-defined CLI options that extend xBuild's built-in options.
  *
  * @remarks
- * This interface allows build configurations to define custom CLI arguments beyond
- * xBuild's built-in options. Each key represents an option name, and each value
- * is a yargs `Options` object defining the argument's type, description, aliases,
- * and validation rules.
- *
- * User extensions enable:
- * - Project-specific build flags (e.g., `--env`, `--feature`)
- * - Custom output configurations
- * - Integration with external tools
- * - Conditional build behavior based on CLI arguments
- *
- * These options are merged with xBuild's default options and appear in the help
- * output under a separate "User Options" section for clarity.
- *
- * The parsed values are accessible in lifecycle hooks and configuration functions,
- * allowing dynamic build behavior based on command-line input.
+ * Declared by a build configuration to add project-specific flags. Each key is an option name and each value a yargs
+ * {@link Options} definition. {@link ArgvModule.enhancedParse} merges them with the defaults and lists them under a
+ * separate "User Options" group in help. Parsed values are available to lifecycle hooks and configuration functions.
  *
  * @example
  * ```ts
  * const userExtensions: UserExtensionInterface = {
- *   env: {
- *     describe: 'Build environment',
- *     type: 'string',
- *     choices: ['dev', 'staging', 'prod'],
- *     default: 'dev'
- *   },
- *   feature: {
- *     describe: 'Enable experimental features',
- *     type: 'boolean',
- *     alias: 'f'
- *   }
+ *   env: { describe: 'Build environment', type: 'string', choices: ['dev', 'staging', 'prod'] }
  * };
  * ```
  *
- * @example
- * ```ts
- * // In build configuration
- * export default {
- *   userArgv: {
- *     deploy: {
- *       describe: 'Deploy after build',
- *       type: 'boolean'
- *     },
- *     target: {
- *       describe: 'Deployment target',
- *       type: 'string',
- *       choices: ['staging', 'production']
- *     }
- *   },
- *   variants: { ... }
- * };
- * ```
- *
- * @see {@link ArgumentsInterface}
- * @see {@link ArgvModule.enhancedParse}
+ * @see ArgumentsInterface
+ * @see ArgvModule.enhancedParse
  *
  * @since 2.0.0
  */
 
 export interface UserExtensionInterface {
     /**
-     * Custom CLI option definition.
-     *
-     * @remarks
-     * Each property defines a command-line argument with its type, description,
-     * aliases, and validation using yargs `Options` format.
+     * A single custom CLI option definition in yargs {@link Options} format.
      *
      * @since 2.0.0
      */
@@ -83,64 +37,21 @@ export interface UserExtensionInterface {
 }
 
 /**
- * Base structure for parsed command-line arguments from yargs.
+ * The fields every yargs parse result contains, regardless of the options supplied.
  *
  * @remarks
- * This interface represents the minimal structure that all yargs-parsed argument
- * objects contain, regardless of specific options. It includes the standard yargs
- * metadata fields that are always present after parsing.
+ * The foundation for {@link ArgumentsInterface}. The index signature carries named options - both defaults and user
+ * extensions - alongside the standard yargs metadata.
  *
- * **Standard fields:**
- * - `_`: Positional arguments (non-option values)
- * - `$0`: The script name or path that was executed
- * - Additional dynamic properties for named options
- *
- * This interface serves as the foundation for more specific argument interfaces
- * like `ArgumentsInterface`, which extends it with xBuild-specific options.
- *
- * The index signature allows any additional properties to accommodate both
- * xBuild's default options and user-defined extensions without losing type safety
- * for the core yargs metadata.
- *
- * @example
- * ```ts
- * // Minimal parsed arguments
- * const args: BaseArgumentsInterface = {
- *   _: ['src/index.ts'],
- *   $0: 'xBuild',
- *   config: 'custom.config.ts'
- * };
- * ```
- *
- * @example
- * ```ts
- * // With positional arguments
- * // Command: xBuild src/app.ts src/worker.ts
- * const args: BaseArgumentsInterface = {
- *   _: ['src/app.ts', 'src/worker.ts'],
- *   $0: '/usr/local/bin/xBuild'
- * };
- * ```
- *
- * @see {@link ArgumentsInterface}
- * @see {@link ArgvModule.parseConfigFile}
+ * @see ArgumentsInterface
+ * @see ArgvModule.parseConfigFile
  *
  * @since 2.0.0
  */
 
 export interface BaseArgumentsInterface {
     /**
-     * Positional arguments (non-option values).
-     *
-     * @remarks
-     * Contains values provided without option flags. Typically, it includes
-     * file paths or commands. Can be strings or numbers depending on parsing context.
-     *
-     * @example
-     * ```ts
-     * // Command: xBuild src/index.ts src/utils.ts
-     * // _: ['src/index.ts', 'src/utils.ts']
-     * ```
+     * Positional arguments (values given without an option flag), typically file paths.
      *
      * @since 2.0.0
      */
@@ -148,18 +59,7 @@ export interface BaseArgumentsInterface {
     _: Array<string | number>;
 
     /**
-     * The script name or path that was executed.
-     *
-     * @remarks
-     * Represents the command used to invoke the script, typically the executable
-     * name or full path. Used by yargs to help text generation.
-     *
-     * @example
-     * ```ts
-     * $0: 'xBuild'              // When invoked as 'xBuild'
-     * $0: '/usr/bin/xBuild'     // Full path
-     * $0: 'node build.js'       // When run with Node.js
-     * ```
+     * The script name or path used to invoke the command, as reported by yargs.
      *
      * @since 2.0.0
      */
@@ -167,12 +67,7 @@ export interface BaseArgumentsInterface {
     $0: string;
 
     /**
-     * Dynamic properties for parsed command-line options.
-     *
-     * @remarks
-     * Allows any additional properties to represent both xBuild's default options
-     * and user-defined extensions. The actual properties present depend on the
-     * options configuration and arguments provided.
+     * Parsed values for any named option, drawn from the defaults or user extensions.
      *
      * @since 2.0.0
      */
@@ -181,105 +76,23 @@ export interface BaseArgumentsInterface {
 }
 
 /**
- * Complete parsed command-line arguments including all xBuild options.
+ * Fully parsed xBuild arguments returned by {@link ArgvModule.enhancedParse}.
  *
  * @remarks
- * This interface extends the base yargs structure with all xBuild-specific CLI
- * options. It represents the fully parsed arguments after running `enhancedParse`
- * with both default options and any user extensions.
+ * Extends {@link BaseArgumentsInterface} with every built-in option. All fields are optional, since any option may be
+ * absent from the command line; defaults are applied later during configuration processing.
  *
- * **Argument categories:**
- *
- * **Input/Output:**
- * - `entryPoints`: Source files to compile
- * - `outdir`: Output directory path
- *
- * **Build Modes:**
- * - `watch`: Enable watch mode for auto-rebuild
- * - `serve`: Start development server (with optional directory)
- * - `typeCheck`: Type check only without output
- *
- * **Build Configuration:**
- * - `bundle`: Bundle dependencies into output
- * - `minify`: Minify output code
- * - `format`: Module format (cjs, esm, iife)
- * - `platform`: Target platform (browser, node, neutral)
- *
- * **TypeScript:**
- * - `types`: Enable type checking during build
- * - `declaration`: Generate .d.ts files
- * - `failOnError`: Fail build on type errors
- * - `tsconfig`: Custom tsconfig path
- *
- * **Configuration:**
- * - `config`: Build configuration file path
- * - `verbose`: Enable detailed logging
- * - `debug`: Debug-specific entry points
- * - `dev`: Development-specific entry points
- *
- * All properties are optional since they may not be provided on the command line.
- * Default values are applied during configuration processing, not during parsing.
- *
- * @example
- * ```ts
- * // Production build
- * const args: ArgumentsInterface = {
- *   _: [],
- *   $0: 'xBuild',
- *   entryPoints: ['src/index.ts'],
- *   bundle: true,
- *   minify: true,
- *   format: 'esm',
- *   outdir: 'dist',
- *   declaration: true
- * };
- * ```
- *
- * @example
- * ```ts
- * // Development mode
- * const args: ArgumentsInterface = {
- *   _: [],
- *   $0: 'xBuild',
- *   entryPoints: ['src/app.ts'],
- *   watch: true,
- *   serve: 'dist',
- *   types: true
- * };
- * ```
- *
- * @example
- * ```ts
- * // Type check only
- * const args: ArgumentsInterface = {
- *   _: [],
- *   $0: 'xBuild',
- *   typeCheck: true,
- *   tsconfig: 'tsconfig.strict.json'
- * };
- * ```
- *
- * @see {@link BaseArgumentsInterface}
- * @see {@link UserExtensionInterface}
- * @see {@link ArgvModule.enhancedParse}
- * @see {@link CLI_DEFAULT_OPTIONS}
+ * @see BaseArgumentsInterface
+ * @see UserExtensionInterface
+ * @see ArgvModule.enhancedParse
+ * @see CLI_DEFAULT_OPTIONS
  *
  * @since 2.0.0
  */
 
 export interface ArgumentsInterface extends BaseArgumentsInterface {
     /**
-     * Development-specific entry points for conditional builds.
-     *
-     * @remarks
-     * Optional array of file paths used only in development builds. Allows
-     * including additional files (like dev tools, mock data) that shouldn't
-     * be in production builds.
-     *
-     * @example
-     * ```ts
-     * dev: ['src/dev-tools.ts', 'src/mocks.ts']
-     * ```
+     * Entry points included only in development builds.
      *
      * @since 2.0.0
      */
@@ -287,16 +100,10 @@ export interface ArgumentsInterface extends BaseArgumentsInterface {
     dev?: Array<string>;
 
     /**
-     * Enable TypeScript type checking during the build process.
+     * Run the TypeScript type checker during the build.
      *
      * @remarks
-     * When true, runs TypeScript type checker in parallel with esbuild compilation.
-     * Type errors are reported but may not fail the build depending on `failOnError`.
-     *
-     * @example
-     * ```ts
-     * types: true  // Enable type checking
-     * ```
+     * Reports type errors; whether they fail the build depends on {@link ArgumentsInterface.failOnError}.
      *
      * @since 2.0.0
      */
@@ -304,16 +111,7 @@ export interface ArgumentsInterface extends BaseArgumentsInterface {
     types?: boolean;
 
     /**
-     * Debug-specific entry points for conditional builds.
-     *
-     * @remarks
-     * Optional array of file paths used only in debug builds. Useful for including
-     * debugging utilities, loggers, or diagnostic tools.
-     *
-     * @example
-     * ```ts
-     * debug: ['src/debug-logger.ts']
-     * ```
+     * Entry points included only in debug builds.
      *
      * @since 2.0.0
      */
@@ -321,18 +119,10 @@ export interface ArgumentsInterface extends BaseArgumentsInterface {
     debug?: Array<string>;
 
     /**
-     * Start development server serving from specified directory.
+     * Directory to serve over a local development server.
      *
      * @remarks
-     * When provided, starts a local HTTP server to serve build output. The value
-     * specifies which directory to serve. Commonly used with watch mode for
-     * live development.
-     *
-     * @example
-     * ```ts
-     * serve: 'dist'        // Serve from dist/
-     * serve: 'public'      // Serve from public/
-     * ```
+     * Commonly paired with {@link ArgumentsInterface.watch} for live development.
      *
      * @since 2.0.0
      */
@@ -340,17 +130,7 @@ export interface ArgumentsInterface extends BaseArgumentsInterface {
     serve?: string;
 
     /**
-     * Directory for build output files.
-     *
-     * @remarks
-     * Specifies where compiled files should be written. Overrides the `outdir`
-     * setting in esbuild configuration when provided.
-     *
-     * @example
-     * ```ts
-     * outdir: 'dist'
-     * outdir: 'build/output'
-     * ```
+     * Directory for build output files, overriding the esbuild `outdir`.
      *
      * @since 2.0.0
      */
@@ -358,16 +138,19 @@ export interface ArgumentsInterface extends BaseArgumentsInterface {
     outdir?: string;
 
     /**
-     * Enable watch mode to rebuild on file changes.
+     * Remove the output directory before building.
      *
      * @remarks
-     * When true, the build system watches source files and automatically rebuilds
-     * when changes are detected. Often used with `serve` for development workflows.
+     * When true, the resolved output directory is deleted so the build starts from a clean folder. Applies to the
+     * {@link ArgumentsInterface.outdir} target.
      *
-     * @example
-     * ```ts
-     * watch: true  // Enable watch mode
-     * ```
+     * @since 2.6.0
+     */
+
+    clear?: boolean;
+
+    /**
+     * Rebuild automatically when source files change.
      *
      * @since 2.0.0
      */
@@ -375,17 +158,7 @@ export interface ArgumentsInterface extends BaseArgumentsInterface {
     watch?: boolean;
 
     /**
-     * Path to build a configuration file.
-     *
-     * @remarks
-     * Specifies a custom configuration file instead of the default `config.xbuild.ts`.
-     * The file must export a valid `BuildConfigInterface` object.
-     *
-     * @example
-     * ```ts
-     * config: 'build/custom.xbuild.ts'
-     * config: 'configs/prod.config.ts'
-     * ```
+     * Path to the build configuration file, instead of the default {@link CLI_CONFIG_PATH}.
      *
      * @since 2.0.0
      */
@@ -393,16 +166,7 @@ export interface ArgumentsInterface extends BaseArgumentsInterface {
     config?: string;
 
     /**
-     * Enable minification of build output.
-     *
-     * @remarks
-     * When true, applies code minification including whitespace removal, name
-     * mangling, and dead code elimination. Typically used for production builds.
-     *
-     * @example
-     * ```ts
-     * minify: true  // Minify output
-     * ```
+     * Minify the build output.
      *
      * @since 2.0.0
      */
@@ -410,17 +174,7 @@ export interface ArgumentsInterface extends BaseArgumentsInterface {
     minify?: boolean;
 
     /**
-     * Bundle dependencies into output files.
-     *
-     * @remarks
-     * When true, includes all imported modules in the output. When false, preserves
-     * module structure and requires dependencies to be available at runtime.
-     *
-     * @example
-     * ```ts
-     * bundle: true   // Bundle everything
-     * bundle: false  // Preserve module structure
-     * ```
+     * Bundle imported modules into the output instead of preserving module structure.
      *
      * @since 2.0.0
      */
@@ -428,20 +182,7 @@ export interface ArgumentsInterface extends BaseArgumentsInterface {
     bundle?: boolean;
 
     /**
-     * Output module format for generated code.
-     *
-     * @remarks
-     * Specifies the JavaScript module system to use:
-     * - `cjs`: CommonJS (require/module.exports)
-     * - `esm`: ECMAScript modules (import/export)
-     * - `iife`: Immediately Invoked Function Expression (for browsers)
-     *
-     * @example
-     * ```ts
-     * format: 'esm'   // ES modules
-     * format: 'cjs'   // CommonJS
-     * format: 'iife'  // Browser bundle
-     * ```
+     * Output module format: `cjs`, `esm`, or `iife`.
      *
      * @since 2.0.0
      */
@@ -449,16 +190,7 @@ export interface ArgumentsInterface extends BaseArgumentsInterface {
     format?: 'cjs' | 'esm' | 'iife';
 
     /**
-     * Enable verbose logging output during builds.
-     *
-     * @remarks
-     * When true, outputs detailed build information including file processing,
-     * hook execution, timing, and diagnostic messages. Useful for debugging.
-     *
-     * @example
-     * ```ts
-     * verbose: true  // Detailed output
-     * ```
+     * Emit detailed build logging and full error stack traces.
      *
      * @since 2.0.0
      */
@@ -466,22 +198,10 @@ export interface ArgumentsInterface extends BaseArgumentsInterface {
     verbose?: boolean;
 
     /**
-     * Target platform for the build output.
+     * Target platform: `browser`, `node`, or `neutral`.
      *
      * @remarks
-     * Specifies the runtime environment:
-     * - `browser`: Web browser environment
-     * - `node`: Node.js environment
-     * - `neutral`: Platform-agnostic (no platform-specific APIs)
-     *
-     * Affects module resolution, built-in polyfills, and output format.
-     *
-     * @example
-     * ```ts
-     * platform: 'node'     // Node.js target
-     * platform: 'browser'  // Browser target
-     * platform: 'neutral'  // Universal
-     * ```
+     * Affects module resolution, built-in polyfills, and the default output format.
      *
      * @since 2.0.0
      */
@@ -489,17 +209,7 @@ export interface ArgumentsInterface extends BaseArgumentsInterface {
     platform?: Platform;
 
     /**
-     * Path to TypeScript configuration file.
-     *
-     * @remarks
-     * Specifies a custom tsconfig.json instead of the default. Used for both
-     * type checking and declaration generation.
-     *
-     * @example
-     * ```ts
-     * tsconfig: 'tsconfig.build.json'
-     * tsconfig: 'configs/tsconfig.strict.json'
-     * ```
+     * Path to a custom `tsconfig.json` for type checking and declaration generation.
      *
      * @since 2.0.0
      */
@@ -507,16 +217,7 @@ export interface ArgumentsInterface extends BaseArgumentsInterface {
     tsconfig?: string;
 
     /**
-     * Perform type checking without building output.
-     *
-     * @remarks
-     * When true, runs TypeScript type checker only without executing esbuild
-     * compilation. Useful for validating types in CI/CD pipelines or pre-commit hooks.
-     *
-     * @example
-     * ```ts
-     * typeCheck: true  // Type check only, no output
-     * ```
+     * Type check only, without producing build output.
      *
      * @since 2.0.0
      */
@@ -524,16 +225,7 @@ export interface ArgumentsInterface extends BaseArgumentsInterface {
     typeCheck?: boolean;
 
     /**
-     * Generate TypeScript declaration files (.d.ts).
-     *
-     * @remarks
-     * When true, emits TypeScript declaration files alongside JavaScript output.
-     * Used for library builds to provide type information to consumers.
-     *
-     * @example
-     * ```ts
-     * declaration: true  // Generate .d.ts files
-     * ```
+     * Emit TypeScript declaration files (`.d.ts`) alongside the output.
      *
      * @since 2.0.0
      */
@@ -541,17 +233,10 @@ export interface ArgumentsInterface extends BaseArgumentsInterface {
     declaration?: boolean;
 
     /**
-     * Source files to build (supports glob patterns).
+     * Source files to build, as paths or glob patterns.
      *
      * @remarks
-     * Array of file paths or glob patterns identifying build entry points.
-     * Can be provided as positional arguments or via the `--entryPoints` flag.
-     *
-     * @example
-     * ```ts
-     * entryPoints: ['src/index.ts']
-     * entryPoints: ['src/*.ts', 'src/workers/*.ts']
-     * ```
+     * May be given as positional arguments or via `--entryPoints`.
      *
      * @since 2.0.0
      */
@@ -559,17 +244,10 @@ export interface ArgumentsInterface extends BaseArgumentsInterface {
     entryPoints?: Array<string>;
 
     /**
-     * Fail build when TypeScript errors are detected.
+     * Exit with a non-zero code when type checking finds errors.
      *
      * @remarks
-     * When true, exits with non-zero code if type checking finds errors.
-     * When false, logs errors but continues the build. Used with `types: true`.
-     *
-     * @example
-     * ```ts
-     * failOnError: true   // Fail on type errors
-     * failOnError: false  // Log errors, continue build
-     * ```
+     * Used with {@link ArgumentsInterface.types}; when false, errors are logged and the build continues.
      *
      * @since 2.0.0
      */
@@ -577,68 +255,18 @@ export interface ArgumentsInterface extends BaseArgumentsInterface {
     failOnError?: boolean;
 
     /**
-     * Array of build variant names to compile from the configuration file.
+     * Names of the configuration variants to build.
      *
      * @remarks
-     * Specifies which build variants defined in the xBuild configuration should be executed.
-     * Build variants allow you to define multiple build configurations (e.g., production, development,
-     * testing) in a single configuration file and selectively compile them via the CLI.
-     *
-     * **Behavior:**
-     * - If not specified: All variants in the configuration file are built
-     * - If specified: Only the named variants are compiled
-     * - Supports multiple values: Can specify multiple variants in a single command
-     * - Non-existent variants: Will result in a build error if specified variant doesn't exist
-     *
-     * **Common use cases:**
-     * - Building-only production bundles: `--build production`
-     * - Building multiple specific variants: `--build development --build staging`
-     * - Selective compilation in CI/CD pipelines
-     * - Testing specific build configurations during development
-     *
-     * Build variants are defined in the xBuild configuration file and can include different:
-     * - Entry points and output directories
-     * - Compiler options (minification, bundling, source maps)
-     * - Target platforms and formats
-     * - Environment-specific settings
+     * When omitted, every variant in the configuration file is built; when given, only the named variants are. Accepts
+     * multiple values, and a name that does not exist is a build error.
      *
      * @example
      * ```ts
-     * // Build only the production variant
-     * xBuild --build production
+     * // xBuild --build development --build staging
      * ```
      *
-     * @example
-     * ```ts
-     * // Build multiple specific variants
-     * xBuild --build development --build staging
-     * // Or using the alias:
-     * xBuild --xb development --xb staging
-     * ```
-     *
-     * @example
-     * ```ts
-     * // Configuration file with variants
-     * export default {
-     *   variants: {
-     *     production: {
-     *       entryPoints: ['src/index.ts'],
-     *       minify: true,
-     *       bundle: true
-     *     },
-     *     development: {
-     *       entryPoints: ['src/index.ts'],
-     *       sourcemap: true
-     *     }
-     *   }
-     * };
-     *
-     * // Build only production
-     * xBuild --build production
-     * ```
-     *
-     * @see {@link CLI_CONFIG_PATH} for configuration file location
-     *
+     * @see CLI_CONFIG_PATH
      * @since 2.0.0
      */
 

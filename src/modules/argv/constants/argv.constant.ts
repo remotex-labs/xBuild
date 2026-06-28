@@ -1,5 +1,5 @@
 /**
- * Import will remove at compile time
+ * Type-only imports erased during TypeScript compilation.
  */
 
 import type { Options } from 'yargs';
@@ -8,32 +8,7 @@ import type { Options } from 'yargs';
  * Default path to the xBuild configuration file.
  *
  * @remarks
- * This constant defines the standard location for xBuild's build configuration.
- * Used as the default value for the `--config` CLI option when no custom path is provided.
- *
- * The configuration file contains:
- * - Build variant definitions (production, development, etc.)
- * - Common build settings shared across variants
- * - esbuild compiler options
- * - TypeScript integration settings
- * - Custom lifecycle hooks
- * - Define replacements and injections
- *
- * The file is a TypeScript module that exports build configuration, enabling
- * type-safe configuration with IDE autocomplete support.
- *
- * @example
- * ```ts
- * // Default usage
- * xBuild src/index.ts
- * // Automatically looks for: config.xbuild.ts
- * ```
- *
- * @example
- * ```ts
- * // Custom config path
- * xBuild src/index.ts --config build/custom.xbuild.ts
- * ```
+ * Used as the default value for the `--config` option when no path is given.
  *
  * @since 2.0.0
  */
@@ -41,76 +16,15 @@ import type { Options } from 'yargs';
 export const CLI_CONFIG_PATH = 'config.xbuild.ts' as const;
 
 /**
- * Default command-line interface options and their configurations.
+ * Built-in CLI option definitions for xBuild, in yargs {@link Options} format.
  *
  * @remarks
- * This constant defines all available CLI flags and arguments for the xBuild tool,
- * providing comprehensive build customization from the command line. Each option
- * includes type validation, aliases, descriptions, and default values.
+ * Registered by {@link ArgvModule.enhancedParse} alongside any user-defined options, and command-line values override
+ * the configuration file. Each entry sets the option's type, alias, description, and where relevant its choices or
+ * default.
  *
- * **Option Categories:**
- *
- * **Input/Output:**
- * - `entryPoints`: Source files to compile (supports glob patterns)
- * - `outdir`: Output directory for compiled files
- *
- * **Build Modes:**
- * - `watch`: Enable watch mode for automatic rebuilds
- * - `serve`: Start development server
- * - `typeCheck`: Type check only without output
- *
- * **Build Configuration:**
- * - `bundle`: Bundle dependencies into output
- * - `minify`: Minify output code
- * - `format`: Module format (cjs, esm, iife)
- * - `platform`: Target platform (browser, node, neutral)
- *
- * **TypeScript:**
- * - `declaration`: Generate .d.ts files
- * - `types`: Enable type checking during build
- * - `failOnError`: Fail build on type errors
- * - `tsconfig`: Custom tsconfig.json path
- *
- * **Configuration:**
- * - `config`: Custom build configuration file path
- * - `verbose`: Enable detailed error messages
- *
- * All options can be used individually or combined to create complex build workflows.
- * Options specified on the command line override configuration file settings.
- *
- * @example
- * ```ts
- * // Single file build with defaults
- * xBuild src/index.ts
- * ```
- *
- * @example
- * ```ts
- * // Production build with bundling and minification
- * xBuild src/app.ts --bundle --minify --format esm
- * ```
- *
- * @example
- * ```ts
- * // Development mode with watch and server
- * xBuild src/app.ts --watch --serve dist
- * ```
- *
- * @example
- * ```ts
- * // Library build with type definitions
- * xBuild src/lib.ts --declaration --format esm --outdir dist
- * ```
- *
- * @example
- * ```ts
- * // Type checking only (no output)
- * xBuild --typeCheck
- * ```
- *
- * @see {@link TSCONFIG_PATH}
- * @see {@link CLI_CONFIG_PATH}
- * @see {@link CLI_USAGE_EXAMPLES}
+ * @see CLI_CONFIG_PATH
+ * @see CLI_USAGE_EXAMPLES
  *
  * @since 2.0.0
  */
@@ -141,6 +55,11 @@ export const CLI_DEFAULT_OPTIONS: Record<string, Options> = {
         describe: 'Directory for build output files',
         alias: 'o',
         type: 'string'
+    },
+    clear: {
+        describe: 'Remove the output directory before building',
+        alias: 'cl',
+        type: 'boolean'
     },
     declaration: {
         describe: 'Generate TypeScript declaration files (.d.ts)',
@@ -203,56 +122,13 @@ export const CLI_DEFAULT_OPTIONS: Record<string, Options> = {
 } as const;
 
 /**
- * Example command-line usage patterns demonstrating common build scenarios.
+ * Example commands shown in `--help` output.
  *
  * @remarks
- * This constant provides a curated collection of practical CLI usage examples
- * that demonstrate how to combine xBuild options for common development workflows.
- * Each example includes the complete command and a description of its purpose.
+ * Each entry is a `[command, description]` pair registered through yargs `example` by
+ * {@link ArgvModule.enhancedParse}.
  *
- * **Example Categories:**
- *
- * **Basic Builds:**
- * - Single file compilation with defaults
- * - Multi-file bundling with optimization
- *
- * **Development Workflows:**
- * - Watch mode with development server
- * - Custom server directory configuration
- *
- * **Library Publishing:**
- * - ESM library with type definitions
- * - Platform-specific builds
- *
- * **Validation:**
- * - Type checking without output
- * - Custom configuration files
- *
- * These examples are displayed in CLI help output and serve as quick-start
- * templates for developers learning the tool.
- *
- * @example
- * ```ts
- * // Displayed when running: xBuild --help
- * // Shows all usage examples with descriptions
- * ```
- *
- * @example
- * ```ts
- * // Example: Production library build
- * xBuild src/lib.ts --format esm --declaration
- * // Generates: dist/lib.js and dist/lib.d.ts as ESM
- * ```
- *
- * @example
- * ```ts
- * // Example: Development with hot reload
- * xBuild src/app.ts -s dist
- * // Starts: Watch mode + dev server serving from dist/
- * ```
- *
- * @see {@link CLI_DEFAULT_OPTIONS}
- *
+ * @see CLI_DEFAULT_OPTIONS
  * @since 2.0.0
  */
 
