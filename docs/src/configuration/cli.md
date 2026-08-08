@@ -84,6 +84,33 @@ xBuild --env production --deploy
 These args are parsed by CLI and available in lifecycle hook `context.argv`.
 :::
 
+## The `$argv` Global
+
+Before the configuration file loads, xBuild runs a minimal CLI parse and exposes the result as the
+global `$argv` (`Record<string, unknown>`). Use it inside `config.xbuild.ts` when a setting depends
+on a CLI argument at config-evaluation time:
+
+```ts
+// config.xbuild.ts
+const isServing = Boolean($argv.serve);
+
+export const config: xBuildConfig = {
+    variants: {
+        main: {
+            esbuild: {
+                entryPoints: [ 'src/index.ts' ],
+                minify: !isServing
+            }
+        }
+    }
+};
+```
+
+::: warning
+`$argv` holds only the pre-config parse (built-in options). Custom `userArgv` options are parsed
+later and reach lifecycle hooks through `context.argv`.
+:::
+
 ## Help Output
 
 Custom `userArgv` options appear in the CLI help under **user Options**.
