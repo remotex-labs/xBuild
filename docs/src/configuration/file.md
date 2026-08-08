@@ -79,6 +79,27 @@ variants: {
 }
 ```
 
+### `dependOn`
+
+A variant can declare that it depends on other variants with `dependOn` (`string` or `Array<string>`).
+Dependencies always finish before the dependent variant starts; independent variants run in parallel:
+
+```ts
+variants: {
+  types: { /* ... */ },
+  shared: { /* ... */ },
+  main: {
+    dependOn: ['types', 'shared'], // main builds after both finish
+    esbuild: {
+      entryPoints: ['src/index.ts'],
+      outdir: 'dist'
+    }
+  }
+}
+```
+
+Cycles and unknown variant names are rejected with a validation error.
+
 ## `common`
 
 Shared defaults for all variants:
