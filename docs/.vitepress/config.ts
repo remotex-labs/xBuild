@@ -22,7 +22,7 @@ export default defineVersionedConfig({
         ]
     ],
     versionsConfig: {
-        current: 'v2.2.x',
+        current: 'v3.0.0',
         versionSwitcher: false
     },
     themeConfig: {
@@ -32,15 +32,54 @@ export default defineVersionedConfig({
             provider: 'local'
         },
 
-        nav: [
-            { text: 'Home', link: '/' },
-            { text: 'Guide', link: '/guide' },
-            { component: 'VersionSwitcher' }
-        ],
+        nav: {
+            root: [
+                { text: 'Home', link: '/' },
+                { text: 'Guide', link: '/guide' },
+                {
+                    text: 'Macros',
+                    items: [
+                        { text: 'Ifdef', link: '/macros/ifdef' },
+                        { text: 'Ifndef', link: '/macros/ifndef' },
+                        { text: 'Inline', link: '/macros/inline' }
+                    ]
+                },
+                {
+                    text: 'Configuration',
+                    items: [
+                        { text: 'CLI', link: '/configuration/cli' },
+                        { text: 'File', link: '/configuration/file' },
+                        { text: 'Serve', link: '/configuration/serve' },
+                        { text: 'Runtime', link: '/configuration/runtime' },
+                        { text: 'Lifecycle', link: '/configuration/lifecycle' }
+                    ]
+                },
+                { component: 'VersionSwitcher' }
+            ],
+            'v1.x.x': [
+                { text: 'Home', link: '/' },
+                { text: 'Guide', link: '/guide' },
+                {
+                    text: 'Macros',
+                    items: [{ text: 'Ifdef', link: '/macros/ifdef' }]
+                },
+                {
+                    text: 'Configuration',
+                    items: [
+                        { text: 'CLI', link: '/configuration/cli' },
+                        { text: 'File', link: '/configuration/file' },
+                        { text: 'Serve', link: '/configuration/serve' },
+                        { text: 'Lifecycle', link: '/configuration/lifecycle' }
+                    ]
+                },
+                { component: 'VersionSwitcher' }
+            ]
+        },
 
         sidebar: {
             root: [
-                { text: 'Guide', link: '/guide' },
+                { text: 'Getting Started', link: '/guide' },
+                { text: 'Release Notes', link: '/release' },
                 {
                     text: 'Macros',
                     collapsed: false,
@@ -54,10 +93,10 @@ export default defineVersionedConfig({
                     text: 'Configuration',
                     collapsed: false,
                     items: [
-                        { text: 'Cli', link: '/configuration/cli' },
+                        { text: 'CLI', link: '/configuration/cli' },
                         { text: 'File', link: '/configuration/file' },
                         { text: 'Serve', link: '/configuration/serve' },
-                        { text: 'runtime', link: '/configuration/lifecycle' },
+                        { text: 'Runtime', link: '/configuration/runtime' },
                         { text: 'Lifecycle', link: '/configuration/lifecycle' }
                     ]
                 },
@@ -71,11 +110,28 @@ export default defineVersionedConfig({
                 }
             ],
             'v1.x.x': [
-                { text: 'Guide', link: '.' },
-                { text: 'Hooks', link: './hooks' },
-                { text: 'serve', link: './serve' },
-                { text: 'Macros', link: './macros' },
-                { text: 'Configuration', link: './configuration' }
+                { text: 'Getting Started', link: '/guide' },
+                { text: 'Release Notes', link: '/release' },
+                {
+                    text: 'Macros',
+                    collapsed: false,
+                    items: [{ text: 'Ifdef', link: '/macros/ifdef' }]
+                },
+                {
+                    text: 'Configuration',
+                    collapsed: false,
+                    items: [
+                        { text: 'CLI', link: '/configuration/cli' },
+                        { text: 'File', link: '/configuration/file' },
+                        { text: 'Serve', link: '/configuration/serve' },
+                        { text: 'Lifecycle', link: '/configuration/lifecycle' }
+                    ]
+                },
+                {
+                    text: 'Advanced',
+                    collapsed: false,
+                    items: [{ text: 'Programmatic', link: '/advanced/programmatic' }]
+                }
             ]
         },
 
@@ -85,8 +141,8 @@ export default defineVersionedConfig({
         ],
 
         docFooter: {
-            prev: false,
-            next: false
+            prev: true,
+            next: true
         },
         footer: {
             message: 'Released under the Mozilla Public License 2.0',
