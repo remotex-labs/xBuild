@@ -12,6 +12,7 @@
         "isolatedModules": true,
         "moduleDetection": "force",
         "moduleResolution": "bundler",
+        "resolveJsonModule": true,
         "emitDeclarationOnly": true,
         "experimentalDecorators": true,
         "lib": [
@@ -67,7 +68,7 @@
     "exclude": [
         "dist",
         "node_modules",
-        "**/*.spec.ts"W
+        "**/*.spec.ts"
     ],
     "references": [
         { "path": "./tsconfig.spec.json" }
