@@ -1,5 +1,5 @@
 /**
- * Import will remove at compile time
+ * Type-only imports erased during TypeScript compilation.
  */
 
 import type { xJetConfig } from '@remotex-labs/xjet';
@@ -21,7 +21,7 @@ export default {
         target: [ `node${ version.slice(1) }` ],
         platform: 'node',
         packages: 'bundle',
-        external: [ 'typescript', 'esbuild', 'yargs', 'url' ],
+        external: [ 'typescript', 'esbuild', 'yargs', 'url', 'oxc-parser', 'oxc-transform' ],
         loader: {
             '.html': 'text'
         }
