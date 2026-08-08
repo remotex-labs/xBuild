@@ -12,16 +12,21 @@
         "isolatedModules": true,
         "moduleDetection": "force",
         "moduleResolution": "bundler",
-        "resolveJsonModule": true,
         "emitDeclarationOnly": true,
+        "experimentalDecorators": true,
         "lib": [
-            "DOM",
             "ESNext"
         ],
         "types": [
             "node"
         ],
         "paths": {
+            "@ui/*": [
+                "./src/ui/*"
+            ],
+            "@models/*": [
+                "./src/models/*"
+            ],
             "@errors/*": [
                 "./src/errors/*"
             ],
@@ -31,30 +36,23 @@
             "@providers/*": [
                 "./src/providers/*"
             ],
-            "@directives/*": [
-                "./src/directives/*"
-            ],
             "@constants/*": [
                 "./src/constants/*"
             ],
-            "@components/*": [
-                "./src/components/*"
+            "@directives/*": [
+                "./src/directives/*"
             ],
-
             "@interfaces/*": [
                 "./src/interfaces/*"
+            ],
+            "@components/*": [
+                "./src/components/*"
             ],
             "@argv/*": [
                 "./src/modules/argv/*"
             ],
             "@server/*": [
                 "./src/modules/server/*"
-            ],
-            "@symlinks/*": [
-                "./src/modules/symlinks/*"
-            ],
-            "@observable/*": [
-                "./src/modules/observable/*"
             ],
             "@typescript/*": [
                 "./src/modules/typescript/*"
@@ -69,7 +67,7 @@
     "exclude": [
         "dist",
         "node_modules",
-        "**/*.spec.ts"
+        "**/*.spec.ts"W
     ],
     "references": [
         { "path": "./tsconfig.spec.json" }
