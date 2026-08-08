@@ -9,10 +9,10 @@ hero:
   actions:
     - theme: brand
       text: Get Started
-      link: /guide
+      link: ./guide
     - theme: alt
       text: Configuration
-      link: /configuration/file
+      link: ./configuration/file
     - theme: alt
       text: GitHub
       link: https://github.com/remotex-labs/xBuild
