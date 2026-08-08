@@ -116,7 +116,7 @@ By default, xbuild uses `config.xbuild.ts` (`--config` change it). Here's how yo
 
 ```ts
 /**
- * Import will remove at compile time
+ * Type-only imports erased during TypeScript compilation.
  */
 
 import type { xBuildConfig } from '@remotex-labs/xbuild';
@@ -210,7 +210,7 @@ To enable these blocks during the build, define your conditions in the `xBuild` 
 
 ```ts
 /**
- * Import will remove at compile time
+ * Type-only imports erased during TypeScript compilation.
  */
 
 import type { xBuildConfig } from '@remotex-labs/xbuild';
