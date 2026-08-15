@@ -1,173 +1,148 @@
 /**
- * Import will remove at compile time
- */
-
-import type { MockState } from '@remotex-labs/xjet';
-
-/**
  * Imports
  */
 
+import { cwd } from 'process';
 import { readFileSync } from 'fs';
-import { FrameworkService } from '@services/framework.service';
+import { FrameworkService } from './framework.service';
+import { normalize, resolve, SourceService } from '@remotex-labs/xmap';
 
 /**
  * Tests
  */
 
 describe('FrameworkService', () => {
+    const sourceMap = '{"version":3,"file":"index.js","sources":["index.ts"],"names":[],"mappings":"AAAA"}';
+    const emptyMap = '{"version":3,"file":"index.js","sources":["index.ts"],"names":[],"mappings":""}';
+
+    let readMock: any;
     let framework: FrameworkService;
-    let readFileSyncMock: MockState;
-    const fakeFilePath = '/project/root/src/framework.ts';
-    const fakeMapPath = '/project/root/src/framework.ts.map';
-    const fakeDistPath = '/project/root/dist';
-
-    // Dummy valid source map (minimal to pass parsing)
-    const dummySourceMap = JSON.stringify({
-        version: 3,
-        sources: [ 'framework.ts' ],
-        names: [],
-        mappings: 'AAAA'
-    });
-
-    beforeAll(() => {
-        // Mock import.meta
-        xJet.spyOn(import.meta, 'filename').mockReturnValue(fakeFilePath);
-        xJet.spyOn(import.meta, 'dirname').mockReturnValue(fakeDistPath);
-        readFileSyncMock = xJet.mock(readFileSync).mockImplementation(((path: string): string => {
-            if (path === fakeMapPath) return dummySourceMap;
-            throw new Error(`ENOENT: no such file or directory, open '${ path }'`);
-        }) as any);
-    });
 
     beforeEach(() => {
-        xJet.resetAllMocks();
-        framework = new FrameworkService();
-    });
-
-    afterAll(() => {
         xJet.restoreAllMocks();
+
+        xJet.mock(resolve).mockImplementation((path: string) => path.startsWith('/') ? path : `/abs/${ path }`);
+        readMock = xJet.mock(readFileSync).mockReturnValue(<any> sourceMap);
+        framework = new FrameworkService();
+        readMock.mockClear();
     });
 
-    describe('constructor & paths', () => {
-        test('sets filePath, rootPath and distPath correctly', () => {
-            expect(framework.filePath).toBe(fakeFilePath);
-            expect(framework.distPath).toBe(fakeDistPath);
+    describe('constructor', () => {
+        test('should capture the project root and register the framework own map', () => {
+            expect(framework.projectRoot).toBe(normalize(cwd()));
+            expect(framework.frameworkFile).toBe(normalize(framework.frameworkFile));
+            expect(framework.getSourceMap(framework.frameworkFile)).toBeInstanceOf(SourceService);
         });
 
-        test('initializes main source map for own file', () => {
-            const map = framework.getSourceMap(fakeFilePath);
+        test('should report a framework shipped without a readable map', () => {
+            readMock.mockImplementation(() => {
+                throw new Error('ENOENT');
+            });
 
-            expect(map).toBeDefined();
-            expect(readFileSync).toHaveBeenCalledWith(fakeMapPath, 'utf-8');
+            expect(() => new FrameworkService()).toThrow(/Failed to load source map for: .+\nENOENT/);
+        });
+    });
+
+    describe('resolve', () => {
+        test('should resolve a path through the shared file cache', () => {
+            expect(FrameworkService.resolve('dist/index.js')).toBe('/abs/dist/index.js');
         });
     });
 
     describe('isFrameworkFile', () => {
-        test('returns true for positions from xJet framework files', () => {
-            expect(framework.isFrameworkFile(<any> {
-                source: '/project/root/node_modules/xbuild/index.ts',
-                sourceRoot: undefined
-            })).toBe(true);
+        test('should judge a source that names the framework, whatever its case', () => {
+            expect(framework.isFrameworkFile(<any> { source: 'D:/app/node_modules/xBuild/dist/index.js' })).toBe(true);
+            expect(framework.isFrameworkFile(<any> { source: 'D:/app/src/index.ts' })).toBe(false);
         });
 
-        test('returns true when sourceRoot contains xBuild', () => {
-            expect(framework.isFrameworkFile(<any> {
-                source: undefined,
-                sourceRoot: '/some/path/xBuild/src'
-            })).toBe(true);
+        test('should fall back to the source root when the source settles nothing', () => {
+            expect(framework.isFrameworkFile(<any> { source: 'index.js', sourceRoot: '/app/xbuild/dist' })).toBe(true);
         });
 
-        test('returns false for unrelated files', () => {
-            expect(framework.isFrameworkFile(<any> {
-                source: '/project/root/src/app.ts',
-                sourceRoot: '/project/root'
-            })).toBe(false);
-        });
-
-        test('returns false for xbuild.config files', () => {
-            expect(framework.isFrameworkFile(<any> {
-                source: '/project/root/xbuild.config.ts',
-                sourceRoot: undefined
-            })).toBe(false);
+        test('should spare a project xbuild.config file', () => {
+            expect(framework.isFrameworkFile(<any> { source: 'D:/app/xbuild.config.ts' })).toBe(false);
         });
     });
 
     describe('getSourceMap', () => {
-        test('returns undefined for unregistered path', () => {
-            expect(framework.getSourceMap('/unregistered/file.ts')).toBeUndefined();
-        });
-
-        test('returns cached SourceService for known path', () => {
-            const first = framework.getSourceMap(fakeFilePath);
-            const second = framework.getSourceMap(fakeFilePath);
-
-            expect(second).toBe(first);
+        test('should return undefined for a file that was never registered', () => {
+            expect(framework.getSourceMap('dist/index.js')).toBeUndefined();
+            expect(readMock).not.toHaveBeenCalled();
         });
     });
 
-    describe('setSource', () => {
-        test('initializes SourceService from raw source map string', () => {
-            const raw = JSON.stringify({
-                version: 3,
-                sources: [ 'custom.ts' ],
-                mappings: 'AAAA',
-                names: []
-            });
+    describe('addSourceMap', () => {
+        test('should register a map under the resolved path of its file', () => {
+            framework.addSourceMap('/abs/dist/index.js', sourceMap);
 
-            framework.setSource(raw, '/project/root/custom.ts');
-
-            expect(framework.getSourceMap('/project/root/custom.ts')).toBeDefined();
+            expect(framework.getSourceMap('dist/index.js')).toBeInstanceOf(SourceService);
         });
 
-        test('skips empty mappings', () => {
-            framework.setSource('{"mappings": ""}', '/project/root/empty.ts');
+        test('should keep the map a file already carries', () => {
+            framework.addSourceMap('dist/index.js', sourceMap);
+            const registered = framework.getSourceMap('dist/index.js');
+            framework.addSourceMap('dist/index.js', sourceMap);
 
-            expect(framework.getSourceMap('/project/root/empty.ts')).toBeUndefined();
+            expect(framework.getSourceMap('dist/index.js')).toBe(registered);
         });
 
-        test('throws on invalid source map', () => {
-            expect(() => framework.setSource('invalid', '/bad.ts'))
-                .toThrow(/Failed to initialize SourceService:.+?\/bad\.ts.*/);
+        test('should drop a map that maps nothing', () => {
+            framework.addSourceMap('dist/index.js', emptyMap);
+
+            expect(framework.getSourceMap('dist/index.js')).toBeUndefined();
+        });
+
+        test('should report the file when the content does not parse', () => {
+            expect(() => framework.addSourceMap('dist/index.js', 'not a source map'))
+                .toThrow('Failed to load source map for: /abs/dist/index.js');
         });
     });
 
-    describe('setSourceFile', () => {
-        test('loads and initializes .map companion file', () => {
-            const fakeMap = JSON.stringify({
-                version: 3,
-                sources: [ 'index.ts' ],
-                mappings: 'AAAA',
-                names: []
+    describe('loadSourceMap', () => {
+        test('should register the map the companion beside the file carries', () => {
+            framework.loadSourceMap('dist/index.js');
+
+            expect(readMock).toHaveBeenCalledWith('/abs/dist/index.js.map', 'utf-8');
+            expect(framework.getSourceMap('dist/index.js')).toBeInstanceOf(SourceService);
+        });
+
+        test('should ignore an empty path', () => {
+            framework.loadSourceMap('');
+
+            expect(readMock).not.toHaveBeenCalled();
+        });
+
+        test('should leave a file that already carries a map alone', () => {
+            framework.addSourceMap('dist/index.js', sourceMap);
+            framework.loadSourceMap('dist/index.js');
+
+            expect(readMock).not.toHaveBeenCalled();
+        });
+
+        test('should report the file when the companion cannot be read', () => {
+            readMock.mockImplementation(() => {
+                throw new Error('ENOENT');
             });
 
-            readFileSyncMock.mockReturnValueOnce(fakeMap);
-            framework.setSourceFile(fakeFilePath);
-
-            expect(readFileSyncMock).toHaveBeenCalledWith(fakeMapPath, 'utf-8');
-            expect(framework.getSourceMap(fakeFilePath)).toBeDefined();
+            expect(() => framework.loadSourceMap('dist/index.js'))
+                .toThrow('Failed to load source map for: /abs/dist/index.js\nENOENT');
         });
 
-        test('throws when .map file missing', () => {
-            expect(() => framework.setSourceFile('fakeFilePath'))
-                .toThrow(/Failed to initialize SourceService: .+fakeFilePath.*/);
+        test('should report a failure that was thrown as something other than an error', () => {
+            readMock.mockImplementation(() => {
+                throw 'EACCES';
+            });
+
+            expect(() => framework.loadSourceMap('dist/index.js'))
+                .toThrow('Failed to load source map for: /abs/dist/index.js\nEACCES');
         });
 
-        test('does nothing if path is falsy', () => {
-            readFileSyncMock.mockReset();
-            framework.setSourceFile('');
+        test('should drop a companion that maps nothing', () => {
+            readMock.mockReturnValue(<any> emptyMap);
 
-            expect(readFileSync).not.toHaveBeenCalled();
-        });
+            framework.loadSourceMap('dist/index.js');
 
-        test('reuses existing cached map', () => {
-            framework.setSourceFile(fakeFilePath); // first
-
-            const readSpy = xJet.mock(readFileSync).mockClear();
-
-            framework.setSourceFile(fakeFilePath); // second
-
-            expect(readSpy).not.toHaveBeenCalled();
+            expect(framework.getSourceMap('dist/index.js')).toBeUndefined();
         });
     });
 });
