@@ -88,13 +88,14 @@ describe('ServerModule', () => {
         expect(server['server']).toBeUndefined();
     });
 
-    test('should log message when stopping without running server', async () => {
+    test('should report a stop that was not running', async () => {
         const server = new ServerModule(fakeConfig, rootDir);
-        const logSpy = xJet.spyOn(console, 'log');
+        const events: Array<unknown> = [];
 
+        server.subscribe(event => events.push(event));
         await server.stop();
 
-        expect(logSpy).toHaveBeenCalledWith(expect.anything(), expect.stringContaining('No server is currently running'));
+        expect(events).toEqual([{ type: 'stop', running: false }]);
     });
 
     test('should restart server by stopping and starting', async () => {
@@ -110,32 +111,31 @@ describe('ServerModule', () => {
         expect(startSpy).toHaveBeenCalled();
     });
 
-    test('handleRequest should log request when verbose is true', () => {
-        const verboseConfig = { ...fakeConfig, verbose: true };
-        const server = new ServerModule(verboseConfig, rootDir);
+    test('handleRequest should report the request it was given', () => {
+        const server = new ServerModule(fakeConfig, rootDir);
 
         const req = { url: '/test.html' } as any;
         const res = { end: xJet.fn(), writeHead: xJet.fn() } as any;
 
         const defaultHandler = xJet.fn();
-        const logSpy = xJet.spyOn(console, 'log');
+        const events: Array<unknown> = [];
 
+        server.subscribe(event => events.push(event));
         server['handleRequest'](req, res, defaultHandler);
 
-        expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('/test.html'));
-        expect(verboseConfig.onRequest).toHaveBeenCalledWith(req, res, defaultHandler);
+        expect(events).toEqual([{ type: 'request', url: '/test.html' }]);
+        expect(fakeConfig.onRequest).toHaveBeenCalledWith(req, res, defaultHandler);
     });
 
-    test('handleRequest should not log request when verbose is false', () => {
+    test('handleRequest should write nothing of its own', () => {
         const server = new ServerModule(fakeConfig, rootDir);
         const req = { url: '/test.html' } as any;
         const res = { end: xJet.fn(), writeHead: xJet.fn() } as any;
-        const defaultHandler = xJet.fn();
         const logSpy = xJet.spyOn(console, 'log');
 
-        server['handleRequest'](req, res, defaultHandler);
+        server['handleRequest'](req, res, xJet.fn());
 
-        expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('[server]'), expect.stringContaining('/test.html'));
+        expect(logSpy).not.toHaveBeenCalled();
     });
 
     test('handleRequest should call onRequest if provided', () => {
@@ -298,11 +298,12 @@ describe('ServerModule', () => {
         const res = { writeHead: xJet.fn(), end: xJet.fn() } as any;
         const err = new Error('boom');
 
-        const logSpy = xJet.spyOn(console, 'error').mockImplementation(() => {
-        });
+        const events: Array<unknown> = [];
+
+        server.subscribe(event => events.push(event));
         server['sendError'](res, err);
 
-        expect(logSpy).toHaveBeenCalled();
+        expect(events).toEqual([{ type: 'error', error: err }]);
         expect(res.writeHead).toHaveBeenCalledWith(500, { 'Content-Type': 'text/plain' });
         expect(res.end).toHaveBeenCalledWith('Internal Server Error');
     });
