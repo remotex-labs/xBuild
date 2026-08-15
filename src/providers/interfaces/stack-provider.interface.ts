@@ -1,34 +1,42 @@
 /**
- * Import will remove at compile time
+ * Type-only imports erased during TypeScript compilation.
  */
 
 import type { ResolveOptionsInterface, ResolveMetadataInterface as xMapResolveMetadataInterface } from '@remotex-labs/xmap';
 
 /**
- * Configuration options for parsing and formatting stack traces.
+ * Options deciding which frames a resolved stack keeps and how much source is shown with them.
  *
  * @remarks
- * These options control how stack traces are parsed, what frames are included,
- * and how much source code context is displayed. Used by {@link getErrorMetadata}
- * to customize stack trace output.
+ * Extends the xMap resolve options with the one question xMap has no view on:
+ * whether the framework's own frames belong in the output.
+ * The inherited `linesBefore` and `linesAfter` size the code window,
+ * and every other inherited option is passed through to `resolveError` as it stands.
  *
- * @see stackEntry
+ * @example
+ * ```ts
+ * getErrorMetadata(error, { withFrameworkFrames: false, linesBefore: 2, linesAfter: 2 });
+ * ```
+ *
  * @see getErrorMetadata
- *
  * @since 2.0.0
  */
 
 export interface StackTraceInterface  extends Omit<ResolveOptionsInterface, 'getSource'> {
     /**
-     * Whether to include framework-internal stack frames in the output.
-     *
-     * @defaultValue Based on `ConfigurationService.verbose` setting
+     * Whether the framework's own frames stay in the resolved stack.
      *
      * @remarks
-     * Framework frames are identified by {@link FrameworkService.isFrameworkFile}.
-     * When false, these frames are filtered out to reduce noise in stack traces.
-     * Automatically set based on the `verbose` configuration setting if not
-     * explicitly provided.
+     * A frame counts as the framework's by {@link FrameworkService.isFrameworkFile}.
+     * Omitting it reads as `false`, which is what keeps a project's own frames at the head of the trace.
+     * It settles two further questions: whether native frames are admitted
+     * and whether a framework frame may supply the code window.
+     *
+     * @example
+     * ```ts
+     * getErrorMetadata(error, { withFrameworkFrames: true }); // a failure raised inside the build
+     * getErrorMetadata(error);                                // a failure in the project being built
+     * ```
      *
      * @see FrameworkService.isFrameworkFile
      * @since 2.0.0
@@ -38,22 +46,36 @@ export interface StackTraceInterface  extends Omit<ResolveOptionsInterface, 'get
 }
 
 /**
- * Additional metadata used when resolving and formatting source output.
+ * Resolved stack metadata, carrying the code window this package renders for it.
  *
  * @remarks
- * Extends the base xMap resolution metadata with optional formatted code text
- * that can be attached to the resolution result.
+ * Everything xMap resolves, plus the snippet {@link getErrorMetadata} builds from the first frame that carried code.
  *
+ * @example
+ * ```ts
+ * const metadata = getErrorMetadata(error);
+ *
+ * metadata.stack[0].format; // 'at run src/index.ts:12:8'
+ * metadata.formatCode;      // the highlighted snippet
+ * ```
+ *
+ * @see getErrorMetadata
  * @since 2.2.5
  */
 
 export interface ResolveMetadataInterface extends xMapResolveMetadataInterface {
     /**
-     * Formatted source code associated with the resolved item.
+     * The highlighted code window to print with the error.
      *
      * @remarks
-     * Typically used when a resolved file needs to preserve or expose its
-     * transformed code representation for later processing or display.
+     * Taken from the first frame that carried code, highlighted and marked at the failing column.
+     * Left unset when no frame carried any, which is what a resolve against sources that are gone produces.
+     *
+     * @example
+     * ```ts
+     * metadata.formatCode; // '11 | x();\n   | ^'
+     * metadata.formatCode; // undefined - no frame resolved to code
+     * ```
      *
      * @since 2.2.5
      */

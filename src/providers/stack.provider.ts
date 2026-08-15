@@ -1,5 +1,5 @@
 /**
- * Import will remove at compile time
+ * Type-only imports erased during TypeScript compilation.
  */
 
 import type { PartialMessage } from 'esbuild';
@@ -11,40 +11,40 @@ import type { StackTraceInterface, ResolveMetadataInterface } from '@providers/i
  * Imports
  */
 
+import { inject } from '@remotex-labs/xinject';
+import { FilesModel } from '@models/files.model';
 import { resolveError } from '@remotex-labs/xmap';
-import { inject } from '@symlinks/symlinks.module';
 import { xterm } from '@remotex-labs/xansi/xterm.component';
-import { FilesModel } from '@typescript/models/files.model';
 import { FrameworkService } from '@services/framework.service';
 import { parseErrorStack } from '@remotex-labs/xmap/parser.component';
-import { ConfigurationService } from '@services/configuration.service';
 import { formatErrorCode } from '@remotex-labs/xmap/formatter.component';
 import { highlightCode } from '@remotex-labs/xmap/highlighter.component';
 
 /**
- * Retrieves a source service for a given stack frame, either from source maps or file snapshots.
+ * Returns a source resolver for a file, from its source map when one is registered and from its cached text otherwise.
  *
- * @param fileName - The source filename
- * @returns A {@link SourceService} if the source can be resolved, otherwise null
+ * @param fileName - Path of the file a stack frame points at, relative or absolute
+ * @returns The resolver for that file, or `null` when the file has neither a map nor cached text
  *
  * @remarks
- * - First attempts to retrieve a mapped source using {@link FrameworkService.getSourceMap}.
- * - Falls back to file snapshots via {@link FilesModel.getSnapshot} if no source map exists.
- * - Creates a minimal {@link SourceService} implementation for snapshot-based sources.
- * - Returns null if neither a source map nor snapshot is available.
- * - The created service implements `getPositionWithCode` to extract code snippets with context lines.
+ * A registered map wins since it resolves back to the authored file rather than to the emitted one.
+ * Without a map the cached text stands in through a minimal resolver that slices the surrounding lines as its
+ * code window, so an unmapped file still prints a snippet.
+ * That window spans three lines either side unless the caller asks for a different span and is clamped to the
+ * bounds of the file.
+ * `startLine` and `endLine` come back as 1-based line numbers rather than as indexes into the text,
+ * which is how {@link formatErrorCode} reads them, so a printed number labels the line it belongs to.
+ * The line passes through as it arrived, while the column comes back one higher than it was given.
  *
  * @example
  * ```ts
- * const source = getSource.call(context, frame);
- * if (source) {
- *   const position = source.getPositionWithCode(10, 5, Bias.LOWER_BOUND);
- * }
+ * getSource('dist/index.js');                            // SourceService - the registered map
+ * getSource('src/index.ts')?.getPositionWithCode(10, 4); // line 10, column 5, lines 7-13 as code
+ * getSource('missing.ts');                               // null
  * ```
  *
  * @see SourceService
- * @see StackContextInterface
- * @see FilesModel.getSnapshot
+ * @see FilesModel.touch
  * @see FrameworkService.getSourceMap
  *
  * @since 2.0.0
@@ -55,28 +55,29 @@ export function getSource(fileName: string = ''): SourceService | null {
     const mapped = framework.getSourceMap(fileName);
     if (mapped) return mapped;
 
-    const snapshot = inject(FilesModel).getOrTouchFile(fileName);
-    const code = snapshot?.contentSnapshot?.text;
+    const snapshot = inject(FilesModel).touch(fileName);
+    const code = snapshot.snapshot?.text;
 
     if (!snapshot || !code) return null;
     const lines = code.split('\n');
 
     return {
         getPositionWithCode: (line, column, _bias, options) => {
-            const before = options?.linesBefore ?? 3;
             const after = options?.linesAfter ?? 3;
+            const before = options?.linesBefore ?? 3;
 
-            const startLine = Math.max(line - before, 0);
+            // both bounds are 1-based line numbers, so only the slice start converts to an index
+            const startLine = Math.max(line - before, 1);
             const endLine = Math.min(line + after, lines.length);
 
             return {
                 line,
-                column: column + 1,
-                code: lines.slice(startLine, endLine).join('\n'),
-                source: fileName,
                 name: null,
-                startLine,
+                code: lines.slice(startLine - 1, endLine).join('\n'),
+                source: fileName,
+                column: column,
                 endLine,
+                startLine,
                 sourceRoot: null,
                 sourceIndex: -1,
                 generatedLine: -1,
@@ -87,22 +88,26 @@ export function getSource(fileName: string = ''): SourceService | null {
 }
 
 /**
- * Extracts a parsed stack trace from either an Error object or an esbuild PartialMessage.
+ * Brings an error and an esbuild message to the same shape - a name, a message, and a list of frames.
  *
- * @param raw - Either an {@link Error} object or an esbuild {@link PartialMessage}
- * @returns A {@link ParsedStackTraceInterface} containing structured stack frame data
+ * @param raw - Thrown error, or the message esbuild reported for a failed build
+ * @returns The parsed trace, with an empty frame list when there is nothing to point at
  *
  * @remarks
- * - If `raw` is an Error instance, parses it directly using {@link parseErrorStack}.
- * - If `raw.detail` is an Error, parses that instead.
- * - For esbuild messages without location info, returns a minimal parsed stack.
- * - For esbuild messages with location, creates a single-frame stack from the location data.
+ * An `Error` is parsed from its own stack text, whether it arrives on its own or wrapped as the `detail` of an
+ * esbuild message.
+ * A plain esbuild message carries no stack, so its location becomes the single frame of the trace, flagged as
+ * ordinary code: not eval, not async, not native, and not a constructor call.
+ * A message without a location resolves to no frames at all, which leaves the caller with the text alone.
  *
  * @example
  * ```ts
- * const error = new Error("Something went wrong");
- * const parsed = getErrorStack(error);
- * console.log(parsed.stack); // Array of stack frames
+ * getErrorStack(new Error('boom')).stack.length; // 12 - frames parsed from error.stack
+ *
+ * getErrorStack({ text: 'Unexpected token', location: { file: 'src/index.ts', line: 4, column: 2 } }).stack;
+ * // [ { source: '@src/index.ts', fileName: 'src/index.ts', line: 4, column: 2, ... } ]
+ *
+ * getErrorStack({ text: 'Could not resolve module' }).stack; // []
  * ```
  *
  * @see parseErrorStack
@@ -127,7 +132,7 @@ export function getErrorStack(raw: Partial<PartialMessage> | Error): ParsedStack
             {
                 source: `@${ raw.location.file }`,
                 line: raw.location.line,
-                column: raw.location.column,
+                column: raw.location.column || 1,
                 fileName: raw.location.file,
                 eval: false,
                 async: false,
@@ -138,46 +143,39 @@ export function getErrorStack(raw: Partial<PartialMessage> | Error): ParsedStack
     };
 }
 
-
 /**
- * Parses error metadata into a structured stack representation with enhanced source information.
+ * Resolves an error back to its authored sources and picks the code window to print with it.
  *
- * @param raw - Either an esbuild {@link PartialMessage} or an {@link Error} object
- * @param options - Optional {@link StackTraceInterface} configuration for controlling stack parsing
- * @returns A {@link ResolveMetadataInterface} object containing formatted stack frames and code context
+ * @param raw - Thrown error, or the message esbuild reported for a failed build
+ * @param options - Frame selection and code window size, as {@link resolveError} takes them
+ * @param verbose - Whether native frames stay in the resolved stack
+ * @returns The resolved trace, carrying `formatCode` when a frame supplied a code window
  *
  * @remarks
- * - Creates a {@link ResolveMetadataInterface} using injected services for file and framework resolution.
- * - Respects the `verbose` configuration setting to control native and framework frame visibility.
- * - Uses {@link getErrorStack} to parse the raw error into stack frames.
- * - Processes each frame via {@link resolveError}, filtering out empty results.
- * - Returns structured metadata including formatted code, line/column positions, and stack traces.
- * - Line offsets are applied to all resolved positions for alignment with external systems.
+ * Every frame resolves through {@link getSource}, so a mapped frame points at the authored file and an unmapped
+ * one falls back to the cached text of the emitted file.
+ * `verbose` and `withFrameworkFrames` each admit native frames to the stack, while `withFrameworkFrames` alone
+ * decides whether a framework frame may supply the code window.
+ * The window is taken from the first frame that carries code, highlighted and marked at that position, and is
+ * left unset when no frame carries any - a resolve against sources that are gone prints as a bare trace.
  *
  * @example
  * ```ts
- * try {
- *   throw new Error("Something went wrong");
- * } catch (error) {
- *   const metadata = getErrorMetadata(error, { linesBefore: 5, linesAfter: 5 });
- *   console.log(metadata.stacks); // Array of formatted stack lines
- *   console.log(metadata.formatCode); // Highlighted code snippet
- * }
+ * const metadata = getErrorMetadata(error, { linesBefore: 2, linesAfter: 2 });
+ * metadata.stack[0].format; // 'at run src/index.ts:12:8'
+ * metadata.formatCode;      // lines 10-14, highlighted, with column 8 marked in bright pink
  * ```
  *
- * @see stackEntry
+ * @see resolveError
  * @see getErrorStack
- * @see StackInterface
  * @see StackTraceInterface
- * @see StackContextInterface
- * @see ConfigurationService
+ * @see ResolveMetadataInterface
  *
- * @since 2.0.0
+ * @since 3.0.0
  */
 
-export function getErrorMetadata(raw: PartialMessage | Error, options?: StackTraceInterface): ResolveMetadataInterface {
+export function getErrorMetadata(raw: PartialMessage | Error, options?: StackTraceInterface, verbose: boolean = false): ResolveMetadataInterface {
     const framework = inject(FrameworkService);
-    const verbose = inject(ConfigurationService).getValue(c => c.verbose) ?? false;
     const parsed = getErrorStack(raw);
     const resolved: ResolveMetadataInterface = resolveError(parsed, {
         ...options,
@@ -193,9 +191,9 @@ export function getErrorMetadata(raw: PartialMessage | Error, options?: StackTra
             resolved.formatCode = formatErrorCode(
                 {
                     code: highlightCode(frame.code),
-                    line: frame.line ?? 0,
-                    column: frame.column ?? 0,
-                    startLine: frame.stratLine ?? 0
+                    line: frame.line ?? 1,
+                    column: frame.column ?? 1,
+                    startLine: frame.stratLine ?? 1
                 },
                 { color: xterm.brightPink }
             );
@@ -206,41 +204,36 @@ export function getErrorMetadata(raw: PartialMessage | Error, options?: StackTra
 }
 
 /**
- * Formats error metadata into a human-readable string with enhanced styling.
+ * Renders resolved metadata as the block that gets printed to the terminal.
  *
- * @param metadata - The {@link ResolveMetadataInterface} object containing parsed stack trace information
- * @param name - The error name (e.g., "TypeError", "ReferenceError")
- * @param message - The error message describing what went wrong
- * @param notes - Optional array of esbuild {@link PartialMessage} notes to display
- * @returns A string containing the formatted error output with colorized text, code snippet, and stack trace
+ * @param metadata - Resolved trace, as {@link getErrorMetadata} returns it
+ * @param name - Name to head the block with, such as `TypeError` or `esBuildMessage`
+ * @param message - Message to head the block with
+ * @param notes - Extra lines esbuild attached to the message, printed in gray under the heading
+ * @returns The block, ready to write as-is
  *
  * @remarks
- * - Constructs a formatted error output from pre-parsed stack metadata.
- * - Displays the error name and message at the top with {@link xterm.lightCoral} highlighting.
- * - Includes any additional notes in gray text below the error message.
- * - Appends syntax-highlighted code snippet if available in metadata.
- * - Appends formatted stack trace frames with proper indentation under "Enhanced Stack Trace".
- * - All formatting and syntax highlighting should be pre-applied in the metadata.
+ * The heading is always written, the code window and the trace only when the metadata holds them, so an error
+ * resolved against missing sources still prints as a single readable line.
+ * Coloring of the window and of each frame is left as {@link getErrorMetadata} produced it - nothing here is
+ * highlighted a second time.
  *
  * @example
  * ```ts
- * const metadata: StackInterface = {
- *   code: "const x = undefined;\nx.toString();",
- *   line: 2,
- *   column: 1,
- *   source: "/path/to/file.ts",
- *   stacks: ["at Object.<anonymous> (/path/to/file.ts:2:1)"],
- *   formatCode: "1 | const x = undefined;\n2 | x.toString();\n    ^"
- * };
- *
- * const notes = [{ text: "Did you forget to check for null?" }];
- * console.log(formatStack(metadata, "TypeError", "Cannot read property 'toString' of undefined", notes));
+ * formatStack(metadata, 'TypeError', 'x is not a function');
+ * //
+ * // TypeError: x is not a function
+ * //
+ * // 11 | x();
+ * //    | ^
+ * //
+ * // Enhanced Stack Trace:
+ * //     at run src/index.ts:11:2
  * ```
  *
  * @see xterm
- * @see PartialMessage
- * @see StackInterface
  * @see getErrorMetadata
+ * @see ResolveMetadataInterface
  *
  * @since 2.0.0
  */
