@@ -3,7 +3,9 @@
  */
 
 import { URL } from 'url';
-import { deepMerge, isObject } from './object.component';
+import { runInNewContext } from 'vm';
+import { equals, hasKey, stringify } from './object.component';
+import { deepMerge, isObject, isPlainObject } from './object.component';
 
 /**
  * Tests
@@ -18,6 +20,32 @@ describe('deepMerge utility', () => {
         xJet.restoreAllMocks();
     });
 
+    describe('isPlainObject', () => {
+        test('should tell an object literal from an instance of something', () => {
+            expect(isPlainObject({ key: 'value' })).toBe(true);
+            expect(isPlainObject(Object.create(null))).toBe(true);
+            expect(isPlainObject(runInNewContext('({ a: 1 })'))).toBe(true);
+            expect(isPlainObject(/^_/)).toBe(false);
+            expect(isPlainObject(new Date())).toBe(false);
+            expect(isPlainObject([])).toBe(false);
+            expect(isPlainObject(null)).toBe(false);
+        });
+
+        test('should reject an instance that carries its state somewhere other than its own keys', () => {
+            expect(isPlainObject(new Map([[ 'a', 1 ]]))).toBe(false);
+            expect(isPlainObject(new Set([ 1 ]))).toBe(false);
+            expect(isPlainObject(new (class Thing {
+                name = 'thing';
+            })())).toBe(false);
+        });
+
+        test('should reject a value that cannot be keyed at all', () => {
+            expect(isPlainObject(42)).toBe(false);
+            expect(isPlainObject('hello')).toBe(false);
+            expect(isPlainObject(undefined)).toBe(false);
+        });
+    });
+
     describe('isObject', () => {
         test('should return true for plain objects', () => {
             expect(isObject({})).toBe(true);
@@ -29,6 +57,16 @@ describe('deepMerge utility', () => {
             expect(isObject(null)).toBe(false);
             expect(isObject(42)).toBe(false);
             expect(isObject('hello')).toBe(false);
+        });
+
+        test('should accept anything else that is an object, whatever else it is', () => {
+            expect(isObject(new Date())).toBe(true);
+            expect(isObject(/a/)).toBe(true);
+            expect(isObject(new (class Thing {})())).toBe(true);
+        });
+
+        test('should return false for a function', () => {
+            expect(isObject(() => undefined)).toBe(false);
         });
     });
 
@@ -148,22 +186,74 @@ describe('deepMerge utility', () => {
 
             expect(result).toBe(a);
         });
+
+        test('should stop at a source that is not an object, leaving the ones behind it unmerged', () => {
+            expect(deepMerge({ a: 1 }, <any> null, { b: 2 })).toEqual({ a: 1 });
+            expect(deepMerge({ a: 1 }, <any> [ 'x' ], { b: 2 })).toEqual({ a: 1 });
+        });
+
+        test('should overwrite an array target with an object source', () => {
+            expect(deepMerge({ a: [ 1 ] }, { a: { b: 2 } })).toEqual({ a: { b: 2 } });
+        });
+
+        test('should overwrite an object target with an array source', () => {
+            expect(deepMerge({ a: { b: 1 } }, { a: [ 2 ] })).toEqual({ a: [ 2 ] });
+        });
+
+        test('should copy a nested object into a fresh target rather than sharing it', () => {
+            const source = { nested: { a: 1 } };
+            const copy = deepMerge({}, source);
+
+            expect(copy).toEqual(source);
+            expect((<any> copy).nested).not.toBe(source.nested);
+        });
+
+        test('should merge an object literal built in another realm rather than overwriting with it', () => {
+            const foreign = runInNewContext('({ nested: { a: 1 }, pattern: /^_/ })');
+            const merged = deepMerge<any>({ nested: { b: 2 } }, foreign);
+
+            expect(merged.nested).toEqual({ a: 1, b: 2 });
+            expect(merged.pattern).toBe(foreign.pattern);
+        });
+
+        test('should carry a value that is not a plain object across as it stands', () => {
+            const source = { pattern: /^_/, created: new Date(0) };
+            const merged = deepMerge<any>({ pattern: /^x/, created: {} }, source);
+
+            expect(merged.pattern).toBe(source.pattern);
+            expect(merged.created).toBe(source.created);
+        });
+
+        test('should replace a target that is not a plain object rather than merging into it', () => {
+            const merged = deepMerge<any>({ created: new Date(0) }, { created: { year: 2024 } });
+
+            expect(merged.created).toEqual({ year: 2024 });
+            expect(merged.created).not.toBeInstanceOf(Date);
+        });
+
+        test('should carry a keyed instance across whole rather than reducing it to its own keys', () => {
+            const index = new Map([[ 'a', 1 ]]);
+            const thing = new (class Thing {
+                name = 'thing';
+            })();
+
+            const merged = deepMerge<any>({ index: { b: 2 }, thing: {} }, { index, thing });
+
+            expect(merged.index).toBe(index);
+            expect(merged.index.size).toBe(1);
+            expect(merged.thing).toBe(thing);
+        });
+
+        test('should share an array a fresh target had nothing to concatenate it with', () => {
+            const source = { items: [ 1, 2 ] };
+            const copy = deepMerge<any>({}, source);
+
+            copy.items.push(3);
+
+            expect(source.items).toEqual([ 1, 2, 3 ]);
+        });
     });
 });
-
-/**
- * Import will remove at compile time
- */
-
-/**
- * Imports
- */
-
-import { equals, hasKey } from '@components/object.component';
-
-/**
- * Tests
- */
 
 describe('Object Component', () => {
     afterEach(() => {
@@ -243,6 +333,10 @@ describe('Object Component', () => {
             const date = new Date('2024-01-01');
 
             expect(equals(date, date)).toBe(true);
+        });
+
+        test('should report two invalid dates as unequal', () => {
+            expect(equals(new Date('nonsense'), new Date('nonsense'))).toBe(false);
         });
     });
 
@@ -369,6 +463,19 @@ describe('Object Component', () => {
     describe('equals function - Objects', () => {
         test('should compare objects by properties', () => {
             expect(equals({ a: 1, b: 2 }, { a: 1, b: 2 })).toBe(true);
+        });
+
+        test('should look at the string keys alone, leaving symbol entries uncompared', () => {
+            const key = Symbol('id');
+
+            expect(equals({ [key]: 1 }, { [key]: 2 })).toBe(true);
+        });
+
+        test('should compare a function by identity alone', () => {
+            const fn = (): number => 1;
+
+            expect(equals(fn, fn)).toBe(true);
+            expect(equals(fn, (): number => 1)).toBe(false);
         });
 
         test('should return false for objects with different properties', () => {
@@ -733,5 +840,41 @@ describe('Object Component', () => {
 
             expect(equals(obj1, obj2)).toBe(true);
         });
+    });
+});
+
+describe('stringify', () => {
+    test.each(
+        { case: 'an object', value: { a: 1, b: 'x' }, expected: '{"a":1,"b":"x"}' },
+        { case: 'an array', value: [ 1, 'x', true, null ], expected: '[1,"x",true,null]' },
+        { case: 'null', value: null, expected: 'null' },
+        { case: 'a bigint on its own', value: 10n, expected: '"10n"' },
+        { case: 'a bigint held by a key', value: { id: 10n }, expected: '{"id":"10n"}' },
+        { case: 'a negative bigint', value: -5n, expected: '"-5n"' },
+        { case: 'a bigint nested in an array', value: [ 1n, 2n ], expected: '["1n","2n"]' },
+        { case: 'a bigint nested in an object', value: { nested: { id: 1n } }, expected: '{"nested":{"id":"1n"}}' },
+        { case: 'a bigint past what a number holds', value: { big: 9007199254740993n }, expected: '{"big":"9007199254740993n"}' },
+        { case: 'a value that carries its own serialization', value: new Date(0), expected: '"1970-01-01T00:00:00.000Z"' },
+        { case: 'an instance with no keys of its own', value: new Map([[ 'a', 1 ]]), expected: '{}' },
+        { case: 'a key JSON has no representation for', value: { a: undefined, b: 1 }, expected: '{"b":1}' }
+    )('should serialize $case', ({ value, expected }) => {
+        expect(stringify(value)).toBe(expected);
+    });
+
+    test('should hand back nothing for a value JSON has no representation for', () => {
+        expect(stringify(undefined)).toBeUndefined();
+        expect(stringify(() => 1)).toBeUndefined();
+    });
+
+    test('should throw on a structure that points back at itself', () => {
+        const circular: any = { name: 'root' };
+        circular.self = circular;
+
+        expect(() => stringify(circular)).toThrow(TypeError);
+    });
+
+    test('should keep the digits a bigint would lose as a number', () => {
+        expect(stringify({ big: 9007199254740993n })).toContain('9007199254740993');
+        expect(String(Number(9007199254740993n))).not.toBe('9007199254740993');
     });
 });

@@ -1,32 +1,24 @@
 /**
- * Checks whether a value is a plain object (not null, not an array, but an object).
+ * Reports whether a value can be treated as a keyed object.
  *
- * @param item - The value to check
- *
- * @returns `true` if the value is a plain object, `false` otherwise
+ * @param item - Value to test
+ * @returns `true` when the value is a non-null object that is not an array
  *
  * @remarks
- * This type guard function narrows the type to `Record<string, unknown>` when it returns `true`.
- * A value is considered a plain object if it meets all criteria:
- * - Is truthy (not `null`, `undefined`, `false`, `0`, `''`, etc.)
- * - Has type `'object'`
- * - Is not an array
- *
- * This function treats class instances, dates, and other object types as plain objects since
- * they satisfy the criteria. Use more specific checks if you need to exclude these.
+ * Narrows to `Record<string, unknown>`, which is what lets the merge and comparison helpers index a value they were
+ * handed as `unknown`.
+ * Only arrays and `null` are ruled out, so a `Date`, a `RegExp`, and a class instance all pass - the callers that
+ * care treat those specially before asking.
  *
  * @example
  * ```ts
- * isObject({}); // true
  * isObject({ key: 'value' }); // true
- * isObject(null); // false
- * isObject([]); // false
- * isObject('string'); // false
- * isObject(new Date()); // true (it's an object, not an array)
+ * isObject(new Date());       // true - an object, whatever else it is
+ * isObject([]);               // false
+ * isObject(null);             // false
  * ```
  *
- * @see {@link deepMerge}
- *
+ * @see deepMerge
  * @since 2.0.0
  */
 
@@ -35,63 +27,74 @@ export function isObject(item: unknown): item is Record<string, unknown> {
 }
 
 /**
- * Recursively merges multiple source objects into a target object with deep property merging.
+ * Reports whether a value is an ordinary keyed object rather than an instance of something.
  *
- * @template T - The type of the target object must extend `object`
- *
- * @param target - The target object to merge into
- * @param sources - One or more source objects to merge from
- *
- * @returns The target object with all sources merged into it
+ * @param item - Value to test
+ * @returns `true` when the value is an object literal, or one built with a null prototype
  *
  * @remarks
- * This function performs a deep merge with the following behavior:
- * - Primitive values in sources overwrite values in target
- * - Arrays are concatenated (target items first, then source items)
- * - Objects are recursively merged
- * - Sources are processed left-to-right, with later sources overwriting earlier ones
- * - The target object is mutated and returned
- *
- * Merge strategy by type:
- * - **Both arrays**: Concatenates `[...targetValue, ...sourceValue]`
- * - **Both objects**: Recursively merges properties
- * - **Source is object, target is not**: Creates a new object with source properties
- * - **Other cases**: Source value overwrites target value
+ * Where {@link isObject} asks whether a value can be indexed, this asks whether walking its keys describes it.
+ * A `Date`, a `RegExp`, a `Map`, and a class instance carry their state somewhere other than their own enumerable
+ * keys, so merging into a fresh object would leave nothing of them behind.
+ * The test is that the prototype is a root of its chain rather than this realm's `Object.prototype`.
+ * An object literal built inside a `vm` context therefore counts as plain,
+ * which is what a configuration file executed in a sandbox hands back.
  *
  * @example
  * ```ts
- * const target = { a: 1, b: { x: 10 } };
- * const source = { b: { y: 20 }, c: 3 };
- *
- * const result = deepMerge(target, source);
- * // { a: 1, b: { x: 10, y: 20 }, c: 3 }
+ * isPlainObject({ key: 'value' });               // true
+ * isPlainObject(Object.create(null));            // true
+ * isPlainObject(runInNewContext('({ a: 1 })'));  // true - plain, whatever realm built it
+ * isPlainObject(/^_/);                           // false - a value, not a shape
+ * isPlainObject(new Date());                     // false
  * ```
+ *
+ * @see isObject
+ * @see deepMerge
+ *
+ * @since 3.0.0
+ */
+
+export function isPlainObject(item: unknown): item is Record<string, unknown> {
+    if (!isObject(item)) return false;
+    const prototype = Object.getPrototypeOf(item);
+
+    return prototype === null || Object.getPrototypeOf(prototype) === null;
+}
+
+/**
+ * Merges objects into a target, recursing into nested objects.
+ *
+ * @typeParam T - Type of the object being merged into
+ *
+ * @param target - Object the sources are merged into, modified in place
+ * @param sources - Objects to merge, applied left to right so a later one wins
+ * @returns The target, for chaining
+ *
+ * @remarks
+ * Three rules decide each key: two arrays concatenate, two plain objects merge, and anything else is overwritten.
+ * A `Date`, a `RegExp`, a `Map`, and a class instance are values rather than shapes to walk,
+ * so they are carried across as they stand.
+ * Recursing into such a value would reduce it to a plain object holding whatever its own enumerable keys are.
+ * Concatenation rather than replacement means merging the same configuration twice doubles its arrays,
+ * so an accumulating merge wants a fresh target each time.
+ * That is also the way to use this as a deep copy, by merging into `{}`.
+ * The target is modified rather than copied, so pass a literal unless the caller means to have its object rewritten.
  *
  * @example
  * ```ts
- * // Array concatenation
- * const target = { items: [1, 2] };
- * const source = { items: [3, 4] };
- *
- * deepMerge(target, source);
- * // { items: [1, 2, 3, 4] }
+ * deepMerge({ a: 1, b: { x: 10 } }, { b: { y: 20 }, c: 3 }); // { a: 1, b: { x: 10, y: 20 }, c: 3 }
+ * deepMerge({ items: [ 1, 2 ] }, { items: [ 3 ] });          // { items: [ 1, 2, 3 ] } - concatenated
+ * deepMerge({}, { pattern: /^_/ });                          // { pattern: /^_/ } - the same regular expression
+ * deepMerge({}, config);                                     // a deep copy of config
  * ```
  *
- * @example
- * ```ts
- * // Multiple sources
- * const result = deepMerge(
- *   { a: 1 },
- *   { b: 2 },
- *   { c: 3 }
- * );
- * // { a: 1, b: 2, c: 3 }
- * ```
- *
- * @see {@link isObject}
+ * @see isObject
+ * @see isPlainObject
  *
  * @since 2.0.0
  */
+
 export function deepMerge<T extends object>(target: T, ...sources: Array<object>): T {
     if (!sources.length) return target;
     const source = sources.shift();
@@ -103,10 +106,10 @@ export function deepMerge<T extends object>(target: T, ...sources: Array<object>
 
             if (Array.isArray(sourceValue) && Array.isArray(targetValue)) {
                 Object.assign(target, { [key]: [ ...targetValue, ...sourceValue ] });
-            } else if (isObject(sourceValue)) {
+            } else if (isPlainObject(sourceValue)) {
                 Object.assign(target, {
                     [key]: deepMerge(
-                        isObject(targetValue) ? targetValue : {},
+                        isPlainObject(targetValue) ? targetValue : {},
                         sourceValue
                     )
                 });
@@ -122,65 +125,31 @@ export function deepMerge<T extends object>(target: T, ...sources: Array<object>
 }
 
 /**
- * Performs deep equality comparison between two values with support for primitives, objects, arrays, and special types.
+ * Compares two values by structure rather than by identity.
  *
- * @param a - The first value to compare
- * @param b - The second value to compare
- * @param strictCheck - When `true`, requires arrays and objects to have the same length/key count; defaults to `true`
- *
- * @returns `true` if values are deeply equal, `false` otherwise
+ * @param a - First value
+ * @param b - Second value
+ * @param strictCheck - Whether both sides must have the same number of entries, `true` by default
+ * @returns `true` when the two are equal by these rules
  *
  * @remarks
- * This function performs comprehensive equality checking with special handling for:
- * - **Primitives**: Uses strict equality (`===`) and `Object.is()` for `NaN` and `-0` handling
- * - **Dates**: Compares timestamps using `getTime()`
- * - **RegExp**: Compares source patterns and flags
- * - **URLs**: Compares full `href` strings
- * - **Arrays**: Recursively compares elements
- * - **Objects**: Recursively compares properties
- *
- * The `strictCheck` parameter controls comparison behavior:
- * - `true` (default): Arrays must have the same length, objects must have the same key count.
- * - `false`: Allows partial matches (subset comparison)
- *
- * **Null handling**:
- * Returns `false` if either value is `null` (unless both are `null`, caught by `===` check).
+ * `Date`, `RegExp`, and `URL` are compared by what they mean - timestamp, pattern and flags, href - rather than by
+ * walking their properties, which would find nothing.
+ * `NaN` equals itself here, unlike under `===`.
+ * `0` and `-0` compare equal, since strict equality settles them before the question of sign arises.
+ * Relaxing `strictCheck` turns the comparison into a subset test: every entry of the first value must appear in the
+ * second, and extra entries in the second are ignored.
  *
  * @example
  * ```ts
- * equals(1, 1); // true
- * equals('test', 'test'); // true
- * equals(NaN, NaN); // true (via Object.is)
- * equals(null, null); // true
+ * equals(NaN, NaN);                                      // true
+ * equals(new Date('2024-01-01'), new Date('2024-01-01')); // true
+ * equals({ a: 1, b: { c: 2 } }, { a: 1, b: { c: 2 } });   // true
+ * equals([ 1, 2 ], [ 1, 2, 3 ], false);                   // true - a subset
+ * equals([ 1, 2 ], [ 1, 2, 3 ]);                          // false - lengths differ
  * ```
  *
- * @example
- * ```ts
- * // Date comparison
- * const date1 = new Date('2024-01-01');
- * const date2 = new Date('2024-01-01');
- * equals(date1, date2); // true
- * ```
- *
- * @example
- * ```ts
- * // Deep object comparison
- * equals(
- *   { a: 1, b: { c: 2 } },
- *   { a: 1, b: { c: 2 } }
- * ); // true
- * ```
- *
- * @example
- * ```ts
- * // Strict vs non-strict array comparison
- * equals([1, 2], [1, 2, 3], true); // false (different lengths)
- * equals([1, 2], [1, 2, 3], false); // true (subset match)
- * ```
- *
- * @see {@link deepEquals}
- * @see {@link hasKey}
- *
+ * @see hasKey
  * @since 2.0.0
  */
 
@@ -206,43 +175,25 @@ export function equals(a: unknown, b: unknown, strictCheck = true): boolean {
 }
 
 /**
- * Checks whether an object or function has a specific property key.
+ * Reports whether a key can be reached on a value.
  *
- * @param obj - The object or function to check
- * @param key - The property key to search for (string or symbol)
- *
- * @returns `true` if the key exists on the object, `false` otherwise
+ * @param obj - Value to look in
+ * @param key - Key to look for, a name or a symbol
+ * @returns `true` when the key is reachable, own or inherited
  *
  * @remarks
- * This function performs two checks to determine the key existence:
- * 1. Uses the `in` operator to check the prototype chain
- * 2. Uses `Object.prototype.hasOwnProperty.call()` for own properties
- *
- * Returns `false` if the value is:
- * - `null` or `undefined`
- * - Not an object or function (primitives like strings, numbers, booleans)
- *
- * This function is safer than direct property access when dealing with unknown objects,
- * as it handles `null` and `undefined` gracefully without throwing errors.
+ * Answers for objects and functions only: a primitive returns `false` even where the key would resolve, so
+ * `'length'` on a string is not found here.
+ * `null` and `undefined` answer `false` rather than throwing, which is the point of asking through this rather than
+ * with `in` directly.
  *
  * @example
  * ```ts
- * const obj = { name: 'test' };
- * hasKey(obj, 'name'); // true
- * hasKey(obj, 'age'); // false
- * hasKey(null, 'key'); // false
- * hasKey('string', 'length'); // true
+ * hasKey({ name: 'test' }, 'name');   // true
+ * hasKey({ name: 'test' }, 'age');    // false
+ * hasKey(null, 'key');                // false
+ * hasKey('string', 'length');         // false - a primitive, not an object
  * ```
- *
- * @example
- * ```ts
- * // Symbol keys
- * const sym = Symbol('key');
- * const obj = { [sym]: 'value' };
- * hasKey(obj, sym); // true
- * ```
- *
- * @see {@link deepEquals}
  *
  * @since 2.0.0
  */
@@ -255,51 +206,18 @@ export function hasKey(obj: unknown, key: string | symbol): boolean {
 }
 
 /**
- * Performs deep equality comparison on objects and arrays with configurable strictness.
+ * Compares two objects or arrays entry by entry.
  *
- * @param a - The first object to compare
- * @param b - The second object to compare
- * @param strictCheck - When `true`, requires same length/key count; defaults to `true`
- *
- * @returns `true` if objects are deeply equal, `false` otherwise
+ * @param a - First value
+ * @param b - Second value
+ * @param strictCheck - Whether both sides must have the same number of entries
+ * @returns `true` when every entry of the first matches the second
  *
  * @remarks
- * This internal helper function is called by {@link equals} to handle object and array comparisons.
- * It recursively compares nested structures using the following logic:
- *
- * **Array comparison**:
- * - In strict mode: Arrays must have identical length
- * - Compares elements by index using {@link equals}
- * - Order matters (different order means not equal)
- *
- * **Object comparison**:
- * - In strict mode: Objects must have same number of keys
- * - Iterates through keys of the first object
- * - Checks if each key exists in the second object
- * - Recursively compares property values using {@link equals}
- *
- * **Non-strict mode** allows partial matches where the first value can be a subset of the second.
- *
- * @example
- * ```ts
- * // Arrays
- * deepEquals([1, 2, 3], [1, 2, 3], true); // true
- * deepEquals([1, 2], [1, 2, 3], false); // true (subset)
- * deepEquals([1, 2], [1, 2, 3], true); // false (different lengths)
- * ```
- *
- * @example
- * ```ts
- * // Nested objects
- * deepEquals(
- *   { user: { name: 'Alice', age: 30 } },
- *   { user: { name: 'Alice', age: 30 } },
- *   true
- * ); // true
- * ```
- *
- * @see {@link equals}
- * @see {@link hasKey}
+ * The recursive half of {@link equals}, which handles the special types before delegating here.
+ * Position compares arrays, so the same items in another order are not equal.
+ * Objects are walked by the first value's own enumerable keys, which is what makes the relaxed mode a subset test -
+ * a key the second value has and the first does not is never looked at.
  *
  * @since 2.0.0
  */
@@ -323,4 +241,38 @@ function deepEquals(a: object, b: object, strictCheck: boolean = true): boolean 
     }
 
     return true;
+}
+
+/**
+ * Serializes a value to JSON, carrying a `bigint` across as a string.
+ *
+ * @param value - Value to serialize
+ * @returns The JSON text
+ *
+ * @throws TypeError - Raised when the value holds a circular reference
+ *
+ * @remarks
+ * `JSON.stringify` throws on a `bigint` rather than serializing it, so this converts each to its decimal digits on
+ * the way out.
+ * The digits are written as a JSON string, since JSON has no number wide enough to hold them,
+ * which is what keeps a value past `Number.MAX_SAFE_INTEGER` exact.
+ * A reader therefore gets a string back where a `bigint` went in.
+ * Everything else behaves as `JSON.stringify` does: an `undefined` property is dropped, a `Map` and a `Set` come out
+ * as `{}`, and a `Date` comes out as the string its own `toJSON` produced.
+ * A top-level `undefined`, function, or symbol still yields `undefined` rather than text,
+ * which the declared return type does not admit.
+ *
+ * @example
+ * ```ts
+ * stringify({ id: 9007199254740993n }); // '{"id":"9007199254740993n"}' - the digits kept exactly
+ * stringify({ a: 1, b: [ 1, 2 ] });     // '{"a":1,"b":[1,2]}'
+ * stringify({ a: undefined, b: 1 });    // '{"b":1}' - the undefined key dropped
+ * stringify(undefined);                 // undefined - not text, despite the signature
+ * ```
+ *
+ * @since 3.0.0
+ */
+
+export function stringify(value: unknown): string {
+    return JSON.stringify(value, (_, entry) => typeof entry === 'bigint' ? entry.toString() + 'n' : entry);
 }
