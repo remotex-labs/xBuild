@@ -1,5 +1,5 @@
 /**
- * Import will remove at compile time
+ * Type-only imports erased during TypeScript compilation.
  */
 
 import type { BuildOptions } from 'esbuild';
@@ -8,86 +8,85 @@ import type { BuildOptions } from 'esbuild';
  * Imports
  */
 
-import { xBuildError } from '@errors/xbuild.error';
-import { collectFilesFromGlob } from '@components/glob.component';
+import { cwd } from 'process';
+import { relative } from '@remotex-labs/xmap';
+import { collectFiles } from '@components/glob.component';
+import { FrameworkService } from '@services/framework.service';
 
 /**
- * Extracts and normalizes entry points from various esbuild entry point formats.
+ * Normalizes entry points of any esbuild form into an output name to input path record.
  *
- * @param baseDir - Base directory to resolve glob patterns from
- * @param entryPoints - Entry points in any esbuild-supported format
- * @returns Normalized object mapping output names to input file paths
+ * @param entryPoints - Entry points in any form esbuild accepts, or `undefined`
+ * @param root - Directory the output names are shortened against, defaulting to the working directory
+ * @returns The entry points keyed by the output each one produces, or `undefined` when none were given
+ *
+ * @throws Error - When the entry points are neither an array, an object, nor `undefined`
  *
  * @remarks
- * Supports three esbuild entry point formats:
+ * The three forms differ only in where the output name comes from:
+ * - A list of globs is matched from the working directory, and each file is keyed by its path with `root` stripped
+ *   off the front and the extension dropped, so `src` as the root turns `src/components/interactive.component.ts`
+ *   into `components/interactive.component`.
+ * - A list of `in` and `out` pairs is keyed by `out`, both paths passing through untouched.
+ * - A record is already in the target shape and is returned as it stands, without a copy.
  *
- * **Array of strings (glob patterns):**
- * - Treats entries as glob patterns to match files
- * - Keys are filenames without extensions
- *
- * **Array of objects with `in` and `out` properties:**
- * - `in`: Input file path
- * - `out`: Output file path
- * - Keys are the `out` values
- *
- * **Record object:**
- * - Keys are output names
- * - Values are input file paths
- * - Returned as-is without modification
- *
- * @throws {@link xBuildError}
- * Thrown when entry points format is unsupported or invalid
- *
- * @example
- * Array of glob patterns:
- * ```ts
- * const entries = extractEntryPoints('./src', ['**\/*.ts', '!**\/*.test.ts']);
- * // Returns: { 'index': 'index.ts', 'utils/helper': 'utils/helper.ts' }
- * ```
+ * Globs are always matched from the working directory, whatever `root` says: `root` shortens the output names and
+ * does nothing else, matching no files itself and excluding none.
+ * A file the globs reach from outside `root` is therefore kept rather than dropped,
+ * and is named by its whole path from the working directory instead.
+ * One call can therefore carry files from either side of `root`:
+ * an outside file lands in a directory of its own in the output, while an inside file lands at the top.
+ * The values are the paths the walk produced, relative to the working directory,
+ * so nothing is resolved a second time, and a key costs one slice.
+ * An empty list yields an empty record rather than every file under the working directory, which a pattern set with
+ * no includes would otherwise match.
  *
  * @example
- * Array of in/out objects:
  * ```ts
- * const entries = extractEntryPoints('./src', [
- *   { in: 'src/index.ts', out: 'bundle' },
- *   { in: 'src/worker.ts', out: 'worker' }
- * ]);
- * // Returns: { 'bundle': 'src/index.ts', 'worker': 'src/worker.ts' }
+ * extractEntryPoints([ 'src/**' ]);
+ * // { 'src/index': 'src/index.ts', 'src/components/glob.component': 'src/components/glob.component.ts' }
+ *
+ * extractEntryPoints([ 'src/**' ], 'src/components');
+ * // {
+ * //     'glob.component': 'src/components/glob.component.ts',    // under the root, shortened to its own name
+ * //     'src/services/vm.service': 'src/services/vm.service.ts'  // outside it, named by its whole path
+ * // }
+ *
+ * extractEntryPoints([ { in: 'src/index.ts', out: 'bundle' } ]);
+ * // { bundle: 'src/index.ts' }
  * ```
  *
- * @example
- * Record object:
- * ```ts
- * const entries = extractEntryPoints('./src', {
- *   main: 'src/index.ts',
- *   worker: 'src/worker.ts'
- * });
- * // Returns: { 'main': 'src/index.ts', 'worker': 'src/worker.ts' }
- * ```
+ * @see collectFiles
+ * @see {@link https://esbuild.github.io/api/#entry-points | esbuild entry points}
  *
- * @see {@link https://esbuild.github.io/api/#entry-points|esbuild Entry Points}
- *
- * @since 2.0.0
+ * @since 3.0.0
  */
 
-export function extractEntryPoints(baseDir: string, entryPoints: BuildOptions['entryPoints']): Record<string, string> | undefined {
-    if (Array.isArray(entryPoints)) {
-        let result: Record<string, string> = {};
+export function extractEntryPoints(entryPoints: BuildOptions['entryPoints'], root: string = cwd()): Record<string, string> | undefined {
+    if (entryPoints === undefined) return undefined;
+    if (!Array.isArray(entryPoints)) {
+        if (typeof entryPoints !== 'object' || entryPoints === null) throw new Error('Unsupported entry points format');
 
-        if (entryPoints.length > 0 && typeof entryPoints[0] === 'object') {
-            (entryPoints as { in: string, out: string }[]).forEach(entry => {
-                result[entry.out] = entry.in;
-            });
-        } else if (typeof entryPoints[0] === 'string') {
-            result =  collectFilesFromGlob(baseDir, <Array<string>> entryPoints);
-        }
-
-        return result;
-    } else if (entryPoints && typeof entryPoints === 'object') {
         return entryPoints;
-    } else if (entryPoints === undefined) {
-        return undefined;
     }
 
-    throw new xBuildError('Unsupported entry points format');
+    const result: Record<string, string> = {};
+    if (entryPoints.length < 1) return result;
+
+    if (typeof entryPoints[0] === 'object') {
+        for (const entry of <Array<{ in: string, out: string }>> entryPoints) result[entry.out] = entry.in;
+
+        return result;
+    }
+
+    const prefix = relative(cwd(), FrameworkService.resolve(root));
+    const scope = prefix && prefix !== '.' ? `${ prefix }/` : '';
+
+    for (const file of collectFiles(cwd(), <Array<string>> entryPoints)) {
+        const name = scope && file.startsWith(scope) ? file.slice(scope.length) : file;
+        const dot = name.lastIndexOf('.');
+        result[dot > name.lastIndexOf('/') + 1 ? name.slice(0, dot) : name] = file;
+    }
+
+    return result;
 }
