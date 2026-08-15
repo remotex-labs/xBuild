@@ -1,121 +1,55 @@
 /**
- * Import will remove at compile time
+ * Type-only imports erased during TypeScript compilation.
  */
 
 import type { Options } from 'yargs';
 
 /**
- * Default path to the xBuild configuration file.
+ * Path the `--config` option falls back to.
  *
  * @remarks
- * This constant defines the standard location for xBuild's build configuration.
- * Used as the default value for the `--config` CLI option when no custom path is provided.
- *
- * The configuration file contains:
- * - Build variant definitions (production, development, etc.)
- * - Common build settings shared across variants
- * - esbuild compiler options
- * - TypeScript integration settings
- * - Custom lifecycle hooks
- * - Define replacements and injections
- *
- * The file is a TypeScript module that exports build configuration, enabling
- * type-safe configuration with IDE autocomplete support.
+ * Resolved against the working directory, so the file is picked up by name from wherever the build was started.
+ * It is the default of the option itself rather than a fallback applied afterward,
+ * which is what lets every parse pass report a path whether one was typed.
  *
  * @example
  * ```ts
- * // Default usage
- * xBuild src/index.ts
- * // Automatically looks for: config.xbuild.ts
+ * ArgsConfigPath;                            // 'config.xbuild.ts'
+ * ArgsDefaultOptions.config.default;         // 'config.xbuild.ts' - the same value, reused
  * ```
  *
- * @example
- * ```ts
- * // Custom config path
- * xBuild src/index.ts --config build/custom.xbuild.ts
- * ```
- *
- * @since 2.0.0
+ * @since 3.0.0
  */
 
-export const CLI_CONFIG_PATH = 'config.xbuild.ts' as const;
+export const ArgsConfigPath = 'config.xbuild.ts' as const;
 
 /**
- * Default command-line interface options and their configurations.
+ * Every option xBuild itself accepts, in the form yargs declares them.
  *
  * @remarks
- * This constant defines all available CLI flags and arguments for the xBuild tool,
- * providing comprehensive build customization from the command line. Each option
- * includes type validation, aliases, descriptions, and default values.
+ * One table serving three purposes:
+ * - it declares the options for the full parse,
+ * - it supplies `config` on its own to the early pass that only needs the configuration path,
+ * - and its keys name the flags help gathers under the xBuild heading.
  *
- * **Option Categories:**
- *
- * **Input/Output:**
- * - `entryPoints`: Source files to compile (supports glob patterns)
- * - `outdir`: Output directory for compiled files
- *
- * **Build Modes:**
- * - `watch`: Enable watch mode for automatic rebuilds
- * - `serve`: Start development server
- * - `typeCheck`: Type check only without output
- *
- * **Build Configuration:**
- * - `bundle`: Bundle dependencies into output
- * - `minify`: Minify output code
- * - `format`: Module format (cjs, esm, iife)
- * - `platform`: Target platform (browser, node, neutral)
- *
- * **TypeScript:**
- * - `declaration`: Generate .d.ts files
- * - `types`: Enable type checking during build
- * - `failOnError`: Fail build on type errors
- * - `tsconfig`: Custom tsconfig.json path
- *
- * **Configuration:**
- * - `config`: Custom build configuration file path
- * - `verbose`: Enable detailed error messages
- *
- * All options can be used individually or combined to create complex build workflows.
- * Options specified on the command line override configuration file settings.
+ * An option added here is therefore declared, parsed, and documented by that one edit.
+ * Only `config` carries a default, so every other flag is absent from the parse result unless it was typed.
+ * That is what lets configuration handling tell a flag that was left out from one that was passed as `false`.
+ * `platform` and `format` restrict their values, so an unrecognized one fails during parsing rather than reaching the
+ * build.
  *
  * @example
  * ```ts
- * // Single file build with defaults
- * xBuild src/index.ts
+ * ArgsDefaultOptions.minify.alias;   // 'm'
+ * ArgsDefaultOptions.format.choices; // [ 'cjs', 'esm', 'iife' ]
+ * Object.keys(ArgsDefaultOptions);   // the flags listed under 'xBuild Options:' in help
  * ```
  *
- * @example
- * ```ts
- * // Production build with bundling and minification
- * xBuild src/app.ts --bundle --minify --format esm
- * ```
- *
- * @example
- * ```ts
- * // Development mode with watch and server
- * xBuild src/app.ts --watch --serve dist
- * ```
- *
- * @example
- * ```ts
- * // Library build with type definitions
- * xBuild src/lib.ts --declaration --format esm --outdir dist
- * ```
- *
- * @example
- * ```ts
- * // Type checking only (no output)
- * xBuild --typeCheck
- * ```
- *
- * @see {@link TSCONFIG_PATH}
- * @see {@link CLI_CONFIG_PATH}
- * @see {@link CLI_USAGE_EXAMPLES}
- *
- * @since 2.0.0
+ * @see ArgsConfigPath
+ * @since 3.0.0
  */
 
-export const CLI_DEFAULT_OPTIONS: Record<string, Options> = {
+export const ArgsDefaultOptions: Record<string, Options> = {
     entryPoints: {
         describe: 'Source files to build (supports glob patterns)',
         type: 'string',
@@ -156,7 +90,7 @@ export const CLI_DEFAULT_OPTIONS: Record<string, Options> = {
         describe: 'Path to build configuration file',
         alias: 'c',
         type: 'string',
-        default: CLI_CONFIG_PATH
+        default: ArgsConfigPath
     },
     tsconfig: {
         describe: 'Path to TypeScript configuration file',
@@ -199,64 +133,32 @@ export const CLI_DEFAULT_OPTIONS: Record<string, Options> = {
         alias: 'xb',
         type: 'string',
         array: true
+    },
+    clean: {
+        describe: 'Clean build artifacts',
+        type: 'boolean',
+        default: false
     }
 } as const;
 
 /**
- * Example command-line usage patterns demonstrating common build scenarios.
+ * Command and description pairs shown in the examples section of the help output.
  *
  * @remarks
- * This constant provides a curated collection of practical CLI usage examples
- * that demonstrate how to combine xBuild options for common development workflows.
- * Each example includes the complete command and a description of its purpose.
- *
- * **Example Categories:**
- *
- * **Basic Builds:**
- * - Single file compilation with defaults
- * - Multi-file bundling with optimization
- *
- * **Development Workflows:**
- * - Watch mode with development server
- * - Custom server directory configuration
- *
- * **Library Publishing:**
- * - ESM library with type definitions
- * - Platform-specific builds
- *
- * **Validation:**
- * - Type checking without output
- * - Custom configuration files
- *
- * These examples are displayed in CLI help output and serve as quick-start
- * templates for developers learning the tool.
+ * Registered one by one on the parser, so the order here is the order they are printed in.
+ * They document the combinations worth reaching for rather than every flag,
+ * the option list above already covers each flag on its own.
  *
  * @example
  * ```ts
- * // Displayed when running: xBuild --help
- * // Shows all usage examples with descriptions
+ * ArgsUsageExamples[0]; // [ 'xBuild src/index.ts', 'Build a single file with default settings' ]
  * ```
  *
- * @example
- * ```ts
- * // Example: Production library build
- * xBuild src/lib.ts --format esm --declaration
- * // Generates: dist/lib.js and dist/lib.d.ts as ESM
- * ```
- *
- * @example
- * ```ts
- * // Example: Development with hot reload
- * xBuild src/app.ts -s dist
- * // Starts: Watch mode + dev server serving from dist/
- * ```
- *
- * @see {@link CLI_DEFAULT_OPTIONS}
- *
- * @since 2.0.0
+ * @see ArgsDefaultOptions
+ * @since 3.0.0
  */
 
-export const CLI_USAGE_EXAMPLES = [
+export const ArgsUsageExamples = [
     [ 'xBuild src/index.ts', 'Build a single file with default settings' ],
     [ 'xBuild src/**/*.ts --bundle --minify', 'Bundle and minify all TypeScript files' ],
     [ 'xBuild src/app.ts -s', 'Development mode with watch and dev server' ],
