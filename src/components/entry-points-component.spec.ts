@@ -2,125 +2,115 @@
  * Imports
  */
 
-import process from 'process';
-import { readdirSync, readFileSync } from 'fs';
+import { cwd } from 'process';
+import { collectFiles } from '@components/glob.component';
 import { extractEntryPoints } from '@components/entry-points.component';
 
 /**
  * Tests
  */
 
-const dummySourceMap = JSON.stringify({
-    version: 3,
-    sources: [ 'framework.ts' ],
-    names: [],
-    mappings: 'AAAA'
-});
+const collectMock = xJet.mock(collectFiles);
 
 beforeEach(() => {
-    xJet.restoreAllMocks();
-    xJet.mock(readFileSync).mockImplementation(() => dummySourceMap);
+    xJet.resetAllMocks();
+    collectMock.mockReturnValue([]);
 });
 
 describe('extractEntryPoints', () => {
-    const testDir = '/test/dir';
-
-    beforeEach(() => {
-        xJet.spyOn(process, 'cwd').mockReturnValue('/test/dir');
+    test('should return undefined when no entry points are given', () => {
+        expect(extractEntryPoints(undefined)).toBeUndefined();
     });
 
-    test('should handle array of { in: string, out: string }', () => {
-        const entryPoints = [
-            { in: 'src/index.ts', out: 'dist/index' },
-            { in: 'src/utils.ts', out: 'dist/utils' }
-        ];
+    test('should throw for an unsupported entry points format', () => {
+        expect(() => extractEntryPoints(<any> 123)).toThrow('Unsupported entry points format');
+        expect(() => extractEntryPoints(<any> 'src/index.ts')).toThrow('Unsupported entry points format');
+        expect(() => extractEntryPoints(<any> null)).toThrow('Unsupported entry points format');
+    });
 
-        const result = extractEntryPoints(testDir, entryPoints);
+    test('should return a record as it stands, without copying it', () => {
+        const record = { index: 'src/index.ts' };
 
-        expect(result).toEqual({
-            'dist/index': 'src/index.ts',
-            'dist/utils': 'src/utils.ts'
+        expect(extractEntryPoints(record)).toBe(record);
+    });
+
+    test('should return an empty record for an empty list rather than matching everything', () => {
+        expect(extractEntryPoints([])).toEqual({});
+        expect(collectFiles).not.toHaveBeenCalled();
+    });
+
+    test('should key a list of in and out pairs by their out', () => {
+        expect(extractEntryPoints([
+            { in: 'src/index.ts', out: 'bundle' },
+            { in: 'src/worker.ts', out: 'nested/worker' }
+        ])).toEqual({
+            'bundle': 'src/index.ts',
+            'nested/worker': 'src/worker.ts'
         });
     });
 
-    test('should handle array of glob patterns', () => {
-        xJet.mock(readdirSync).mockReturnValue(<any>[
-            { name: 'index.ts', isDirectory: () => false },
-            { name: 'utils.ts', isDirectory: () => false }
-        ]);
+    test('should match globs from the working directory whatever the root says', () => {
+        extractEntryPoints([ 'src/**' ], 'src/components');
 
-        const result = extractEntryPoints(testDir, [ '**/*.ts' ]);
-
-        expect(result).toEqual({
-            'index': 'index.ts',
-            'utils': 'utils.ts'
-        });
+        expect(collectFiles).toHaveBeenCalledWith(cwd(), [ 'src/**' ]);
     });
 
-    test('should handle array of glob patterns with exclusions', () => {
-        xJet.mock(readdirSync).mockReturnValue(<any>[
-            { name: 'app.ts', isDirectory: () => false },
-            { name: 'app.test.ts', isDirectory: () => false }
-        ]);
+    test('should key a matched file by its path with the extension dropped', () => {
+        collectMock.mockReturnValue([ 'src/index.ts', 'src/components/glob.component.ts' ]);
 
-        const result = extractEntryPoints(testDir, [ '**/*.ts', '!**/*.test.ts' ]);
-
-        expect(result).toEqual({
-            'app': 'app.ts'
-        });
-        expect(result).not.toHaveProperty('app.test');
-    });
-
-    test('should handle nested files with glob patterns', () => {
-        const readdirMock = xJet.mock(readdirSync);
-
-        // root
-        readdirMock.mockReturnValueOnce(<any>[{ name: 'src', isDirectory: () => true }]);
-
-        // src
-        readdirMock.mockReturnValueOnce(<any>[
-            { name: 'index.ts', isDirectory: () => false },
-            { name: 'utils.ts', isDirectory: () => false }
-        ]);
-
-        const result = extractEntryPoints(testDir, [ '**/*.ts' ]);
-
-        expect(result).toEqual({
+        expect(extractEntryPoints([ 'src/**' ])).toEqual({
             'src/index': 'src/index.ts',
-            'src/utils': 'src/utils.ts'
+            'src/components/glob.component': 'src/components/glob.component.ts'
         });
     });
 
-    test('should handle Record<string, string>', () => {
-        const entryPoints = {
-            'index': 'src/index.ts',
-            'utils': 'src/utils.ts'
-        };
+    test('should shorten a matched file against the root', () => {
+        collectMock.mockReturnValue([ 'src/components/glob.component.ts' ]);
 
-        const result = extractEntryPoints(testDir, entryPoints);
-
-        expect(result).toEqual(entryPoints);
+        expect(extractEntryPoints([ 'src/**' ], 'src')).toEqual({
+            'components/glob.component': 'src/components/glob.component.ts'
+        });
     });
 
-    test('should handle empty array of in/out objects', () => {
-        const result = extractEntryPoints(testDir, []);
+    test('should name a file outside the root by its whole path', () => {
+        collectMock.mockReturnValue([ 'src/components/glob.component.ts', 'src/services/vm.service.ts' ]);
 
-        expect(result).toEqual({});
+        expect(extractEntryPoints([ 'src/**' ], 'src/components')).toEqual({
+            'glob.component': 'src/components/glob.component.ts',
+            'src/services/vm.service': 'src/services/vm.service.ts'
+        });
     });
 
-    test('should handle empty array of glob patterns', () => {
-        const result = extractEntryPoints(testDir, []);
+    test('should shorten nothing when the root is the working directory', () => {
+        collectMock.mockReturnValue([ 'src/index.ts' ]);
+        const expected = { 'src/index': 'src/index.ts' };
 
-        expect(result).toEqual({});
+        expect(extractEntryPoints([ 'src/**' ])).toEqual(expected);
+        expect(extractEntryPoints([ 'src/**' ], '.')).toEqual(expected);
+        expect(extractEntryPoints([ 'src/**' ], cwd())).toEqual(expected);
     });
 
-    test('should throw error for unsupported format', () => {
-        expect(() => extractEntryPoints(testDir, 123 as any)).toThrow('Unsupported entry points format');
-        expect(() => extractEntryPoints(testDir, '{}' as any)).toThrow('Unsupported entry points format');
-        expect(() => extractEntryPoints(testDir, null as any)).toThrow('Unsupported entry points format');
+    test('should name every file by its whole path when the root lies outside the working directory', () => {
+        collectMock.mockReturnValue([ 'src/index.ts' ]);
+
+        expect(extractEntryPoints([ 'src/**' ], '../elsewhere')).toEqual({ 'src/index': 'src/index.ts' });
     });
 
-    test('should throw error for undefined entry points', () => {
-        expect(() => extractEntryPoints(testDir, 'asd' as any)).toThrow('Unsupported entry points format');
+    test('should drop the last extension alone from a name that carries several dots', () => {
+        collectMock.mockReturnValue([ 'src/glob.component.ts', 'src/.eslintrc.json' ]);
+
+        expect(extractEntryPoints([ 'src/**' ])).toEqual({
+            'src/glob.component': 'src/glob.component.ts',
+            'src/.eslintrc': 'src/.eslintrc.json'
+        });
+    });
+
+    test('should keep the whole name of a file that carries no extension', () => {
+        collectMock.mockReturnValue([ 'LICENSE', 'src/.eslintrc' ]);
+
+        expect(extractEntryPoints([ '**' ])).toEqual({
+            'LICENSE': 'LICENSE',
+            'src/.eslintrc': 'src/.eslintrc'
+        });
     });
 });
