@@ -7,27 +7,28 @@ import { xBuildBaseError } from '@errors/base.error';
 import { formatStack, getErrorMetadata } from '@providers/stack.provider';
 
 /**
- * Formats and logs error output in a standardized way.
+ * Prints whatever reached a global handler the way the framework prints its own errors.
+ *
+ * @param reason - Error, aggregate error, or any other value that escaped
  *
  * @remarks
- * This utility is designed for use in global error handlers such as
- * `uncaughtException` and `unhandledRejection`.
- * - If the error is an {@link AggregateError}, all individual errors are iterated and logged.
- * - Errors extending {@link xBuildBaseError} are logged directly without stack formatting.
- * - Standard {@link Error} instances are logged using {@link formatStack}, with both
- *   framework and native frames included.
- * - Non-error values are logged as-is.
- *
- * @param reason - The error, aggregate error, or arbitrary value to log.
+ * An {@link xBuildBaseError} already carries its resolved block, so it goes to the console untouched rather than
+ * being resolved a second time.
+ * Any other `Error` is resolved here with the framework and native frames kept,
+ * since a value that got this far offers no other clue about where it came from.
+ * An {@link AggregateError} is announced once and then unwrapped, each of its errors going through the same choice.
+ * A value that is not an error is printed as it stands.
  *
  * @example
  * ```ts
- * formatErrors(new Error("Something went wrong"));
+ * formatErrors(new Error('connect ECONNREFUSED')); // heading, snippet and resolved trace
+ * formatErrors(new xBuildError('bad config'));     // the block the error already carries
+ * formatErrors('not an error at all');             // 'not an error at all'
  * ```
  *
  * @see formatStack
- * @see xJetBaseError
- * @see AggregateError
+ * @see xBuildBaseError
+ * @see getErrorMetadata
  *
  * @since 2.0.0
  */
@@ -56,26 +57,22 @@ export function formatErrors(reason: unknown): void {
 }
 
 /**
- * Global handler for uncaught exceptions in Node.js.
- *
- * @param reason - The value or error object representing the uncaught exception
- *
- * @throws This handler does not throw, but catches uncaught exceptions
+ * Prints an exception that escaped every `try` and leaves the process with exit code `2`.
  *
  * @remarks
- * When an uncaught exception occurs, this handler logs the error using {@link formatStack}
- * with both framework and native frames included, and then terminates the process
- * with exit code `2`, signaling failure.
+ * Registered as a side effect of importing this file, which is why the CLI entry point imports it on its first line -
+ * anything thrown while the later imports evaluate is already covered.
+ * Node leaves the process in an undefined state once an exception gets this far, so the handler prints and exits
+ * instead of letting the build carry on.
  *
  * @example
  * ```ts
- * // Automatically registered when this file is loaded,
- * throw new Error('This error will be logged and exit the process');
+ * import '@errors/uncaught.error';
+ * throw new Error('unreachable state'); // the resolved block, then exit code 2
  * ```
  *
- * @see formatStack
- * @see process.exit
- * @see {@link https://nodejs.org/api/process.html#event-uncaughtexception | Node.js documentation on 'uncaughtException'}
+ * @see formatErrors
+ * @see {@link https://nodejs.org/api/process.html#event-uncaughtexception | process 'uncaughtException'}
  *
  * @since 2.0.0
  */
@@ -86,32 +83,27 @@ process.on('uncaughtException', (reason: unknown) => {
 });
 
 /**
- * Global handler for unhandled promise rejections in Node.js.
- *
- * @param reason - The value or error object representing the reason for the unhandled promise rejection
- *
- * @throws This handler does not throw, but catches unhandled promise rejections
+ * Prints a rejection nobody awaited and leaves the process with exit code `2`.
  *
  * @remarks
- * When an unhandled promise rejection occurs, this handler logs the error using {@link formatStack}
- * with both framework and native frames included, and then terminates the process
- * with exit code `2`. Using a distinct exit code allows differentiating between uncaught exceptions
- * and unhandled promise rejections.
+ * Registered alongside the exception handler, since an unawaited rejection ends the build just as surely and would
+ * otherwise print Node's own warning without any source resolution.
+ * The exit code matches the one used for uncaught exceptions: both mean the build died on an unhandled failure, and
+ * nothing downstream needs to tell them apart.
  *
  * @example
  * ```ts
- * // Automatically registered when this file is loaded
- * Promise.reject(new Error('This rejection will be logged and exit the process'));
+ * import '@errors/uncaught.error';
+ * Promise.reject(new Error('write after end')); // the resolved block, then exit code 2
  * ```
  *
- * @see formatStack
- * @see process.exit
- * @see {@link https://nodejs.org/api/process.html#process_event_unhandledrejection | Node.js documentation on 'unhandledRejection'}
+ * @see formatErrors
+ * @see {@link https://nodejs.org/api/process.html#event-unhandledrejection | process 'unhandledRejection'}
  *
  * @since 2.0.0
  */
 
 process.on('unhandledRejection', (reason: unknown) => {
     formatErrors(reason);
-    process.exit(2);
+    process.exit(3);
 });
