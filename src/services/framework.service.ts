@@ -1,5 +1,5 @@
 /**
- * Import will remove at compile time
+ * Type-only imports erased during TypeScript compilation.
  */
 
 import type { PositionInterface, FormatStackFrameInterface } from '@remotex-labs/xmap';
@@ -8,26 +8,61 @@ import type { PositionInterface, FormatStackFrameInterface } from '@remotex-labs
  * Imports
  */
 
+import { cwd } from 'process';
 import { readFileSync } from 'fs';
-import { SourceService } from '@remotex-labs/xmap';
-import { resolve, toPosix } from '@remotex-labs/xmap';
-import { Injectable } from '@symlinks/symlinks.module';
+import { FilesModel } from '@models/files.model';
+import { inject, Injectable } from '@remotex-labs/xinject';
+import { normalize, SourceService } from '@remotex-labs/xmap';
 
 /**
- * Provides access to the framework's file paths and associated source maps.
+ * Matches a path that belongs to the framework rather than to the project being built.
  *
  * @remarks
- * This service manages the framework's source map files, including the main framework
- * file and any additional source files. It caches initialized {@link SourceService}
- * instances for performance.
+ * Case-insensitive, since the same file surfaces as `xBuild` from a checkout and as `xbuild` from `node_modules`.
+ * The lookahead spares a project's own `xbuild.config`, which names the framework without being part of it.
+ *
+ * @since 3.0.0
+ */
+
+const FRAMEWORK_PATH_REGEX = /xbuild(?!\.config)/i;
+
+/**
+ * Matches a source map whose `mappings` field is empty.
+ *
+ * @remarks
+ * Such a map resolves nothing,
+ * so keeping it would cost a lookup on every frame and answer with the generated position anyway.
+ * Kept at module level so the pattern is compiled once rather than on every registration.
+ *
+ * @since 3.0.0
+ */
+
+const EMPTY_MAPPINGS_REGEX = /"mappings"\s*:\s*""/;
+
+/**
+ * Holds the framework's own paths and the source maps a stack trace is resolved through.
+ *
+ * @remarks
+ * Two jobs in service of one thing - reporting an error against the source a reader recognizes.
+ * It tells framework frames apart from a project's own,
+ * and it hands out the {@link SourceService} that maps a generated position back to its source.
+ * Maps arrive either as text through {@link addSourceMap} or read from a `.map` companion through
+ * {@link loadSourceMap}, and both are keyed by resolved path, so the same file registered under a relative and an
+ * absolute path is parsed once.
+ * The framework's own map is loaded on construction, which is what lets an error thrown inside the build be reported
+ * against its source.
+ * Registered as a singleton, so every consumer shares one registry.
  *
  * @example
  * ```ts
- * const frameworkService = new FrameworkService();
- * console.log(frameworkService.rootPath);
- * const sourceMap = frameworkService.sourceMap(frameworkService.filePath);
+ * const framework = inject(FrameworkService);
+ *
+ * framework.projectRoot;                                        // 'D:/app' - where the build was started
+ * framework.getSourceMap(framework.frameworkFile);              // the framework's own SourceService
+ * framework.isFrameworkFile({ source: 'D:/app/src/index.ts' }); // false - a project file
  * ```
  *
+ * @see SourceService
  * @since 2.0.0
  */
 
@@ -36,61 +71,149 @@ import { Injectable } from '@symlinks/symlinks.module';
 })
 export class FrameworkService {
     /**
-     * Absolute path to the current file.
+     * Absolute path of the framework file this service was loaded from.
      *
-     * @readonly
-     * @since 2.0.0
+     * @remarks
+     * Normalized like {@link frameworkRoot} and {@link projectRoot},
+     * so all three compare and join the same way whatever the platform.
+     *
+     * @example
+     * ```ts
+     * framework.frameworkFile; // 'D:/app/node_modules/@remotex-labs/xbuild/dist/index.js'
+     * ```
+     *
+     * @since 3.0.0
      */
 
-    readonly filePath: string;
+    readonly frameworkFile: string;
 
     /**
-     * Absolute path to the distribution directory.
+     * Absolute path of the directory the framework was distributed in.
      *
-     * @readonly
-     * @since 2.0.0
+     * @remarks
+     * Where anything shipped beside the build is found, the server's certificates among them.
+     *
+     * @example
+     * ```ts
+     * framework.frameworkRoot; // 'D:/app/node_modules/@remotex-labs/xbuild/dist'
+     * ```
+     *
+     * @since 3.0.0
      */
 
-    readonly distPath: string;
+    readonly frameworkRoot: string;
 
     /**
-     * Absolute path to the project root directory.
+     * Absolute path of the directory the build was started from.
      *
-     * @readonly
-     * @since 2.0.0
+     * @remarks
+     * The user's project root rather than the framework's,
+     * so it is what a path is made relative to when a frame is printed.
+     *
+     * @example
+     * ```ts
+     * framework.projectRoot; // 'D:/app'
+     * ```
+     *
+     * @since 3.0.0
      */
 
-    readonly rootPath: string;
+    readonly projectRoot: string;
 
     /**
-     * Cached {@link SourceService} instances for additional source files.
+     * Shared file cache, held on the class so {@link resolve} needs no instance.
+     *
+     * @remarks
+     * What is wanted here is the memo it keeps rather than the snapshots: resolving through it is what keeps this
+     * registry, the file cache, and everything else keyed by path agreeing on what one path is.
+     * Claimed by the first {@link resolve} rather than by a static initializer, since an initializer would run while
+     * this module is being imported, and importing it must not reach the container.
+     *
+     * @see FilesModel
+     * @since 3.0.0
+     */
+
+    private static files?: FilesModel;
+
+    /**
+     * Source maps keyed by the resolved path of the file each one describes.
+     *
      * @since 2.0.0
      */
 
     private readonly sourceMaps = new Map<string, SourceService>();
 
     /**
-     * Initializes a new {@link FrameworkService} instance.
+     * Captures the framework's paths and loads its own source map.
+     *
+     * @throws Error - When the framework ships without a readable `.map` companion
      *
      * @remarks
-     * Sets up the main framework source map, as well as root and distribution paths.
+     * A framework shipped without its map is a broken build rather than a supported one,
+     * so the read failure surfaces here instead of being swallowed.
      *
+     * @example
+     * ```ts
+     * const framework = new FrameworkService();
+     * framework.getSourceMap(framework.frameworkFile); // SourceService
+     * ```
+     *
+     * @see loadSourceMap
      * @since 2.0.0
      */
 
     constructor() {
-        this.filePath = import.meta.filename;
-        this.setSourceFile(this.filePath);
+        this.projectRoot = normalize(cwd());
+        this.frameworkFile = normalize(import.meta.filename);
+        this.frameworkRoot = normalize(import.meta.dirname);
 
-        this.rootPath = this.getRootDir();
-        this.distPath = this.getDistDir();
+        this.loadSourceMap(this.frameworkFile);
     }
 
     /**
-     * Determines whether a given {@link PositionInterface} refers to a framework file.
+     * Normalizes a path to the absolute form every cache here is keyed by.
      *
-     * @param position - The position information to check
-     * @returns `true` if the position is from the framework (contains "xJet"), otherwise `false`
+     * @param path - Filesystem path, relative or absolute
+     * @returns Absolute path with forward slashes
+     *
+     * @remarks
+     * Static so that a caller with no framework service in hand can still key a path the way this package does, which
+     * is what keeps entry-point names, source-map keys, and file entries from disagreeing about one file.
+     * The first call claims the file cache, and every later call finds it already claimed, so the container is reached
+     * only once something asks for a path rather than when this module is imported.
+     * Resolution is memoized by the cache behind it, so resolving the same path again costs a lookup.
+     *
+     * @example
+     * ```ts
+     * FrameworkService.resolve('src/index.ts'); // 'D:/app/src/index.ts'
+     * ```
+     *
+     * @see FilesModel
+     * @since 3.0.0
+     */
+
+    static resolve(path: string): string {
+        return (FrameworkService.files ??= inject(FilesModel)).resolve(path);
+    }
+
+    /**
+     * Reports whether a position belongs to the framework rather than to the project being built.
+     *
+     * @param position - Position or stack frame to judge, as the source map resolver reports it
+     * @returns `true` when the position comes from framework code
+     *
+     * @remarks
+     * The judgment is made on the path, matched case-insensitively, since the same file surfaces as `xBuild` from a
+     * checkout and as `xbuild` from `node_modules`.
+     * A project's own `xbuild.config` names the framework without being part of it, so it is excluded by name.
+     * The source root is consulted only when the source itself does not settle the question.
+     *
+     * @example
+     * ```ts
+     * framework.isFrameworkFile({ source: 'D:/app/node_modules/xbuild/dist/index.js' }); // true
+     * framework.isFrameworkFile({ source: 'D:/app/xbuild.config.ts' });                  // false
+     * framework.isFrameworkFile({ source: 'D:/app/src/index.ts' });                      // false
+     * ```
      *
      * @see PositionInterface
      * @see FormatStackFrameInterface
@@ -99,143 +222,149 @@ export class FrameworkService {
      */
 
     isFrameworkFile(position: PositionInterface | FormatStackFrameInterface): boolean {
-        const { source, sourceRoot } = position;
-        const lowerCaseSource = source?.toLowerCase();
-
-        return Boolean(
-            (source && lowerCaseSource.includes('xbuild') && !lowerCaseSource.includes('xbuild.config')) ||
-            (sourceRoot && sourceRoot.includes('xBuild'))
-        );
+        return FRAMEWORK_PATH_REGEX.test(position.source ?? '') || FRAMEWORK_PATH_REGEX.test(position.sourceRoot ?? '');
     }
 
     /**
-     * Retrieves a cached {@link SourceService} for a given file path.
+     * Returns the source map registered for a file.
      *
-     * @param path - Absolute path to the file
-     * @returns A {@link SourceService} instance if found, otherwise `undefined`
+     * @param path - Path of the file, relative or absolute
+     * @returns The source map of that file, or `undefined` when none was registered
      *
      * @remarks
-     * Paths are normalized before lookup. Only previously initialized source maps
-     * (via {@link setSource} or {@link setSourceFile}) are available in the cache.
+     * A pure registry read: a file that was never registered stays unregistered, since nothing here reaches the disk.
+     * Use {@link loadSourceMap} to register one.
+     *
+     * @example
+     * ```ts
+     * framework.getSourceMap('dist/index.js'); // undefined - never registered
+     * framework.loadSourceMap('dist/index.js');
+     * framework.getSourceMap('dist/index.js'); // SourceService
+     * ```
      *
      * @see SourceService
      * @since 2.0.0
      */
 
     getSourceMap(path: string): SourceService | undefined {
-        path = resolve(path);
-        if (this.sourceMaps.has(path))
-            return this.sourceMaps.get(path)!;
-
-        return undefined;
+        return this.sourceMaps.get(FrameworkService.resolve(path));
     }
 
     /**
-     * Registers and initializes a new {@link SourceService} for a provided source map string.
+     * Registers a source map from its text.
      *
-     * @param source - The raw source map content
-     * @param path - Absolute file path associated with the source map
-     * @returns A new or cached {@link SourceService} instance
-     *
-     * @throws Error if initialization fails
-     *
-     * @remarks
-     * If a source map for the given path is already cached, the cached instance is returned.
-     *
-     * @see SourceService
-     * @since 2.0.0
-     */
-
-    setSource(source: string, path: string): void {
-        const key = resolve(path);
-
-        try {
-            return this.initializeSourceMap(source, key);
-        } catch (error) {
-            throw new Error(
-                `Failed to initialize SourceService: ${ key }\n${ error instanceof Error ? error.message : String(error) }`
-            );
-        }
-    }
-
-    /**
-     * Loads and initializes a {@link SourceService} for a file and its `.map` companion.
-     *
-     * @param path - Absolute path to the file
-     * @returns A new or cached {@link SourceService} instance
-     *
-     * @throws Error if the `.map` file cannot be read or parsed
-     *
-     * @remarks
-     * This method attempts to read the `.map` file located next to the provided file.
-     * If already cached, returns the existing {@link SourceService}.
-     *
-     * @see SourceService
-     * @since 2.0.0
-     */
-
-    setSourceFile(path: string): void {
-        if(!path) return;
-
-        const key = resolve(path);
-        const map = `${ path }.map`;
-
-        if (this.sourceMaps.has(key))
-            return;
-
-        try {
-            const sourceMapData = readFileSync(map, 'utf-8');
-
-            return this.initializeSourceMap(sourceMapData, key);
-        } catch (error) {
-            throw new Error(
-                `Failed to initialize SourceService: ${ key }\n${ error instanceof Error ? error.message : String(error) }`
-            );
-        }
-    }
-
-    /**
-     * Retrieves the project root directory.
-     * @returns Absolute path to the project root
-     *
-     * @since 2.0.0
-     */
-
-    private getRootDir(): string {
-        return toPosix(process.cwd());
-    }
-
-    /**
-     * Retrieves the distribution directory.
-     * @returns Absolute path to the distribution folder
-     *
-     * @since 2.0.0
-     */
-
-    private getDistDir(): string {
-        return toPosix(import.meta.dirname);
-    }
-
-    /**
-     * Creates and caches a new {@link SourceService} instance for a given source map.
-     *
+     * @param path - Path of the file the map describes, relative or absolute
      * @param source - Raw source map content
-     * @param path - Normalized file path used as the cache key
-     * @returns The newly created {@link SourceService} instance
+     *
+     * @throws Error - When the content is not a source map the resolver can parse
      *
      * @remarks
-     * This method is only used internally by {@link setSource} and {@link setSourceFile}.
-     * The instance is cached in {@link sourceMaps} for reuse.
+     * A file that already carries a map keeps it, so the first registration wins, and a later call costs only a lookup.
+     * A map with empty mappings is dropped rather than registered, resolving through such a map being the same as not
+     * resolving at all.
      *
-     * @see SourceService
-     * @since 2.0.0
+     * @example
+     * ```ts
+     * framework.addSourceMap('dist/index.js', readFileSync('dist/index.js.map', 'utf-8'));
+     * framework.getSourceMap('dist/index.js'); // SourceService
+     * ```
+     *
+     * @see loadSourceMap
+     * @since 3.0.0
      */
 
-    private initializeSourceMap(source: string, path: string): void {
-        if(source?.includes('"mappings": ""'))
-            return;
+    addSourceMap(path: string, source: string): void {
+        const key = FrameworkService.resolve(path);
+        if (this.sourceMaps.has(key)) return;
 
-        const sourceMap = new SourceService(source, path);
-        this.sourceMaps.set(path, sourceMap);
+        this.register(key, source);
+    }
+
+    /**
+     * Registers the source map a file's `.map` companion carries.
+     *
+     * @param path - Path of the generated file, relative or absolute
+     *
+     * @throws Error - When the companion cannot be read or does not parse
+     *
+     * @remarks
+     * The companion is looked for beside the file, as `<path>.map`, which is where every file this toolchain emits
+     * carries its map.
+     * A file that already carries a map is left alone before the disk is touched,
+     * so repeating the call on a tracked file costs only a lookup.
+     * An empty path is ignored outright,
+     * and a companion that parses but maps nothing registers no map and raises nothing.
+     *
+     * @example
+     * ```ts
+     * framework.loadSourceMap('dist/index.js'); // reads dist/index.js.map
+     * framework.loadSourceMap('dist/index.js'); // cached - no read
+     * ```
+     *
+     * @see addSourceMap
+     * @since 3.0.0
+     */
+
+    loadSourceMap(path: string): void {
+        if (!path) return;
+
+        const key = FrameworkService.resolve(path);
+        if (this.sourceMaps.has(key)) return;
+
+        let source: string;
+        try {
+            source = readFileSync(`${ key }.map`, 'utf-8');
+        } catch (error) {
+            throw FrameworkService.failure(key, error);
+        }
+
+        this.register(key, source);
+    }
+
+    /**
+     * Builds the error reported when a source map cannot be registered.
+     *
+     * @param key - Resolved path of the file the map describes
+     * @param error - Failure raised while reading or parsing it
+     * @returns The error to throw, naming the file and carrying the original reason
+     *
+     * @remarks
+     * The reading and the parsing halves fail in the same way as far as a caller is concerned,
+     * so both report the file first and the reason after it.
+     *
+     * @since 3.0.0
+     */
+
+    private static failure(key: string, error: unknown): Error {
+        return new Error(
+            `Failed to load source map for: ${ key }\n${ error instanceof Error ? error.message : String(error) }`
+        );
+    }
+
+    /**
+     * Parses a source map and files it under a resolved path.
+     *
+     * @param key - Resolved path of the file the map describes
+     * @param source - Raw source map content
+     *
+     * @throws Error - When the content is not a source map the resolver can parse
+     *
+     * @remarks
+     * The single point where a map enters the registry,
+     * so both entry points resolve their path once and skip an already registered file before reaching here.
+     * A map with empty mappings is dropped rather than registered, since resolving through such a map answers with
+     * the position it was given.
+     *
+     * @since 3.0.0
+     */
+
+    private register(key: string, source: string): void {
+        if (EMPTY_MAPPINGS_REGEX.test(source)) return;
+
+        try {
+            this.sourceMaps.set(key, new SourceService(source, key));
+        } catch (error) {
+            throw FrameworkService.failure(key, error);
+        }
     }
 }
