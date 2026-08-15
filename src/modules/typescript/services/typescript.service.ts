@@ -1,497 +1,707 @@
 /**
- * Import will remove at compile time
+ * Type-only imports erased during TypeScript compilation.
  */
 
-import type { ParsedCommandLine, LanguageService, Diagnostic } from 'typescript';
-import type { CachedServiceInterface, DiagnosticInterface } from './interfaces/typescript-service.interface';
+import type { ModuleResolutionCache, SourceFile } from 'typescript';
+import type { LanguageService, Diagnostic, Program } from 'typescript';
+import type { EmitAndSemanticDiagnosticsBuilderProgram } from 'typescript';
+import type { CacheEntryInterface } from './interfaces/typescript-service.interface';
+import type { ParsedCommandLine, BuilderProgramHost, ReadBuildProgramHost } from 'typescript';
+import type { DiagnosticInterface, ResolvedModuleInterface } from './interfaces/typescript-service.interface';
 
 /**
  * Imports
  */
 
 import ts from 'typescript';
-import { matchesGlob } from 'path';
-import { relative } from '@remotex-labs/xmap';
-import { Injectable } from '@symlinks/symlinks.module';
-import { BundlerService } from '@typescript/services/bundler.service';
-import { EmitterService } from '@typescript/services/emitter.service';
-import { LanguageHostService } from '@typescript/services/hosts.service';
+import { Injectable } from '@remotex-labs/xinject';
+import { normalize, relative, dirname } from '@remotex-labs/xmap';
+import { DeclarationModel } from '@typescript/models/declaration.model';
+import { LanguageHostService } from '@typescript/services/host.service';
 
 /**
- * Manages TypeScript language services with caching and reference counting for shared compiler instances.
- * Provides type checking, code emission, and bundling capabilities through a unified interface that coordinates
- * multiple internal services while maintaining efficient resource usage across multiple consumers.
+ * One TypeScript project, wrapping its language service, module resolution, and declaration emit.
  *
  * @remarks
- * This service implements a caching strategy to share language service instances across multiple consumers
- * that reference the same `tsconfig.json` file. The lifecycle is managed through reference counting:
- * - Each instantiation increments the reference count for the config path
- * - Calling {@link dispose} decrements the count
- * - When the count reaches zero, the language service is cleaned up automatically
+ * Everything a build needs from TypeScript comes through here:
  *
- * The service coordinates three key subsystems:
- * - Language service and host for type checking and analysis
- * - Emitter service for standard TypeScript compilation output
- * - Bundler service for creating bundled outputs from entry points
+ * - **Diagnostics** - {@link check}
+ * - **Declaration files** - {@link emit} and {@link emitBundle}
+ * - **Specifier resolution** - {@link resolve}
+ *
+ * Each configuration file gets one shared instance, reference counted,
+ * so several consumers naming the same `tsconfig.json` share one language service,
+ * and the last {@link dispose} tears it down.
+ * The parse forces `emitDeclarationOnly` on,
+ * since this asks the compiler for types alone while the bundler produces the JavaScript.
  *
  * @example
  * ```ts
- * const service = new TypescriptService('tsconfig.json');
+ * const service = inject(TypescriptService, 'tsconfig.json');
  *
- * // Type check all files
- * const diagnostics = service.check();
- * if (diagnostics.length > 0) {
- *   console.error('Type errors found:', diagnostics);
- * }
- *
- * // Emit compiled output
- * await service.emit('./dist');
- *
- * // Clean up when done
- * service.dispose('tsconfig.json');
+ * service.check();                               // [] - the project type-checks
+ * await service.emit({ index: 'src/index.ts' }); // [ 'D:/app/dist/index.d.ts' ]
+ * service.dispose();                             // released - torn down once nothing else holds it
  * ```
  *
- * @see {@link EmitterService}
- * @see {@link BundlerService}
- * @see {@link LanguageHostService}
+ * @see DeclarationModel
+ * @see LanguageHostService
  *
  * @since 2.0.0
  */
 
 @Injectable({
-    providers: [{ useValue: 'tsconfig.json' }]
+    factory(path?: string): TypescriptService {
+        return TypescriptService.acquire(path);
+    }
 })
 export class TypescriptService {
     /**
-     * Parsed TypeScript compiler configuration including options, file names, and project references.
-     * @since 2.0.0
-     */
-
-    readonly config: ParsedCommandLine;
-
-    /**
-     * TypeScript language service instance providing type checking, intellisense, and compilation capabilities.
+     * The language service this project's queries run against.
+     *
+     * @remarks
+     * Backed by {@link languageHostService} and a document registry,
+     * so the syntax trees of shared files survive between requests.
+     *
+     * @example
+     * ```ts
+     * service.languageService.getProgram()?.getSourceFiles().length; // 214
+     * ```
+     *
      * @since 2.0.0
      */
 
     readonly languageService: LanguageService;
 
     /**
-     * Custom language service host managing file system interactions and compiler options.
+     * The host the language service reads files and versions through.
+     *
+     * @remarks
+     * Exposed because it owns the tracked file set, which is what decides the program's file list.
+     *
+     * @example
+     * ```ts
+     * service.languageHostService.tracked.size; // grows as the language service resolves imports
+     * ```
+     *
+     * @see LanguageHostService
      * @since 2.0.0
      */
 
     readonly languageHostService: LanguageHostService;
 
     /**
-     * Shared cache mapping config paths to language service instances with reference counting.
+     * The live instances, keyed by their normalized configuration path.
      *
      * @remarks
-     * This static cache enables multiple service instances to share the same underlying language service
-     * when they reference the same `tsconfig.json` file, reducing memory usage and compilation overhead.
-     * Entries are automatically cleaned up when reference counts reach zero.
+     * Static, so sharing spans the whole process rather than one injector,
+     * and each entry carries the reference count that decides when its language service is torn down.
      *
-     * @since 2.0.0
+     * @see acquire
+     * @since 3.0.0
      */
 
-    private static readonly serviceCache = new Map<string, CachedServiceInterface>();
+    private static readonly cache = new Map<string, CacheEntryInterface>();
 
     /**
-     * Service responsible for emitting compiled TypeScript output files.
-     * @since 2.0.0
-     */
-
-    private readonly emitterService: EmitterService;
-
-    /**
-     * Service responsible for creating bundled outputs from entry points.
-     * @since 2.0.0
-     */
-
-    private readonly bundlerService: BundlerService;
-
-    /**
-     * Creates a new TypeScript service instance or retrieves a cached one for the specified configuration.
-     *
-     * @param configPath - Path to the `tsconfig.json` file, defaults to `'tsconfig.json'` in the current directory
+     * The diagnostics of every file checked so far, keyed by the file name the compiler reported.
      *
      * @remarks
-     * The constructor performs the following initialization steps:
-     * - Acquires or creates a cached language service for the config path
-     * - Increments the reference count for the shared service instance
-     * - Touches all files listed in the parsed configuration to ensure they're loaded
-     * - Initializes emitter and bundler services with the language service
+     * Only the affected files are recomputed on a {@link check},
+     * so the untouched entries here are what makes the result whole-project rather than only-what-changed.
+     * The key is the absolute path the compiler reported,
+     * so a caller's own names are resolved before they are read back.
      *
-     * If a language service already exists for the given config path, it will be reused rather than
-     * creating a new instance, improving performance and reducing memory usage.
+     * @see reconcileDiagnostics
+     * @since 3.0.0
+     */
+
+    private readonly diagnosticsCache = new Map<string, Array<DiagnosticInterface>>();
+
+    /**
+     * The host the builder program reads through.
+     *
+     * @remarks
+     * Routes every read to {@link languageHostService},
+     * so the builder sees the same cached content the language service does
+     * rather than reaching the disk a second time and disagreeing with it.
+     *
+     * @since 3.0.0
+     */
+
+    private readonly builderHost: ReadBuildProgramHost & BuilderProgramHost = {
+        createHash: ts.sys.createHash,
+        readFile: (file: string, encoding?: BufferEncoding): string | undefined =>
+            this.languageHostService.readFile(file, encoding),
+        getCurrentDirectory: (): string => ts.sys.getCurrentDirectory(),
+        useCaseSensitiveFileNames: (): boolean => ts.sys.useCaseSensitiveFileNames
+    };
+
+    /**
+     * The declaration cache and emitter bound to this project.
+     *
+     * @remarks
+     * Constructed with this service, whose {@link resolve} is what decides which specifiers name project files.
+     *
+     * @see DeclarationModel
+     * @since 3.0.0
+     */
+
+    private readonly declaration: DeclarationModel;
+
+    /**
+     * The configuration currently in force, replaced whenever the file behind it is reparsed.
+     *
+     * @see parseConfig
+     * @since 3.0.0
+     */
+
+    private parsedConfig: ParsedCommandLine;
+
+    /**
+     * The snapshot version of the configuration file behind the current parse.
+     *
+     * @remarks
+     * Taken from the shared file model, which advances a version whenever the watcher re-reads a file that changed,
+     * so comparing it against the version the model now holds tells {@link reload} whether anything needs reparsing.
+     *
+     * @see reload
+     * @since 3.0.0
+     */
+
+    private configVersion: number;
+
+    /**
+     * The cache backing {@link resolve}, rebuilt whenever the compiler options change.
+     *
+     * @see createResolutionCache
+     * @since 3.0.0
+     */
+
+    private resolutionCache: ModuleResolutionCache;
+
+    /**
+     * The builder program of the last {@link check}, carried forward, so the next check only revisits what changed.
+     *
+     * @remarks
+     * Absent before the first check and after a {@link reload}, either of which makes the next check a full pass.
+     *
+     * @since 3.0.0
+     */
+
+    private builder?: EmitAndSemanticDiagnosticsBuilderProgram;
+
+    /**
+     * Creates a service for one configuration file.
+     *
+     * @param configPath - Path of the `tsconfig.json` to run against
+     *
+     * @remarks
+     * Prefer injecting the service, which shares and reference counts instances per configuration path.
+     * An instance built here stays outside the shared cache, so nothing else can reach it,
+     * and {@link dispose} has no hold of its own to release.
+     * A configuration that cannot be read does not throw - {@link parseConfig} falls back to a built-in default.
      *
      * @example
      * ```ts
-     * // Use default tsconfig.json
-     * const service = new TypescriptService();
-     *
-     * // Use custom config path
-     * const customService = new TypescriptService('./custom-tsconfig.json');
+     * const service = new TypescriptService('tsconfig.build.json');
+     * service.config.options.emitDeclarationOnly; // true - forced on regardless of the file
      * ```
      *
-     * @see {@link acquireLanguageService}
-     * @see {@link LanguageHostService.touchFiles}
-     *
-     * @since 2.0.0
+     * @see acquire
+     * @since 3.0.0
      */
 
-    constructor(private configPath: string = 'tsconfig.json') {
-        const { config, host, service } = this.acquireLanguageService();
+    constructor(readonly configPath: string  = 'tsconfig.json') {
+        this.parsedConfig = this.parseConfig();
+        this.languageHostService = new LanguageHostService(this.parsedConfig);
+        this.configVersion = this.languageHostService.filesCache.touch(this.configPath).version;
+        this.resolutionCache = this.createResolutionCache();
+        this.languageService = ts.createLanguageService(
+            this.languageHostService, ts.createDocumentRegistry(true)
+        );
 
-        this.config = config;
-        this.languageService = service;
-        this.languageHostService = host;
-        this.languageHostService.touchFiles(this.config.fileNames);
-
-        this.emitterService = new EmitterService(service, host);
-        this.bundlerService = new BundlerService(service, host);
+        this.declaration = new DeclarationModel(this);
     }
 
     /**
-     * Performs type checking on all source files in the project and returns collected diagnostics.
+     * Reparses the configuration of every shared instance whose file has changed.
      *
-     * @returns Array of formatted diagnostic information including errors, warnings, and suggestions
+     * @returns The configuration paths reparsed by this call, in the order their instances were acquired
      *
      * @remarks
-     * This method filters out files that should not be checked (such as `node_modules` and declaration files)
-     * and collects three types of diagnostics for each remaining file:
-     * - Semantic diagnostics (type errors, type mismatches)
-     * - Syntactic diagnostics (parse errors, invalid syntax)
-     * - Suggestion diagnostics (optional improvements can be slow)
-     *
-     * If the language service has no program available, an empty array is returned.
+     * This walks the whole shared cache rather than reaching one instance through a holder.
+     * A single call after a watch event covers every project in the process,
+     * and a configuration several consumers share is reparsed once rather than once per consumer.
+     * Each version comes from the shared file model as it stands rather than from disk,
+     * since re-reading a changed file is the watcher's part,
+     * so an instance whose configuration has not moved costs a map lookup and nothing more.
+     * A change discards everything the old options fed:
+     * the file set, the resolution cache, the cached declarations, the cached diagnostics, and the builder program,
+     * so the next {@link check} runs as a full pass.
+     * An instance the constructor built rather than the cache is never reached here.
      *
      * @example
      * ```ts
-     * const service = new TypescriptService();
-     * const diagnostics = service.check();
+     * const service = inject(TypescriptService, 'tsconfig.json');
      *
-     * for (const diagnostic of diagnostics) {
-     *   console.log(`${diagnostic.file}:${diagnostic.line}:${diagnostic.column}`);
-     *   console.log(`${diagnostic.message}`);
-     * }
+     * TypescriptService.reload(); // [] - nothing has been written since the configuration was read
+     * TypescriptService.reload(); // [ 'tsconfig.json' ] - reparsed, and service.config describes the edit
      * ```
      *
-     * @see {@link shouldCheckFile}
-     * @see {@link collectDiagnostics}
+     * @see check
+     * @see acquire
      *
-     * @since 2.0.0
+     * @since 3.0.0
      */
 
-    check(filesList?: Array<string>): Array<DiagnosticInterface> {
+    static reload(): Array<string> {
+        const reloaded: Array<string> = [];
+        for (const [ path, entry ] of TypescriptService.cache) {
+            if (entry.instance.refresh()) reloaded.push(path);
+        }
+
+        return reloaded;
+    }
+
+    /**
+     * The parsed configuration this service is running against.
+     *
+     * @returns The compiler options, file names, and raw configuration currently in force
+     *
+     * @remarks
+     * {@link reload} replaces it wholesale,
+     * so a reference taken from here describes the configuration as it stood when it was read.
+     *
+     * @example
+     * ```ts
+     * service.config.options.rootDir;  // 'D:/app' - defaulted to the working directory when the file omits it
+     * service.config.fileNames.length; // 42
+     * ```
+     *
+     * @since 3.0.0
+     */
+
+    get config(): ParsedCommandLine {
+        return this.parsedConfig;
+    }
+
+    /**
+     * Type-checks the project and returns the diagnostics of the files named.
+     *
+     * @param reachable - Files to report on, as the build reaches them, reporting everything checked when omitted
+     * @returns Diagnostics of those files, formatted for reporting
+     *
+     * @remarks
+     * Only the files the builder reports as affected are rechecked,
+     * their semantic, syntactic, and suggestion diagnostics replacing what was cached for them,
+     * while untouched files keep the diagnostics they already had.
+     * That is what makes the result whole-project without rechecking it whole.
+     * A file matched by the configuration's `exclude` globs is skipped,
+     * and a file that has left the program loses its cached diagnostics
+     * rather than reporting them against a file that is no longer there.
+     *
+     * The check covers the program while the report covers `reachable`,
+     * which is what lets several variants share one service:
+     * the diagnostics are computed once for whatever changed,
+     * and each variant reads back the files its own build reaches at the cost of a lookup per file.
+     * Narrowing the check instead would consume a file for the variant that saw it first
+     * and leave the next one with nothing to report.
+     * Each name is resolved as it is read, so a build's own paths serve as they are, relative or absolute.
+     *
+     * @example
+     * ```ts
+     * service.check(); // [ { file: 'src/index.ts', line: 3, column: 7, code: 2322, category: 1, message: '...' } ]
+     * service.check(); // [] once the file is fixed and the watcher has refreshed it
+     *
+     * service.check(context.stage.reachableFiles); // only what this variant's build reaches
+     * ```
+     *
+     * @see DiagnosticInterface
+     * @see reconcileDiagnostics
+     *
+     * @since 3.0.0
+     */
+
+    check(reachable?: Iterable<string>): Array<DiagnosticInterface> {
         const program = this.languageService.getProgram();
         if (!program) return [];
 
-        const files = (filesList && filesList.length > 0) ?
-            filesList.map(file => program.getSourceFile(file)!) :
-            this.languageService.getProgram()?.getSourceFiles();
+        const ignore = this.languageHostService.ignoreSourceFile;
+        const skip = (file: SourceFile): boolean => {
+            if(file.fileName.includes('node_modules')) return true;
 
-        if (!files) return [];
+            return ignore(file);
+        };
 
-        return files
-            .filter(file => this.shouldCheckFile(file))
-            .flatMap(file => this.collectDiagnostics(file));
+        let affected;
+        this.builder = ts.createEmitAndSemanticDiagnosticsBuilderProgram(program, this.builderHost, this.builder);
+        while (affected = this.builder.getSemanticDiagnosticsOfNextAffectedFile(undefined, skip)) {
+            if ('fileName' in affected.affected) {
+                const file = affected.affected;
+                this.diagnosticsCache.set(file.fileName, [
+                    ...affected.result,
+                    ...this.builder!.getSyntacticDiagnostics(file),
+                    ...this.languageService.getSuggestionDiagnostics(file.fileName)
+                ].map(diagnostic => this.formatDiagnostic(diagnostic)));
+            }
+        }
+
+        return this.reconcileDiagnostics(program, reachable ?? this.diagnosticsCache.keys());
     }
 
     /**
-     * Marks files as modified to trigger recompilation and updates configuration if the config file changed.
+     * Writes one declaration file per project file the entry points reach.
      *
-     * @param files - Array of file paths that have been modified or created
+     * @param entryPoints - Entry files to walk, keyed by the output name each entry itself is written under
+     * @param outdir - Directory to write into, defaulting to the configuration's `outDir` and then to `dist`
+     * @returns The output paths written by this call, empty when everything was already current
      *
      * @remarks
-     * This method performs two key operations:
-     * - For files that exist in the script snapshot cache, marks them as touched to invalidate cached data
-     * - If the modified files include the `tsconfig.json` file, reloads the configuration and updates the host options
-     *
-     * This is essential for watch mode scenarios where files change during development and the service
-     * needs to stay synchronized with the file system state.
+     * This path always passes a directory on, so `declarationDir` is never consulted.
+     * Name it explicitly to write somewhere other than `outDir`.
+     * The keys name the entries alone, while the files reached through them keep the layout of the source tree.
+     * Nothing is type-checked here: declarations are produced by an isolated-declarations pass,
+     * and a declaration the compiler cannot infer surfaces through {@link check} rather than as a failure to write.
      *
      * @example
      * ```ts
-     * const service = new TypescriptService();
-     *
-     * // Notify service of file changes
-     * service.touchFiles(['src/index.ts', 'src/utils.ts']);
-     *
-     * // Config change triggers reload
-     * service.touchFiles(['tsconfig.json']);
+     * await service.emit({ index: 'src/index.ts' });          // [ 'dist/index.d.ts', 'dist/builder.d.ts' ] - absolute
+     * await service.emit({ index: 'src/index.ts' });          // [] - nothing changed since
+     * await service.emit({ index: 'src/index.ts' }, 'types'); // the same files, written under ./types
      * ```
      *
-     * @see {@link LanguageHostService.touchFile}
-     * @see {@link LanguageHostService.hasScriptSnapshot}
+     * @see emitBundle
+     * @since 3.0.0
+     */
+
+    async emit(entryPoints: Record<string, string>, outdir?: string): Promise<Array<string>> {
+        outdir ??= this.config.options.outDir ?? 'dist';
+
+        return this.declaration.emit(entryPoints, outdir);
+    }
+
+    /**
+     * Writes one bundled declaration file per entry point.
      *
+     * @param entryPoints - Entry files to bundle, keyed by the output name each is written under
+     * @param outdir - Directory to write into, defaulting to the configuration's `outDir` and then to `dist`
+     * @returns The output paths written, in the order the entry points were given
+     *
+     * @remarks
+     * Each entry becomes one file carrying the declarations of everything it reaches,
+     * so a package ships a single `.d.ts` instead of a tree mirroring its source.
+     * The keys name the outputs, with `.d.ts` appended to each,
+     * which is the shape the bundler's own entry points take and what keeps two entries of one name apart.
+     * Every call rebuilds its bundles rather than reading a cache, so unlike {@link emit} this always writes.
+     *
+     * @example
+     * ```ts
+     * await service.emitBundle({ index: 'src/index.ts' }, 'dist'); // [ 'D:/app/dist/index.d.ts' ]
+     * ```
+     *
+     * @see emit
+     * @since 3.0.0
+     */
+
+    async emitBundle(entryPoints: Record<string, string>, outdir?: string): Promise<Array<string>> {
+        outdir ??= this.config.options.outDir ?? 'dist';
+
+        return this.declaration.emitBundle(entryPoints, outdir);
+    }
+
+    /**
+     * Re-reads a batch of files so the language service sees their current content.
+     *
+     * @param files - Paths to refresh, relative or absolute
+     *
+     * @remarks
+     * Each path is tracked as it is refreshed,
+     * so naming a file the program has not reached yet adds it rather than passing over it.
+     *
+     * @example
+     * ```ts
+     * service.touchFiles([ 'src/index.ts' ]);
+     * service.check(); // now reflects what is on disk
+     * ```
+     *
+     * @see LanguageHostService.refreshFiles
      * @since 2.0.0
      */
 
     touchFiles(files: Array<string>): void {
-        for (const file of files) {
-            if (this.languageHostService.hasScriptSnapshot(file)) {
-                this.languageHostService.touchFile(file);
-            }
-
-            if (file.includes(this.configPath)) {
-                const cached = TypescriptService.serviceCache.get(this.configPath)!;
-                cached.config = this.parseConfig();
-                cached.host.options = cached.config.options;
-            }
-        }
+        this.languageHostService.refreshFiles(files);
     }
 
     /**
-     * Emits a bundled output by processing specified entry points through the bundler service.
+     * Resolves a specifier the way the type checker resolves it.
      *
-     * @param entryPoints - Record mapping bundle names to their entry point file paths
-     * @param outdir - Optional output directory path, uses compiler options default if not specified
-     *
-     * @returns Promise that resolves when bundling and emission completes
+     * @param specifier - Module specifier as written in the source
+     * @param containingFile - File the specifier was written in, since resolution is relative to its directory
+     * @returns The resolved module, or `undefined` when the specifier resolves to nothing
      *
      * @remarks
-     * This method delegates to the bundler service which handles dependency resolution, tree shaking,
-     * and output generation. Unlike standard emission, bundling combines multiple modules into
-     * optimized output files.
+     * An alias or a `paths` mapping resolves the way the compiler sees it rather than the way Node would,
+     * which is what lets the declarations rewrite an alias into a path that still resolves.
+     * The result carries two fields beyond what the compiler returns:
+     * the directory the specifier resolved against, and the path from that directory to the target.
+     * The first resolution attaches both, and the cached entry serves them back.
+     * With no containing file, the working directory stands in for it.
      *
      * @example
      * ```ts
-     * const service = new TypescriptService();
+     * const module = service.resolve('@components/builder', 'D:/app/src/index.ts');
      *
-     * await service.emitBundle(
-     *   { 'main': './src/index.ts', 'worker': './src/worker.ts' },
-     *   './dist/bundles'
-     * );
+     * module?.resolvedFileName;        // 'D:/app/src/components/builder.ts'
+     * module?.relativeFileName;        // './components/builder.ts'
+     * module?.isExternalLibraryImport; // false - a project file, not a package
      * ```
      *
-     * @see {@link BundlerService.emit}
-     *
-     * @since 2.0.0
+     * @see ResolvedModuleInterface
+     * @since 3.0.0
      */
 
-    async emitBundle(entryPoints: Record<string, string>, outdir?: string): Promise<void> {
-        await this.bundlerService.emit(entryPoints, outdir);
+    resolve(specifier: string, containingFile?: string): ResolvedModuleInterface | undefined {
+        const container = containingFile ? this.languageHostService.filesCache.resolve(dirname(containingFile)) : process.cwd();
+        const dirCache = this.resolutionCache.getOrCreateCacheForDirectory(container);
+        const cached = dirCache.get(specifier, undefined)?.resolvedModule;
+        if(cached) return cached as ResolvedModuleInterface;
+
+        const result = <ResolvedModuleInterface> ts.resolveModuleName(
+            specifier, containingFile ?? '', this.parsedConfig.options, this.languageHostService, this.resolutionCache
+        ).resolvedModule;
+
+        if (result) {
+            const path = relative(container, result.resolvedFileName);
+
+            result.container = container;
+            result.relativeFileName = path.startsWith('.') ? path : `./${ path }`;
+        }
+
+        return result;
     }
 
     /**
-     * Emits compiled TypeScript output files to the specified directory.
-     *
-     * @param outdir - Optional output directory path, uses compiler options default if not specified
-     *
-     * @returns Promise that resolves when emission completes
+     * Releases this consumer's hold on the shared instance.
      *
      * @remarks
-     * This method performs standard TypeScript compilation, emitting JavaScript files, declaration files,
-     * and source maps according to the compiler options. The emission includes all files in the program
-     * that are not excluded by configuration.
+     * The language service is torn down and the instance dropped from the shared cache
+     * only once the last holder has released it,
+     * so a service several consumers share outlives any one of them.
+     * The hold released is the one the shared cache keeps under this service's configuration path,
+     * so a release takes effect only on an instance the shared cache holds.
      *
      * @example
      * ```ts
-     * const service = new TypescriptService();
+     * const service = inject(TypescriptService);
      *
-     * // Emit to default outDir from tsconfig
-     * await service.emit();
-     *
-     * // Emit to custom directory
-     * await service.emit('./build');
+     * service.dispose(); // released - torn down only if nothing else holds it
      * ```
      *
-     * @see {@link EmitterService.emit}
-     *
-     * @since 2.0.0
+     * @see acquire
+     * @since 3.0.0
      */
 
-    async emit(outdir?: string): Promise<void> {
-        await this.emitterService.emit(outdir);
+    dispose(): void {
+        const entry = TypescriptService.cache.get(this.configPath);
+        if (!entry) return;
+
+        entry.refCount--;
+        if (entry.refCount > 0) return;
+
+        this.languageService.dispose();
+        TypescriptService.cache.delete(this.configPath);
     }
 
     /**
-     * Decrements the reference count for a cached service and cleans up if no longer in use.
-     *
-     * @param tsconfigPath - Path to the TypeScript configuration file identifying which cached service to dispose
+     * Releases the service when it leaves a `using` scope.
      *
      * @remarks
-     * This method implements the cleanup phase of the reference counting lifecycle. When the reference count
-     * reaches zero, the language service is disposed of and removed from the cache. This should be called
-     * when a consumer no longer needs the TypeScript service to prevent resource leaks.
-     *
-     * If no cached service exists for the given path, this method does nothing.
+     * Delegates to {@link dispose}, so scope-bound and explicit release share one reference count.
      *
      * @example
      * ```ts
-     * const service = new TypescriptService('tsconfig.json');
-     *
-     * // Use the service...
-     * const diagnostics = service.check();
-     *
-     * // Clean up when done
-     * service.dispose('tsconfig.json');
+     * {
+     *     using service = inject(TypescriptService);
+     *     service.check();
+     * } // released here
      * ```
      *
-     * @see {@link cleanupUnusedServices}
-     *
-     * @since 2.0.0
+     * @see dispose
+     * @since 3.0.0
      */
 
-    dispose(tsconfigPath: string): void {
-        const cached = TypescriptService.serviceCache.get(tsconfigPath);
-        if (!cached) return;
-
-        cached.refCount--;
-        TypescriptService.cleanupUnusedServices();
+    [Symbol.dispose](): void {
+        this.dispose();
     }
 
     /**
-     * Removes cached language services with zero references and disposes of their resources.
+     * Returns the shared instance for a configuration path, creating it on the first request.
+     *
+     * @param path - Path of the `tsconfig.json` the instance runs against
+     * @returns The instance for that path, with its reference count raised
      *
      * @remarks
-     * This static method iterates through the service cache and removes entries where the reference
-     * count has dropped below one. For each removed entry, the language service's `dispose()` method
-     * is called to clean up internal resources before deletion from the cache.
+     * The path is normalized before it serves as the key,
+     * so the same configuration reached by two spellings is one instance.
+     * The instance is constructed with that normalized key,
+     * which is what lets a release find its own entry.
+     * Reached through the injectable factory rather than called directly.
      *
-     * This method is called automatically by {@link dispose} and should not typically be invoked directly.
-     *
-     * @see {@link dispose}
-     *
-     * @since 2.0.0
+     * @see dispose
+     * @since 3.0.0
      */
 
-    private static cleanupUnusedServices(): void {
-        for (const [ path, cached ] of this.serviceCache) {
-            if (cached.refCount < 1) {
-                cached.service.dispose();
-                this.serviceCache.delete(path);
-            }
-        }
-    }
+    private static acquire(path: string = 'tsconfig.json'): TypescriptService {
+        const key = normalize(path);
+        const entry = TypescriptService.cache.get(key);
 
-    /**
-     * Determines whether a source file should be included in type checking.
-     *
-     * @param file - TypeScript source file to evaluate
-     *
-     * @returns `true` if the file should be checked, `false` if it should be excluded
-     *
-     * @remarks
-     * Files are excluded from checking if they meet either condition:
-     * - Located in the ` node_modules ` directory (third-party dependencies)
-     * - Are TypeScript declaration files (`.d.ts` files)
-     *
-     * @since 2.0.0
-     */
+        if (entry) {
+            entry.refCount++;
 
-    private shouldCheckFile(file: ts.SourceFile): boolean {
-        if(!file || file.fileName.includes('node_modules')) return false;
-        if(this.config.raw?.exclude) {
-            for (const pattern of this.config.raw.exclude) {
-                if (matchesGlob(relative(this.config.options.rootDir!, file.fileName), pattern))
-                    return false;
-            }
+            return entry.instance;
         }
 
-        return !file.isDeclarationFile;
+        const instance = new TypescriptService(key);
+        TypescriptService.cache.set(key, { instance, refCount: 1 });
+
+        return instance;
     }
 
     /**
-     * Collects all diagnostic information for a source file, including errors, warnings, and suggestions.
+     * Rebuilds everything this instance derives from its compiler options once its configuration file has moved.
      *
-     * @param file - TypeScript source file to collect diagnostics from
-     *
-     * @returns Array of formatted diagnostic objects with file location and message details
+     * @returns Whether the configuration was reparsed
      *
      * @remarks
-     * This method gathers three types of diagnostics:
-     * - Semantic diagnostics: type errors, undefined variables, type mismatches
-     * - Syntactic diagnostics: parse errors, invalid syntax, malformed code
-     * - Suggestion diagnostics: optional code improvements (can impact performance)
+     * Split out of {@link reload}, so the shared cache decides which instance reloads,
+     * while the state it rebuilds stays with the instance holding it.
+     * The version is the one the shared file model already holds,
+     * since re-reading a file that changed is the watcher's part,
+     * so this observes a change rather than going looking for one.
      *
-     * Each diagnostic is formatted using {@link formatDiagnostic} to provide consistent output.
-     *
-     * @see {@link formatDiagnostic}
-     *
-     * @since 2.0.0
+     * @see reload
+     * @since 3.0.0
      */
 
-    private collectDiagnostics(file: ts.SourceFile): DiagnosticInterface[] {
-        return [
-            ...this.languageService.getSemanticDiagnostics(file.fileName),
-            ...this.languageService.getSyntacticDiagnostics(file.fileName),
-            ...this.languageService.getSuggestionDiagnostics(file.fileName) // optional: slow
-        ].map(d => this.formatDiagnostic(d));
+    private refresh(): boolean {
+        const { version } = this.languageHostService.filesCache.touch(this.configPath);
+        if (version === this.configVersion) return false;
+
+        this.configVersion = version;
+        this.parsedConfig = this.parseConfig();
+        this.languageHostService.options = this.parsedConfig;
+        this.resolutionCache = this.createResolutionCache();
+        this.declaration.clear();
+        this.diagnosticsCache.clear();
+        this.builder = undefined;
+
+        return true;
     }
 
     /**
-     * Retrieves an existing cached language service or creates a new one if none exists.
+     * Builds the module resolution cache for the current options.
      *
-     * @returns Cached service interface containing config, host, service, and reference count
+     * @returns A cache keyed the way the language host normalizes paths
      *
      * @remarks
-     * This method checks the static service cache for an existing language service matching the
-     * current `configPath`. If found, it increments the reference count and returns the cached instance.
-     * If not found, it delegates to {@link createLanguageService} to create and cache a new instance.
+     * Real paths go through the host,
+     * so a symlinked file is keyed the same here as in the file cache,
+     * and the two cannot disagree about which file a specifier reached.
      *
-     * @see {@link createLanguageService}
-     *
-     * @since 2.0.0
+     * @since 3.0.0
      */
 
-    private acquireLanguageService(): CachedServiceInterface {
-        const cached = TypescriptService.serviceCache.get(this.configPath);
-        if (cached) {
-            cached.refCount++;
+    private createResolutionCache(): ModuleResolutionCache {
+        return ts.createModuleResolutionCache(
+            ts.sys.getCurrentDirectory(),
+            path => this.languageHostService.realpath(path),
+            this.parsedConfig.options
+        );
+    }
 
-            return cached;
+    /**
+     * Reads the diagnostics of a set of files out of the cache, dropping whatever no longer belongs to the program.
+     *
+     * @param program - Program the files are looked up in
+     * @param reachable - Files to read, named as the caller has them, relative or absolute
+     * @returns The cached diagnostics of those files, in the order they were named
+     *
+     * @remarks
+     * The walk covers the files asked for rather than the cache,
+     * so reporting one variant's inputs costs what that variant reaches rather than what the project holds.
+     * Each name is resolved before the lookup,
+     * since the cache is keyed by the absolute path the compiler reported,
+     * while a build names its inputs relative to its own working directory.
+     * A file that leaves the program - deleted, excluded, or no longer reached -
+     * would otherwise keep reporting the diagnostics it had when it left,
+     * since nothing marks it affected once it is gone,
+     * so a name the program no longer carries is dropped from the cache as it is read.
+     *
+     * @since 3.0.0
+     */
+
+    private reconcileDiagnostics(program: Program, reachable: Iterable<string>): Array<DiagnosticInterface> {
+        const files = this.languageHostService.filesCache;
+        const result: Array<DiagnosticInterface> = [];
+
+        for (const name of reachable) {
+            const path = files.resolve(name);
+            const diagnostics = this.diagnosticsCache.get(path);
+
+            if (!diagnostics) continue;
+            if (program.getSourceFile(path)) result.push(...diagnostics);
+            else this.diagnosticsCache.delete(path);
         }
 
-        return this.createLanguageService();
+        return result;
     }
 
     /**
-     * Creates a new language service instance with host and caches it for future reuse.
+     * Reduces a compiler diagnostic to the shape that reporting consumes.
      *
-     * @returns Newly created cached service interface with reference count initialized to 1
+     * @param diagnostic - Diagnostic as the compiler produced it
+     * @returns The message and category, with the position and code when the diagnostic has a location
      *
      * @remarks
-     * This method performs the following steps:
-     * - Parses the TypeScript configuration using {@link parseConfig}
-     * - Creates a new language service host with the parsed options
-     * - Initializes a TypeScript language service with the host and document registry
-     * - Wraps everything in a cache entry with `refCount` set to 1
-     * - Stores the entry in the static service cache
+     * Chained messages are flattened into one string, and line and column are counted from one rather than from zero,
+     * since the compiler counts from zero while every editor and terminal reports from one.
+     * A diagnostic with no file - a configuration error, say - carries the message and category alone.
      *
-     * @see {@link parseConfig}
-     * @see {@link LanguageHostService}
-     *
+     * @see DiagnosticInterface
      * @since 2.0.0
      */
 
-    private createLanguageService(): CachedServiceInterface {
-        const config = this.parseConfig();
-        const host = new LanguageHostService(config.options);
-        const service = ts.createLanguageService(host, ts.createDocumentRegistry());
+    private formatDiagnostic(diagnostic: Diagnostic): DiagnosticInterface {
+        const result: DiagnosticInterface = {
+            message: ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'),
+            category: diagnostic.category
+        };
 
-        const cached: CachedServiceInterface = { config, host, service, refCount: 1 };
-        TypescriptService.serviceCache.set(this.configPath, cached);
+        if (diagnostic.file && diagnostic.start !== undefined) {
+            const { line, character } = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start);
+            result.file = diagnostic.file.fileName;
+            result.line = line + 1;
+            result.column = character + 1;
+            result.code = diagnostic.code;
+        }
 
-        return cached;
+        return result;
     }
 
     /**
-     * Creates a new language service instance with host and caches it for future reuse.
+     * Reads the configuration file and forces the options this build depends on.
      *
-     * @returns Newly created cached service interface with reference count initialized to 1
+     * @returns The parsed configuration, with the forced options applied
      *
      * @remarks
-     * This method performs the following steps:
-     * - Parses the TypeScript configuration using {@link parseConfig}
-     * - Creates a new language service host with the parsed options
-     * - Initializes a TypeScript language service with the host and document registry
-     * - Wraps everything in a cache entry with `refCount` set to 1
-     * - Stores the entry in the static service cache
-     *
-     * @see {@link parseConfig}
-     * @see {@link LanguageHostService}
+     * Declaration emit is forced on and source maps off,
+     * since this asks the compiler for types alone while the bundler produces the JavaScript.
+     * `stripInternal` and `skipLibCheck` follow from that.
+     * A configuration that cannot be read yields a built-in default rather than an error,
+     * so a project without a `tsconfig.json` still type-checks under sensible settings.
+     * `rootDir` falls back to the working directory,
+     * without which output paths would follow whichever directory the sources happen to share.
      *
      * @since 2.0.0
      */
@@ -533,43 +743,12 @@ export class TypescriptService {
 
         config.options = {
             ...config.options,
-            rootDir: config.options?.rootDir ?? process.cwd()
+            noEmit: true,
+            rootDir: config.options?.rootDir ?? process.cwd(),
+            isolatedModules: false,
+            useCaseSensitiveFileNames: true
         };
 
         return config;
-    }
-
-    /**
-     * Converts a TypeScript diagnostic into a standardized diagnostic interface with a formatted message and location.
-     *
-     * @param diagnostic - Raw TypeScript diagnostic from the compiler
-     *
-     * @returns Formatted diagnostic object with message, file path, line, column, and error code
-     *
-     * @remarks
-     * This method flattens multi-line diagnostic messages into a single string using newline separators.
-     * If the diagnostic includes file and position information, it calculates the human-readable line and
-     * column numbers (1-indexed) and includes the diagnostic code.
-     *
-     * If no file or position information is available, only the message is included in the result.
-     *
-     * @since 2.0.0
-     */
-
-    private formatDiagnostic(diagnostic: Diagnostic): DiagnosticInterface {
-        const result: DiagnosticInterface = {
-            message: ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'),
-            category: diagnostic.category
-        };
-
-        if (diagnostic.file && diagnostic.start !== undefined) {
-            const { line, character } = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start);
-            result.file = diagnostic.file.fileName;
-            result.line = line + 1;
-            result.column = character + 1;
-            result.code = diagnostic.code;
-        }
-
-        return result;
     }
 }

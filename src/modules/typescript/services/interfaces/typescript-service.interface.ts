@@ -1,127 +1,96 @@
 /**
- * Import will remove at compile time
+ * Type-only imports erased during TypeScript compilation.
  */
 
-import type { LanguageHostService } from '@typescript/services/hosts.service';
-import type { ParsedCommandLine, LanguageService, DiagnosticCategory } from 'typescript';
+import type { DiagnosticCategory, ResolvedModuleFull } from 'typescript';
+import type { TypescriptService } from '@typescript/services/typescript.service';
 
 /**
- * Represents a cached TypeScript language service instance with reference counting for shared resource management.
- * Enables multiple consumers to share the same language service while tracking active usage through reference counts.
+ * A shared service instance together with the number of consumers holding it.
  *
  * @remarks
- * This interface is used internally by {@link TypescriptService} to implement a caching strategy that prevents
- * duplicate language service instances for the same configuration file. The lifecycle follows these rules:
- * - When a new service is created, `refCount` starts at 1
- * - Each additional consumer increments `refCount`
- * - Calling dispose decrements `refCount`
- * - When `refCount` reaches 0, the service is disposed and removed from cache
- *
- * The cached data includes all components needed to maintain a fully functional TypeScript compiler instance:
- * compiled configuration, language service host, and the language service itself.
+ * One entry per configuration path, which is what lets several consumers naming the same `tsconfig.json` share a
+ * language service instead of each building one.
+ * The count decides the teardown: releasing drops it, and only the release that takes it to zero disposes the service.
  *
  * @example
  * ```ts
- * const cached: CachedServiceInterface = {
- *   config: parsedConfig,
- *   host: languageHost,
- *   service: tsLanguageService,
- *   refCount: 1
- * };
- *
- * // Another consumer acquires the same service
- * cached.refCount++; // Now 2
- *
- * // Consumers finish and dispose
- * cached.refCount--; // Now 1
- * cached.refCount--; // Now 0, triggers cleanup
+ * const entry: CacheEntryInterface = { instance, refCount: 1 };
+ * entry.refCount++; // a second consumer acquired the same configuration
  * ```
  *
- * @see {@link TypescriptService}
- * @see {@link LanguageHostService}
- *
- * @since 2.0.0
+ * @see TypescriptService
+ * @since 3.0.0
  */
 
-export interface CachedServiceInterface {
-
+export interface CacheEntryInterface {
     /**
-     * Number of active consumers currently using this cached language service instance.
+     * The number of consumers currently holding the instance.
      *
      * @remarks
-     * This counter tracks how many TypeScript service instances are sharing this cached language service.
-     * When it reaches zero, the service can be safely disposed of and removed from the cache.
+     * Every acquisition raises it, and every release lowers it.
+     * An instance therefore survives until its last holder is done rather than until its first one is.
+     *
+     * @example
+     * ```ts
+     * entry.refCount; // 2 - two consumers share this service
+     * ```
      *
      * @since 2.0.0
      */
+
     refCount: number;
 
     /**
-     * Language service host managing file system operations and compiler options for this instance.
-     * @since 2.0.0
-     */
-
-    host: LanguageHostService;
-
-    /**
-     * TypeScript language service providing type checking, analysis, and compilation capabilities.
-     * @since 2.0.0
-     */
-
-    service: LanguageService;
-
-    /**
-     * Parsed TypeScript configuration including compiler options, file names, and project references.
+     * The service that the entry hands out.
      *
      * @remarks
-     * This configuration is reloaded when the `tsconfig.json` file changes, ensuring the cached
-     * service stays synchronized with the project's compilation settings.
+     * The first acquisition of a configuration path builds it, and every later one reads back the same instance.
      *
-     * @since 2.0.0
+     * @example
+     * ```ts
+     * const { instance } = entry;
+     * instance.check(); // [] - the shared project reports nothing
+     * ```
+     *
+     * @see TypescriptService
+     * @since 3.0.0
      */
 
-    config: ParsedCommandLine;
+    instance: TypescriptService;
 }
 
 /**
- * Represents formatted diagnostic information from TypeScript compilation, including errors, warnings, and suggestions.
- * Provides a simplified interface for displaying compiler messages with optional source location details.
+ * A compiler diagnostic reduced to what reporting needs.
  *
  * @remarks
- * This interface normalizes TypeScript's diagnostic format into a structure suitable for display in logs,
- * editor integrations, or build output. All location information (file, line, column) is optional because
- * some diagnostics apply globally or lack specific source positions.
- *
- * Line and column numbers are 1-indexed to match standard editor conventions, even though TypeScript
- * internally uses 0-indexed positions.
+ * Flat and free of compiler objects,
+ * so the service caches a diagnostic, holds it across a rebuild, and prints it after its file has left the program.
+ * The location fields travel together: {@link file}, {@link line}, {@link column}, and {@link code} are all present
+ * for a diagnostic that carries a position, and all absent for one that carries none, such as a configuration error.
+ * Only project files reach here, since {@link TypescriptService.check} skips a dependency and every excluded path.
  *
  * @example
  * ```ts
- * const diagnostic: DiagnosticInterface = {
- *   file: 'src/index.ts',
- *   line: 42,
- *   column: 15,
- *   code: 2304,
- *   message: "Cannot find name 'unknownVariable'."
- * };
- *
- * console.log(`${diagnostic.file}:${diagnostic.line}:${diagnostic.column}`);
- * console.log(`TS${diagnostic.code}: ${diagnostic.message}`);
+ * service.check();
+ * // [ { file: 'D:/app/src/index.ts', line: 3, column: 7, code: 2322, message: "Type 'string'…", category: 1 } ]
  * ```
  *
- * @see {@link TypescriptService.check}
- * @see {@link TypescriptService.formatDiagnostic}
- *
+ * @see TypescriptService
  * @since 2.0.0
  */
 
 export interface DiagnosticInterface {
-
     /**
-     * File path where the diagnostic occurred.
+     * The file that carries the diagnostic, absent when the diagnostic belongs to no file.
      *
      * @remarks
-     * Optional because some diagnostics are configuration-level errors that don't relate to a specific file.
+     * Spelled the way the compiler spells it, which is the absolute path with forward slashes.
+     *
+     * @example
+     * ```ts
+     * diagnostic.file; // 'D:/app/src/index.ts'
+     * ```
      *
      * @since 2.0.0
      */
@@ -129,11 +98,15 @@ export interface DiagnosticInterface {
     file?: string;
 
     /**
-     * Line number where the diagnostic occurred, 1-indexed.
+     * The line that the diagnostic reports, counted from one.
      *
      * @remarks
-     * Optional because diagnostics without source location (like config errors) won't have line information.
-     * When present, this value is 1-indexed to match standard editor conventions.
+     * The compiler counts lines from zero, so the service shifts this one to match what an editor and a terminal read.
+     *
+     * @example
+     * ```ts
+     * diagnostic.line; // 3 - the third line of the file
+     * ```
      *
      * @since 2.0.0
      */
@@ -141,26 +114,15 @@ export interface DiagnosticInterface {
     line?: number;
 
     /**
-     * Column number where the diagnostic occurred, 1-indexed.
+     * The TypeScript error number, as the compiler documents it.
      *
      * @remarks
-     * Optional because diagnostics without source location won't have column information.
-     * When present, this value is 1-indexed to match standard editor conventions.
-     *
-     * @since 2.0.0
-     */
-
-    column?: number;
-
-    /**
-     * TypeScript diagnostic code identifying the specific error or warning type.
-     *
-     * @remarks
-     * Optional because not all diagnostics have associated error codes. When present, this can be used
-     * to look up detailed documentation or implement diagnostic-specific handling.
+     * The number is what lets a report filter or link by rule rather than by message text.
      *
      * @example
-     * Common codes include 2304 (cannot find name), 2322 (type not assignable), 2307 (cannot find module).
+     * ```ts
+     * diagnostic.code; // 2322 - Type 'X' is not assignable to type 'Y'
+     * ```
      *
      * @since 2.0.0
      */
@@ -168,11 +130,32 @@ export interface DiagnosticInterface {
     code?: number;
 
     /**
-     * Human-readable diagnostic message describing the error, warning, or suggestion.
+     * The column that the diagnostic reports, counted from one.
      *
      * @remarks
-     * This message is flattened from TypeScript's potentially nested diagnostic message structure
-     * using newline separators for multi-line messages.
+     * The service shifts it from the compiler's zero-based character offset for the same reason it shifts {@link line}.
+     *
+     * @example
+     * ```ts
+     * diagnostic.column; // 7 - the seventh character of the line
+     * ```
+     *
+     * @since 2.0.0
+     */
+
+    column?: number;
+
+    /**
+     * The text of the diagnostic, with any chained messages flattened into it.
+     *
+     * @remarks
+     * A chain that the compiler nests to explain why an assignment failed arrives here as one string,
+     * and a newline separates its links.
+     *
+     * @example
+     * ```ts
+     * diagnostic.message; // "Type 'string' is not assignable to type 'number'."
+     * ```
      *
      * @since 2.0.0
      */
@@ -180,25 +163,11 @@ export interface DiagnosticInterface {
     message: string;
 
     /**
-     * Category of the diagnostic indicating its severity level.
-     *
-     * @remarks
-     * Determines how the diagnostic should be treated and displayed. TypeScript uses this to distinguish
-     * between different severity levels:
-     * - `DiagnosticCategory.Error` (1): Compilation-blocking errors
-     * - `DiagnosticCategory.Warning` (0): Non-blocking warnings
-     * - `DiagnosticCategory.Suggestion` (2): Code improvement suggestions
-     * - `DiagnosticCategory.Message` (3): Informational messages
-     *
-     * This property is essential for filtering diagnostics by severity and determining whether
-     * a build should fail or continue.
+     * The severity that the compiler assigned, which decides whether the diagnostic fails a build.
      *
      * @example
      * ```ts
-     * if (diagnostic.category === DiagnosticCategory.Error) {
-     *   console.error(`Error: ${diagnostic.message}`);
-     *   process.exit(1);
-     * }
+     * diagnostic.category; // 1 - the compiler's error category
      * ```
      *
      * @since 2.0.0
@@ -207,3 +176,63 @@ export interface DiagnosticInterface {
     category: DiagnosticCategory
 }
 
+/**
+ * A resolved module together with the directory that anchored the resolution.
+ *
+ * @remarks
+ * `ResolvedModuleFull` names the file a specifier reached.
+ * A rewrite also needs the base directory of that resolution,
+ * since the emitted specifier has to sit relative to the file that carries it.
+ * {@link TypescriptService.resolve} attaches both fields on the first resolution
+ * and hands them back with the cached module.
+ * It fills them for a package as well as for a project file,
+ * so `isExternalLibraryImport` is what tells the two apart rather than the presence of a relative path.
+ *
+ * @example
+ * ```ts
+ * const module = service.resolve('@components/builder', 'D:/app/src/index.ts');
+ *
+ * module?.resolvedFileName;        // 'D:/app/src/components/builder.ts'
+ * module?.relativeFileName;        // './components/builder.ts'
+ * module?.isExternalLibraryImport; // false
+ * ```
+ *
+ * @see TypescriptService.resolve
+ * @since 3.0.0
+ */
+
+export interface ResolvedModuleInterface extends ResolvedModuleFull {
+    /**
+     * The absolute directory that anchored the resolution.
+     *
+     * @remarks
+     * The directory of the importing file, or the working directory when the caller names no importing file.
+     *
+     * @example
+     * ```ts
+     * module.container; // 'D:/app/src'
+     * ```
+     *
+     * @since 3.0.0
+     */
+
+    container: string;
+
+    /**
+     * The path from {@link container} to the resolved file, always spelled relative.
+     *
+     * @remarks
+     * A path that does not already start with a dot gains a `./` prefix,
+     * so it reads as a relative specifier rather than as a bare one that a resolver would look for in `node_modules`.
+     * The extension is the one the target carries, so a rewrite that wants a different one has to replace it.
+     *
+     * @example
+     * ```ts
+     * module.relativeFileName; // './components/builder.ts'
+     * ```
+     *
+     * @since 3.0.0
+     */
+
+    relativeFileName: string;
+}
