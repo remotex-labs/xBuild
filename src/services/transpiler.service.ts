@@ -1,8 +1,9 @@
 /**
- * Import will remove at compile time
+ * Type-only imports erased during TypeScript compilation.
  */
 
 import type { BuildOptions, BuildResult, Metafile } from 'esbuild';
+import type { BuildResultType } from '@services/interfaces/transpiler-service.interface';
 
 /**
  * Imports
@@ -10,259 +11,139 @@ import type { BuildOptions, BuildResult, Metafile } from 'esbuild';
 
 import { cwd } from 'process';
 import { build } from 'esbuild';
-import { isBuildResultError, processEsbuildMessages } from '@providers/esbuild-messages.provider';
+import { dirname, basename } from '@remotex-labs/xmap';
+import { DefaultBuildOptions } from '@constants/transpiler.constant';
 
 /**
- * Default ESBuild options used when building or transpiling files.
+ * Builds whatever the options describe and returns the result in memory.
+ *
+ * @typeParam T - Extra fields to widen the result with, for a caller that attaches its own
+ *
+ * @param buildOptions - esbuild options, the entry points among them, overriding {@link DefaultBuildOptions}
+ * @returns The build result, carrying a metafile the type still marks optional
+ *
+ * @throws BuildFailure - Rejected by esbuild when the build fails, carrying its errors and warnings
  *
  * @remarks
- * These defaults bundle, minify, preserve symlinks, and generate external sourcemaps
- * targeting modern browser environments.
- *
- * see BuildOptions
- * @since 2.0.0
- */
-
-export const defaultBuildOptions: BuildOptions = {
-    write: false,
-    bundle: true,
-    minify: true,
-    outdir: `${ cwd() }`,
-    format: 'esm',
-    target: 'esnext',
-    platform: 'browser',
-    sourcemap: 'external',
-    mangleQuoted: true,
-    sourcesContent: true,
-    preserveSymlinks: true
-};
-
-/**
- * Builds multiple files using ESBuild with specified options.
- *
- * @param entryPoints - Array of entry points to build
- * @param buildOptions - Optional override build options
- *
- * @returns A promise resolving to an ESBuild BuildResult including metafile information
- *
- * @throws AggregateError - Thrown if esBuild encounters errors during build
- *
- * @remarks
- * This function merges user-provided options with default options and ensures
- * that a metafile is generated. If any errors occur during the build, they are
- * wrapped in a {@link AggregateError} for consistent error reporting.
+ * Options are layered in four steps: the working directory, then {@link DefaultBuildOptions},
+ * then the caller's own, and last the metafile.
+ * Only the metafile is applied after the caller's, so it is the single option that cannot be turned off.
+ * Everything else is the caller's to change, including the working directory and whether output is written at all.
+ * Entry points travel in the options like any other setting,
+ * so a build is described by a single object rather than by an argument and an object that have to agree.
  *
  * @example
  * ```ts
- * const result = await buildFiles(['src/index.ts'], { minify: false });
- * console.log(result.outputFiles);
+ * const result = await buildFiles({ entryPoints: [ 'src/index.ts' ] });
+ *
+ * result.outputFiles?.length;           // 2 - the source map and the code
+ * Object.keys(result.metafile!.inputs); // [ 'src/index.ts', 'src/builder.ts' ]
  * ```
  *
- * @see esBuildError
- * @see AggregateError
- *
- * @since 2.0.0
+ * @see DefaultBuildOptions
+ * @since 3.0.0
  */
 
-export async function buildFiles(entryPoints: BuildOptions['entryPoints'], buildOptions: BuildOptions = {}): Promise<BuildResult<BuildOptions & Metafile>> {
-    try {
-        return await build({
-            absWorkingDir: cwd(),
-            ...defaultBuildOptions,
-            ...buildOptions,
-            metafile: true,
-            entryPoints: entryPoints
-        }) as BuildResult<BuildOptions & Metafile>;
-    } catch (err) {
-        if(isBuildResultError(err)) {
-            const aggregateError = new AggregateError([], 'Failed to build entryPoints');
-            processEsbuildMessages(err.errors, aggregateError.errors);
-
-            throw aggregateError;
-        }
-
-        throw err;
-    }
+export async function buildFiles<T = object>(buildOptions: BuildOptions = {}): Promise<BuildResultType & T> {
+    return await build({
+        absWorkingDir: cwd(),
+        ...DefaultBuildOptions,
+        ...buildOptions,
+        metafile: true
+    }) as BuildResultType & T;
 }
 
 /**
- * Transpiles TypeScript source code from a string into bundled JavaScript output without writing to disk.
+ * Builds source text that has no file behind it.
  *
- * @param source - TypeScript source code as a string to transpile
- * @param path - Source file path used for source map generation and error reporting
- * @param buildOptions - Optional esbuild configuration options to override defaults
+ * @typeParam T - Extra fields to widen the result with, for a caller that attaches its own
  *
- * @returns Promise resolving to a {@link BuildResult} containing transpiled code, source maps, and metadata
+ * @param source - TypeScript source to build
+ * @param path - Name the source is reported under in its map and in errors, which need not exist on the disk
+ * @param buildOptions - Options overriding {@link DefaultBuildOptions}
+ * @returns The build result, carrying the code and its map in `outputFiles`
+ *
+ * @throws BuildFailure - Rejected by esbuild when the build fails, carrying its errors and warnings
  *
  * @remarks
- * This function performs in-memory transpilation of TypeScript code using esbuild's stdin feature.
- * It's particularly useful for:
- * - Runtime code evaluation and transformation
- * - Macro expansion and inline directives
- * - Dynamic code generation during builds
- * - Testing and validation without file system writes
- *
- * The function applies the following configuration:
- * - Uses {@link defaultBuildOptions} as the base configuration
- * - Overrides with provided `buildOptions` parameter
- * - Forces `write: false` to keep output in memory
- * - Enables `metafile: true` for dependency analysis
- * - Sets `logLevel: 'silent'` to suppress build output
- * - Generates external source maps for debugging
- *
- * The source code is treated as TypeScript (`loader: 'ts'`) and resolved relative to the current
- * working directory. The `path` parameter is used for source map generation and error messages
- * but does not need to reference an actual file on disk.
+ * The text is fed in through esbuild's `stdin` rather than read from a file,
+ * which is what lets a macro body or a generated snippet be built before any file exists.
+ * It is loaded as TypeScript, and its relative imports resolve against the working directory rather than against
+ * `path`, which names the source in the map and in errors without pointing at a real location.
+ * Four options are fixed after the caller's and cannot be overridden: the stdin input, in-memory output, the metafile,
+ * and an external source map.
+ * Logging is not among them: it arrives silent from {@link DefaultBuildOptions} and stays the caller's to raise.
  *
  * @example
  * ```ts
- * // Basic transpilation
- * const result = await buildFromString(
- *   'const x: number = 42; export default x;',
- *   'virtual.ts'
- * );
- * console.log(result.outputFiles[0].text); // Transpiled JS
+ * const result = await buildFromString('export const x: number = 42;', 'virtual.ts');
+ *
+ * result.outputFiles?.length;           // 2 - the source map and the code
+ * Object.keys(result.metafile!.inputs); // [ 'virtual.ts' ] - keyed by the name that was passed
  * ```
  *
- * @example
- * ```ts
- * // With custom build options
- * const result = await buildFromString(
- *   'export const add = (a: number, b: number) => a + b;',
- *   'math.ts',
- *   {
- *     format: 'cjs',
- *     target: 'node16',
- *     minify: true
- *   }
- * );
- * ```
- *
- * @example
- * ```ts
- * // Used in macro evaluation
- * const code = extractExecutableCode(node, state);
- * const transpiled = await buildFromString(
- *   code.data,
- *   state.sourceFile.fileName,
- *   {
- *     bundle: false,
- *     format: 'cjs',
- *     packages: 'external',
- *     platform: 'node'
- *   }
- * );
- * // Execute transpiled code in VM
- * ```
- *
- * @see {@link BuildResult} for output structure
- * @see {@link defaultBuildOptions} for base configuration
- * @see {@link BuildOptions} for available configuration options
- * @see {@link analyzeDependencies} for dependency analysis without transpilation
- *
- * @since 2.0.0
+ * @see DefaultBuildOptions
+ * @since 3.0.0
  */
 
-export async function buildFromString(source: string, path: string, buildOptions: BuildOptions = {}): Promise<BuildResult> {
+export async function buildFromString<T = object>(source: string, path: string, buildOptions: BuildOptions = {}): Promise<BuildResultType & T> {
     return await build({
         absWorkingDir: cwd(),
-        ...defaultBuildOptions,
+        ...DefaultBuildOptions,
         ...buildOptions,
         stdin: {
             loader: 'ts',
             contents: source,
-            resolveDir: cwd(),
-            sourcefile: path
+            resolveDir: dirname(path),
+            sourcefile: basename(path)
         },
         write: false,
         metafile: true,
-        logLevel: 'silent',
         sourcemap: 'external'
-    });
+    }) as BuildResultType & T;
 }
 
 /**
- * Analyzes dependencies of entry point files without writing output.
+ * Walks the imports of the entry points named in the options and returns the dependency graph, building no output.
  *
- * @param entryPoint - Entry point file path(s) for dependency analysis.
- * @param buildOptions - Optional esbuild configuration options to customize the analysis.
- * @returns A promise that resolves to a {@link BuildResult} with metafile metadata containing dependency information.
+ * @param buildOptions - esbuild options, the entry points to walk among them, applied under the ones it fixes
+ * @returns The result, its `metafile` describing every input reached and the imports between them
+ *
+ * @throws BuildFailure - Rejected by esbuild when a specifier does not resolve
  *
  * @remarks
- * This function performs a lightweight dependency analysis by:
- *
- * 1. Running esbuild in bundling mode to resolve all imports and dependencies
- * 2. Generating a metafile containing detailed dependency graph information
- * 3. Marking external packages to avoid bundling node_modules
- * 4. Disabling file output to keep the analysis fast and non-destructive
- * 5. Suppressing log output for cleaner execution
- *
- * The resulting metafile contains:
- * - All resolved imports and their relationships
- * - Module dependencies and their sizes
- * - Entry point analysis
- * - Import/export structure information
- *
- * This is useful for:
- * - Understanding project dependency graphs
- * - Identifying circular dependencies
- * - Analyzing import chains
- * - Profiling bundle composition
- * - Validating module resolution
+ * Bundling is what does the walking,
+ * so the graph matches what a bundler would resolve rather than a reading of the import statements.
+ * An unresolvable specifier therefore fails the call instead of being reported as a missing edge.
+ * Packages are marked external, so the walk stops at the project's edge rather than descending into `node_modules`.
+ * Nothing reaches the disk: output is kept in memory,
+ * and the output directory is nominal, named only because esbuild insists on one.
+ * {@link DefaultBuildOptions} is not applied here, unlike {@link buildFiles}, so the caller's options and the seven
+ * fixed after them are the whole of the configuration.
  *
  * @example
  * ```ts
- * // Basic dependency analysis
- * const result = await analyzeDependencies('src/index.ts');
- * console.log('Dependencies:', Object.keys(result.metafile.inputs));
+ * const result = await analyzeDependencies({ entryPoints: [ 'src/index.ts' ] });
  *
- * // With custom build options
- * const result = await analyzeDependencies('src/main.ts', {
- *   external: ['lodash', 'react'],
- *   alias: { '@utils': './src/utils' }
- * });
- *
- * // Analyze multiple entry points
- * const result = await analyzeDependencies(
- *   ['src/index.ts', 'src/cli.ts']
- * );
- *
- * for (const [input, data] of Object.entries(result.metafile.inputs)) {
- *   console.log(`File: ${input}`);
- *   console.log(`Imports: ${data.imports.map(i => i.path).join(', ')}`);
- * }
+ * Object.keys(result.metafile.inputs);            // [ 'src/index.ts', 'src/builder.ts' ]
+ * result.metafile.inputs['src/index.ts'].imports; // [ { path: 'src/builder.ts', kind: 'import-statement' } ]
  * ```
  *
  * @see Metafile
- * @see BuildResult
- * @see BuildOptions
- *
- * @since 1.0.0
+ * @since 3.0.0
  */
 
-export async function analyzeDependencies(entryPoint: BuildOptions['entryPoints'], buildOptions: BuildOptions = {}): Promise<
+export async function analyzeDependencies(buildOptions: BuildOptions = {}): Promise<
     BuildResult & { metafile: Metafile }
 > {
-    try {
-        return await build({
-            ...buildOptions,
-            outdir: 'tmp',
-            write: false, // Prevent writing output files
-            bundle: true, // Bundle to analyze imports
-            outfile: undefined,
-            metafile: true, // Generate a metafile to analyze dependencies
-            packages: 'external',
-            logLevel: 'silent',
-            entryPoints: entryPoint
-        });
-    } catch(err) {
-        if(isBuildResultError(err)) {
-            const aggregateError = new AggregateError([], 'Failed to analyze entryPoint');
-            processEsbuildMessages(err.errors, aggregateError.errors);
-
-            throw aggregateError;
-        }
-
-        throw err;
-    }
+    return await build({
+        ...buildOptions,
+        write: false,
+        bundle: true,
+        outdir: 'tmp',
+        outfile: undefined,
+        metafile: true,
+        packages: 'external',
+        logLevel: 'silent'
+    });
 }
