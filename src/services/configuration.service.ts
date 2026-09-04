@@ -1,74 +1,58 @@
 /**
- * Import will remove at compile time
+ * Type-only imports erased during TypeScript compilation.
  */
 
-import type { UnsubscribeType, Observable } from '@observable/observable.module';
-import type { BuildConfigInterface, DeepPartialType } from '@interfaces/configuration.interface';
+import type { DeepPartialType } from '@interfaces/types.interface';
+import type { UnsubscribeType, Observable } from '@remotex-labs/xobservable';
+import type { ConfigurationInterface } from '@interfaces/configuration.interface';
 
 /**
  * Imports
  */
 
-import { Injectable } from '@symlinks/symlinks.module';
-import { BehaviorSubject } from '@observable/observable.module';
+import { Injectable } from '@remotex-labs/xinject';
+import { BehaviorSubject } from '@remotex-labs/xobservable';
 import { deepMerge, equals } from '@components/object.component';
-import { map, distinctUntilChanged } from '@observable/observable.module';
-import { DEFAULTS_COMMON_CONFIG } from '@constants/configuration.constant';
+import { map, distinctUntilChanged } from '@remotex-labs/xobservable';
+import { DefaultsCommonConfig } from '@constants/configuration.constant';
 
 /**
- * Provides a centralized service for managing and observing configuration state.
+ * Holds the build configuration and lets the rest of the build watch it change.
  *
- * @template T - The configuration object type must extend {@link BuildConfigInterface}
+ * @typeParam T - Shape of the configuration, at least a {@link ConfigurationInterface}
  *
  * @remarks
- * Configuration changes are deeply merged with existing values, preserving unmodified properties.
- * Type-safe selectors enable reactive access to nest or derived configuration properties.
+ * The configuration is not settled once and read forever: a watch reloads the file behind it, so whatever depends on
+ * a setting has to be told when it moves rather than reading it once at startup.
+ * That is what {@link select} is for - it reports only when the value that a caller actually asked for has changed,
+ * so a change elsewhere in the configuration wakes nobody.
+ * Updates merge rather than replace, so an update says what changes and leaves the rest standing.
+ * Registered as a singleton, so every consumer reads and watches the same configuration.
  *
  * @example
  * ```ts
- * // Initialize with default or custom configuration
- * const configService = new ConfigurationService({ name: 'myApp' });
+ * const configuration = inject(ConfigurationService);
  *
- * // Get current configuration value
- * const config = configService.getValue();
- *
- * // Get a specific configuration property
- * const name = configService.getValue(cfg => cfg.name);
- *
- * // Subscribe to configuration changes
- * const unsubscribe = configService.subscribe((config) => {
- *   console.log('Config updated:', config);
- * });
- *
- * // Select and observe specific properties reactively
- * configService.select(cfg => cfg.name)
- *   .subscribe(name => console.log('Name changed:', name));
- *
- * // Update configuration (deep merge)
- * configService.patch({ name: 'newApp' });
- *
- * // Cleanup subscription
- * unsubscribe();
+ * configuration.getValue(config => config.verbose);  // false
+ * configuration.select(config => config.variants)
+ *     .subscribe(variants => rebuild(variants));     // told whenever the variants change
+ * configuration.patch({ verbose: true });            // the variant's watcher hears nothing
  * ```
  *
- * @see {@link BuildConfigInterface} for the configuration contract
- * @see {@link BehaviorSubject} for the underlying reactive implementation
- *
+ * @see ConfigurationInterface
  * @since 2.0.0
  */
 
 @Injectable({
     scope: 'singleton'
 })
-export class ConfigurationService<T extends BuildConfigInterface> {
+export class ConfigurationService<T extends ConfigurationInterface> {
     /**
-     * Internal configuration state managed by a {@link BehaviorSubject}.
+     * The configuration and everything watching it.
      *
      * @remarks
-     * This private property holds the current configuration and emits changes
-     * to all active subscribers. All public methods delegate state access through this subject.
-     *
-     * @see {@link BehaviorSubject}
+     * A behavior subject rather than a plain one, so a subscriber arriving late is handed the configuration as it
+     * stands instead of waiting for the next change.
      *
      * @since 2.0.0
      */
@@ -76,41 +60,37 @@ export class ConfigurationService<T extends BuildConfigInterface> {
     private readonly config$: BehaviorSubject<T>;
 
     /**
-     * Initializes a new {@link ConfigurationService} instance.
+     * Creates the service around a starting configuration.
      *
-     * @param initialConfig - The initial configuration object (defaults to {@link DEFAULTS_COMMON_CONFIG})
+     * @param initialConfig - Configuration to start from, the built-in defaults when omitted
      *
      * @remarks
-     * - Creates a deep copy of the provided configuration to prevent external mutations
-     * - If no configuration is provided, uses the default configuration
-     * - The configuration is wrapped in a {@link BehaviorSubject} for reactive updates
+     * The configuration is copied on the way in, so the object handed over is never written to - which is what makes
+     * the frozen defaults usable as a starting point.
+     * It is also kept as it was passed, since {@link reload} needs something to return to.
      *
      * @example
      * ```ts
-     * // With default configuration
-     * const service = new ConfigurationService();
-     *
-     * // With custom configuration
-     * const service = new ConfigurationService({ name: 'customApp' });
+     * const configuration = new ConfigurationService({ variants: { esm: { esbuild: { format: 'esm' } } } });
+     * configuration.getValue().variants.esm; // { esbuild: { format: 'esm' } }
      * ```
      *
+     * @see DefaultsCommonConfig
      * @since 2.0.0
      */
 
-    constructor(private initialConfig: T = DEFAULTS_COMMON_CONFIG as T) {
+    constructor(private initialConfig: T = DefaultsCommonConfig as T) {
         this.config$ = new BehaviorSubject<T>(deepMerge({}, initialConfig) as T);
     }
 
     /**
-     * Retrieves the current configuration value synchronously.
+     * Reads the whole configuration as it stands.
      *
-     * @overload
-     * @returns The complete current configuration object
+     * @returns The current configuration
      *
      * @example
      * ```ts
-     * const config = configService.getValue();
-     * console.log(config.name);
+     * configuration.getValue().verbose; // false
      * ```
      *
      * @since 2.0.0
@@ -119,21 +99,19 @@ export class ConfigurationService<T extends BuildConfigInterface> {
     getValue(): T;
 
     /**
-     * Retrieves a computed value derived from the current configuration.
+     * Reads one value out of the configuration as it stands.
      *
-     * @overload
-     * @typeParam R - The return type of the selector function
-     * @param selector - A function that extracts or transforms a value from the configuration
-     * @returns The computed value returned by the selector function
+     * @typeParam R - What the selector returns
+     * @param selector - Picks the value to read
+     * @returns Whatever the selector returned
      *
      * @remarks
-     * This overload allows synchronous extraction of specific configuration properties
-     * or computed values without creating an Observable subscription.
+     * The one-off counterpart of {@link select}: it answers once and never again, which suits a decision taken at a
+     * point in time rather than something that has to follow the configuration.
      *
      * @example
      * ```ts
-     * const name = configService.getValue(cfg => cfg.name);
-     * const nameLength = configService.getValue(cfg => cfg.name?.length ?? 0);
+     * configuration.getValue(config => Object.keys(config.variants)); // [ 'esm', 'cjs' ]
      * ```
      *
      * @since 2.0.0
@@ -142,15 +120,10 @@ export class ConfigurationService<T extends BuildConfigInterface> {
     getValue<R>(selector: (config: T) => R): R;
 
     /**
-     * Implementation of getValue that handles both overloads.
+     * Serves both reading forms.
      *
-     * @param selector - Optional selector function for computed values
-     * @returns The current configuration or a computed value derived from it
-     *
-     * @remarks
-     * When no selector is provided, it returns the complete configuration.
-     * When a selector is provided, applies it to the current configuration value
-     * and returns the result.
+     * @param selector - Picks a value, or reads the whole configuration when absent
+     * @returns The configuration, or what the selector returned
      *
      * @since 2.0.0
      */
@@ -163,29 +136,24 @@ export class ConfigurationService<T extends BuildConfigInterface> {
     }
 
     /**
-     * Subscribes to configuration changes and executes a callback for each update.
+     * Watches the whole configuration.
      *
-     * @param observer - A callback function invoked with the new configuration value on each change
-     * @returns An unsubscribe function that removes this subscription when called
+     * @param observer - Called with the configuration, now and on every change
+     * @returns A function that stops the watching
      *
      * @remarks
-     * - The observer is immediately called with the current configuration value
-     * - Subsequent calls occur whenever the configuration is updated via {@link patch}
-     * - Returns an unsubscribe function for cleanup; it should be called to prevent memory leaks
-     * - For more sophisticated reactive operations, consider using {@link select} instead
+     * Called straight away with the configuration as it stands, so a subscriber needs no separate first read.
+     * It hears every change, whatever moved, which is why {@link select} is the better choice for anything that cares
+     * about one corner of the configuration.
      *
      * @example
      * ```ts
-     * const unsubscribe = configService.subscribe((config) => {
-     *   console.log('Configuration changed:', config);
-     * });
-     *
-     * // Later, stop listening to changes
-     * unsubscribe();
+     * const stop = configuration.subscribe(config => console.log(config.verbose)); // logs at once
+     * configuration.patch({ verbose: true });                                      // logs again
+     * stop();
      * ```
      *
-     * @see {@link select} for reactive selector-based subscriptions
-     *
+     * @see select
      * @since 1.0.0
      */
 
@@ -194,41 +162,27 @@ export class ConfigurationService<T extends BuildConfigInterface> {
     }
 
     /**
-     * Creates an Observable that emits selected configuration values whenever they change.
+     * Watches one value in the configuration.
      *
-     * @typeParam R - The return type of the selector function
-     * @param selector - A function that extracts or transforms a value from the configuration
-     * @returns An Observable that emits distinct selector results on configuration changes
+     * @typeParam R - What the selector returns
+     * @param selector - Picks the value to watch
+     * @returns A stream of that value, reporting only when it has actually changed
      *
      * @remarks
-     * - Uses the provided selector to extract a computed value from the configuration
-     * - Only emits values that are distinct from the previous emission (via {@link distinctUntilChanged})
-     * - Distinction is determined using the {@link equals} utility for deep equality comparison
-     * - Allows reactive composition using RxJS operators and subscriptions
-     * - Ideal for observing nested properties or computed values without pollution from unchanged properties
+     * The selector runs on every change, but its result is compared against the one before and only a real difference
+     * is passed on - so a change elsewhere costs a comparison rather than the work behind a subscriber.
+     * The comparison is structural, so a selector that builds an equal object each time still reports nothing.
      *
      * @example
      * ```ts
-     * // Observe a specific property
-     * configService.select(cfg => cfg.name)
-     *   .subscribe(name => console.log('Name is now:', name));
+     * configuration.select(config => config.common?.esbuild?.minify)
+     *     .subscribe(minify => console.log(minify)); // true, then again only when it changes
      *
-     * // Observe a derived value
-     * configService.select(cfg => cfg.name?.toUpperCase() ?? '')
-     *   .subscribe(uppercaseName => console.log('Upper name:', uppercaseName));
-     *
-     * // Compose with other RxJS operators
-     * configService.select(cfg => cfg.name)
-     *   .pipe(
-     *     filter(name => name?.length > 0),
-     *     map(name => name.toUpperCase())
-     *   )
-     *   .subscribe(uppercaseName => console.log('Valid uppercase name:', uppercaseName));
+     * configuration.patch({ verbose: true });        // nothing reported - minify did not move
      * ```
      *
-     * @see {@link equals} for equality comparison logic
-     * @see {@link distinctUntilChanged} for deduplication behavior
-     * @see {@link subscribe} for simple subscription-based value access
+     * @see equals
+     * @see subscribe
      *
      * @since 2.0.0
      */
@@ -241,39 +195,23 @@ export class ConfigurationService<T extends BuildConfigInterface> {
     }
 
     /**
-     * Updates the configuration with partial changes, performing a deep merge.
+     * Merges changes into the configuration and reports them.
      *
-     * @param partial - A partial configuration object containing the properties to update
+     * @param partial - The parts to change, nested as deeply as needed
      *
      * @remarks
-     * - Performs a deep merge of the provided partial configuration with the current configuration
-     * - Unmodified properties are preserved from the current configuration
-     * - The merge operation uses {@link deepMerge} to ensure nested objects are properly merged
-     * - After merging, emits the updated configuration to all active subscribers via the BehaviorSubject
-     * - For complete replacement rather than merging, create a new ConfigurationService instance
+     * Merged over what is there now, so anything left out keeps its value and only the corners named are touched.
+     * Arrays are concatenated rather than replaced, so patching a list adds to it - which is a reason to reach for
+     * {@link reload} when a list has to be replaced rather than extended.
+     * Every subscriber is told, while a {@link select} passes it on only if the value it picked actually moved.
      *
      * @example
      * ```ts
-     * // Update a single property
-     * configService.patch({ name: 'updatedApp' });
-     *
-     * // Update multiple properties (existing properties are preserved)
-     * configService.patch({
-     *   name: 'newApp',
-     *   // other properties remain unchanged
-     * });
-     *
-     * // Patch with nested updates
-     * configService.patch({
-     *   name: 'app',
-     *   // nested properties would be merged deeply if they existed
-     * });
+     * configuration.patch({ common: { esbuild: { minify: false } } });
+     * configuration.getValue().common?.esbuild?.format; // 'cjs' - untouched
      * ```
      *
-     * @see {@link subscribe} to observe changes
-     * @see {@link deepMerge} for the merging implementation
-     * @see {@link select} to observe specific properties reactively
-     *
+     * @see reload
      * @since 1.0.0
      */
 
@@ -288,42 +226,29 @@ export class ConfigurationService<T extends BuildConfigInterface> {
     }
 
     /**
-     * Replaces the entire configuration with a new configuration object.
+     * Starts again from the initial configuration, with the given one merged over it.
      *
-     * @param config - The complete configuration object to set
+     * @param config - Configuration to apply over the initial one
      *
      * @remarks
-     * - Performs a complete replacement of the configuration (unlike {@link patch} which merges)
-     * - The provided configuration object is used directly without deep cloning
-     * - Emits the new configuration to all active subscribers via the BehaviorSubject
-     * - Useful when you need to reset or swap the entire configuration state
-     * - No properties are preserved from the previous configuration
+     * Not a replacement: the result is the configuration this service was constructed with,
+     * merged with what is passed here.
+     * What the initial configuration carried therefore survives, and only what accumulated since is dropped.
+     * That is what re-reading an edited file wants, since a patch has no way to take something back.
+     * To be rid of the initial configuration too, construct another service.
      *
      * @example
      * ```ts
-     * // Replace entire configuration
-     * configService.reload({
-     *   verbose: true,
-     *   variants: { production: { esbuild: { minify: true } } },
-     *   common: { esbuild: { write: true } }
-     * });
-     *
-     * // Reset to default configuration
-     * configService.reload(DEFAULTS_COMMON_CONFIG);
-     *
-     * // Swap between different configuration profiles
-     * const prodConfig = loadProductionConfig();
-     * configService.reload(prodConfig);
+     * configuration.patch({ verbose: true });
+     * configuration.reload({ common: { types: false } });
+     * configuration.getValue().verbose; // false again - the patch is gone
      * ```
      *
-     * @see {@link patch} for partial configuration updates with deep merging
-     * @see {@link subscribe} to observe configuration changes
-     * @see {@link select} to observe specific configuration properties reactively
-     *
+     * @see patch
      * @since 2.0.0
      */
 
-    reload(config: Partial<T>): void {
+    reload(config: DeepPartialType<T>): void {
         this.config$.next(deepMerge({}, this.initialConfig, config) as T);
     }
 }

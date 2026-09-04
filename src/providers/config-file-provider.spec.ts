@@ -1,863 +1,286 @@
 /**
- * Import will remove at compile time
- */
-
-import type { xBuildConfigInterface } from '@providers/interfaces/config-file-provider.interface';
-
-/**
  * Imports
  */
 
-import { runInThisContext } from 'vm';
+import { resolve } from 'path';
+import { readFileSync } from 'fs';
 import { createRequire } from 'module';
-import { resolve } from '@remotex-labs/xmap';
-import { readFileSync, existsSync } from 'fs';
-import { inject } from '@symlinks/symlinks.module';
-import { buildFiles } from '@services/transpiler.service';
-import { configFileProvider } from './config-file.provider';
+import { ArgvModule } from '@argv/argv.module';
+import { inject } from '@remotex-labs/xinject';
+import { FilesModel } from '@models/files.model';
+import { sandboxExecute } from '@services/vm.service';
+import { FrameworkService } from '@services/framework.service';
+import { buildFromString } from '@services/transpiler.service';
+import { configFileProvider, execConfigFile } from './config-file.provider';
 
 /**
  * Tests
  */
 
-describe('configFileProvider', () => {
-    const dummySourceMap = JSON.stringify({
-        version: 3,
-        sources: [ 'config.ts' ],
-        names: [],
-        mappings: 'AAAA'
-    });
+describe('config-file.provider', () => {
+    const path = 'xbuild.config.ts';
+    const cache = inject(FilesModel);
+    const source = 'export const config = { variants: {} };';
+    const sourceMap = '{"version":3,"file":"config.js","sources":["config.ts"],"names":[],"mappings":"AAAA"}';
+    const defaults = { watch: { filter: [ '**/*.{js,ts,json}', '!**/*.d.ts' ], recursive: true } };
 
-    const dummyCode = `
-        module.exports.config = {
-            variants: {
-                esm: {
-                    esbuild: {
-                        format: 'esm'
-                    }
-                }
-            }
-        };
-    `;
+    let touchMock: any;
+    let buildMock: any;
+    let sandboxMock: any;
+    let requireMock: any;
+    let sourceMapMock: any;
+    let parseMock: any;
 
     beforeEach(() => {
         xJet.restoreAllMocks();
-        xJet.mock(readFileSync).mockImplementation(() => dummySourceMap);
-        globalThis.module = { exports: {} } as any;
-        globalThis.require = undefined as any;
+        xJet.mock(readFileSync).mockReturnValue(<any> sourceMap);
 
-        // Default mock for runInThisContext that simulates code execution
-        xJet.mock(runInThisContext).mockImplementation((() => {
-            // Simulate basic module.exports setup
-            globalThis.module.exports = { config: {} };
-        }) as any);
-    });
+        touchMock = xJet.spyOn(cache, 'touch').mockReturnValue(<any> { version: 1, snapshot: { text: source } });
+        sourceMapMock = xJet.spyOn(inject(FrameworkService), 'addSourceMap').mockReturnValue(undefined);
+        requireMock = xJet.mock(createRequire).mockReturnValue(<any> 'require-of-config');
+        parseMock = xJet.spyOn(ArgvModule.prototype, 'enhancedParse')
+            .mockReturnValue(<any> { config: path, watch: true });
 
-    describe('file validation', () => {
-        test('should return empty object when path is not provided', async () => {
-            const result = await configFileProvider('');
-
-            expect(result).toEqual({});
+        buildMock = xJet.mock(buildFromString).mockResolvedValue(<any> {
+            outputFiles: [{ text: 'map-text' }, { text: 'built' }]
         });
 
-        test('should return empty object when path is null', async () => {
-            const result = await configFileProvider(null as any);
-
-            expect(result).toEqual({});
-        });
-
-        test('should return empty object when path is undefined', async () => {
-            const result = await configFileProvider(undefined as any);
-
-            expect(result).toEqual({});
-        });
-
-        test('should return empty object when file does not exist', async () => {
-            const existsSyncMock = xJet.mock(existsSync).mockReturnValue(false);
-
-            const result = await configFileProvider('non-existent.config.ts');
-
-            expect(existsSyncMock).toHaveBeenCalledWith('non-existent.config.ts');
-            expect(result).toEqual({});
-        });
-
-        test('should proceed when file exists', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            const buildFilesMock = xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: dummyCode }
-                ]
-            } as any);
-
-            xJet.mock(runInThisContext).mockImplementation((() => {
-                globalThis.module.exports.config = {
-                    variants: { esm: { esbuild: { format: 'esm' } } }
-                };
-            }) as any);
-
-            await configFileProvider('config.xbuild.ts');
-
-            expect(buildFilesMock).toHaveBeenCalled();
+        sandboxMock = xJet.mock(sandboxExecute).mockImplementation(async (_: string, sandbox: any) => {
+            sandbox.module.exports.config = { variants: { esm: {} } };
         });
     });
 
-    describe('transpilation', () => {
-        test('should call buildFiles with correct path and options', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            const buildFilesMock = xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: dummyCode }
-                ]
-            } as any);
+    describe('execConfigFile', () => {
+        test('should run the code with a module to export through', async () => {
+            await execConfigFile('built', path);
 
-            await configFileProvider('config.xbuild.ts');
-
-            expect(buildFilesMock).toHaveBeenCalledWith(
-                [ 'config.xbuild.ts' ],
-                expect.objectContaining({
-                    outdir: 'tmp',
-                    format: 'cjs',
-                    platform: 'node',
-                    packages: 'external',
-                    preserveSymlinks: true,
-                    minify: false,
-                    minifySyntax: true,
-                    minifyWhitespace: true,
-                    minifyIdentifiers: false,
-                    logLevel: 'silent'
-                })
+            expect(sandboxMock).toHaveBeenCalledWith(
+                'built',
+                { require: 'require-of-config', module: expect.any(Object), $argv: {} },
+                { filename: path },
+                false
             );
         });
 
-        test('should use CommonJS format for transpilation', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            const buildFilesMock = xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: dummyCode }
-                ]
-            } as any);
+        test('should bind require to the file the configuration sits in', async () => {
+            await execConfigFile('built', path);
 
-            await configFileProvider('config.xbuild.ts');
-
-            const callArgs = buildFilesMock.mock.calls[0][1];
-            expect(callArgs?.format).toBe('cjs');
+            expect(requireMock).toHaveBeenCalledWith(resolve(path));
         });
 
-        test('should preserve symlinks during transpilation', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            const buildFilesMock = xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: dummyCode }
-                ]
-            } as any);
+        test('should hand the code the arguments it was given', async () => {
+            const args = { watch: true };
+            await execConfigFile('built', path, args);
 
-            await configFileProvider('config.xbuild.ts');
-
-            const callArgs = buildFilesMock.mock.calls[0][1];
-            expect(callArgs?.preserveSymlinks).toBe(true);
+            expect(sandboxMock.mock.calls[0][1].$argv).toBe(args);
         });
 
-        test('should mark packages as external', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            const buildFilesMock = xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: dummyCode }
-                ]
-            } as any);
+        test('should isolate the logs of the run when it is told to', async () => {
+            await execConfigFile('built', path, {}, true);
 
-            await configFileProvider('config.xbuild.ts');
-
-            const callArgs = buildFilesMock.mock.calls[0][1];
-            expect(callArgs?.packages).toBe('external');
-        });
-    });
-
-    describe('source map registration', () => {
-        test('should register source map with FrameworkService', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: dummyCode }
-                ]
-            } as any);
-
-            const mockFramework = {
-                setSource: xJet.fn()
-            };
-
-            xJet.mock(inject).mockReturnValueOnce({ touchFile: xJet.fn() });
-            xJet.mock(inject).mockReturnValueOnce(mockFramework);
-
-            await configFileProvider('test.config.ts');
-
-            expect(mockFramework.setSource).toHaveBeenCalledWith(dummySourceMap, 'test.config.ts');
+            expect(sandboxMock.mock.calls[0][3]).toBe(true);
         });
 
-        test('should pass correct file path to setSource', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: dummyCode }
-                ]
-            } as any);
-
-            const mockFramework = {
-                setSource: xJet.fn()
-            };
-
-            xJet.mock(inject).mockReturnValueOnce({ touchFile: xJet.fn() });
-            xJet.mock(inject).mockReturnValueOnce(mockFramework);
-            const configPath = 'custom/path/config.ts';
-            await configFileProvider(configPath);
-
-            expect(mockFramework.setSource).toHaveBeenCalledWith(
-                expect.any(String),
-                configPath
-            );
-        });
-    });
-
-    describe('module context setup', () => {
-        test('should set up globalThis.module with exports object', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: dummyCode }
-                ]
-            } as any);
-
-            await configFileProvider('config.ts');
-
-            expect(globalThis.module).toBeDefined();
-            expect(globalThis.module.exports).toBeDefined();
-            expect(typeof globalThis.module.exports).toBe('object');
+        test('should give back what the file exported as config', async () => {
+            expect(await execConfigFile('built', path)).toEqual({ variants: { esm: {} } });
         });
 
-        test('should set up globalThis.require function', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: dummyCode }
-                ]
-            } as any);
-
-            xJet.mock(createRequire).mockReturnValue((() => {
-            }) as any);
-
-            await configFileProvider('/absolute/path/config.ts');
-
-            expect(globalThis.require).toBeDefined();
-            expect(typeof globalThis.require).toBe('function');
-        });
-
-        test('should create require with resolved path', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: dummyCode }
-                ]
-            } as any);
-
-            const createRequireMock = xJet.mock(createRequire)
-                .mockReturnValue((() => {
-                }) as any);
-
-            xJet.mock(resolve).mockImplementationOnce((path: string) => `/resolved/${ path }`);
-
-            await configFileProvider('config.ts');
-
-            expect(createRequireMock).toHaveBeenCalled();
-        });
-    });
-
-    describe('code execution', () => {
-        test('should execute transpiled code in VM context', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: dummyCode }
-                ]
-            } as any);
-
-            const runInThisContextMock = xJet.mock(runInThisContext).mockImplementation((() => {
-                globalThis.module.exports.config = {
-                    variants: { esm: { esbuild: { format: 'esm' } } }
-                };
-            }) as any);
-
-            await configFileProvider('config.ts');
-
-            expect(runInThisContextMock).toHaveBeenCalledWith(
-                dummyCode,
-                { filename: 'config.ts' }
-            );
-        });
-
-        test('should use original filename in VM context', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: dummyCode }
-                ]
-            } as any);
-
-            const runInThisContextMock = xJet.mock(runInThisContext).mockImplementation((() => {
-                globalThis.module.exports.config = {};
-            }) as any);
-
-            await configFileProvider('custom.config.ts');
-
-            expect(runInThisContextMock).toHaveBeenCalledWith(
-                expect.any(String),
-                { filename: 'custom.config.ts' }
-            );
-        });
-    });
-
-    describe('export extraction', () => {
-        test('should return config from named export', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            const namedExportCode = `
-                module.exports.config = {
-                    variants: { esm: { esbuild: { format: 'esm' } } }
-                };
-            `;
-
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: namedExportCode }
-                ]
-            } as any);
-
-            xJet.mock(runInThisContext).mockImplementation((() => {
-                globalThis.module.exports.config = {
-                    variants: { esm: { esbuild: { format: 'esm' } } }
-                };
-            }) as any);
-
-            const result = await configFileProvider<xBuildConfigInterface>('config.ts');
-
-            expect(result.variants).toBeDefined();
-            expect(result.variants?.esm).toBeDefined();
-        });
-
-        test('should fallback to default export when config is not present', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            const defaultExportCode = `
-                module.exports.default = {
-                    common: { types: true }
-                };
-            `;
-
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: defaultExportCode }
-                ]
-            } as any);
-
-            xJet.mock(runInThisContext).mockImplementation((() => {
-                globalThis.module.exports.default = {
-                    common: { types: true }
-                };
-            }) as any);
-
-            const result = await configFileProvider<xBuildConfigInterface>('config.ts');
-
-            expect(result.common).toBeDefined();
-            expect(result.common?.types).toBe(true);
-        });
-
-        test('should return empty object when no valid export is found', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            const noExportCode = `
-                module.exports = {};
-            `;
-
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: noExportCode }
-                ]
-            } as any);
-
-            xJet.mock(runInThisContext).mockImplementation((() => {
-                globalThis.module.exports = {};
-            }) as any);
-
-            const result = await configFileProvider('config.ts');
-
-            expect(result).toEqual({});
-        });
-
-        test('should return empty object when exports are undefined', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            const undefinedExportCode = `
-                module.exports.config = undefined;
-                module.exports.default = undefined;
-            `;
-
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: undefinedExportCode }
-                ]
-            } as any);
-
-            xJet.mock(runInThisContext).mockImplementation((() => {
-                globalThis.module.exports.config = undefined;
-                globalThis.module.exports.default = undefined;
-            }) as any);
-
-            const result = await configFileProvider('config.ts');
-
-            expect(result).toEqual({});
-        });
-
-        test('should prefer named config export over default', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            const bothExportsCode = `
-                module.exports.config = { source: 'named' };
-                module.exports.default = { source: 'default' };
-            `;
-
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: bothExportsCode }
-                ]
-            } as any);
-
-            xJet.mock(runInThisContext).mockImplementation((() => {
-                globalThis.module.exports.config = { source: 'named' };
-                globalThis.module.exports.default = { source: 'default' };
-            }) as any);
-
-            const result = await configFileProvider<any>('config.ts');
-
-            expect(result.source).toBe('named');
-        });
-    });
-
-    describe('type safety', () => {
-        test('should support generic type parameter', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            const customCode = `
-                module.exports.config = {
-                    customField: 'test',
-                    variants: {}
-                };
-            `;
-
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: customCode }
-                ]
-            } as any);
-
-            xJet.mock(runInThisContext).mockImplementation((() => {
-                globalThis.module.exports.config = {
-                    customField: 'test',
-                    variants: {}
-                };
-            }) as any);
-
-            const result = await configFileProvider<any>('config.ts');
-
-            expect(result.customField).toBe('test');
-        });
-
-        test('should return properly typed empty object', async () => {
-            xJet.mock(existsSync).mockReturnValue(false);
-
-            const result = await configFileProvider<xBuildConfigInterface>('config.ts');
-
-            expect(result).toEqual({});
-            expect(typeof result).toBe('object');
-        });
-    });
-
-    describe('complex configurations', () => {
-        test('should handle configuration with multiple variants', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            const multiVariantCode = `
-                module.exports.config = {
-                    variants: {
-                        esm: { esbuild: { format: 'esm' } },
-                        cjs: { esbuild: { format: 'cjs' } },
-                        production: { esbuild: { minify: true } }
-                    }
-                };
-            `;
-
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: multiVariantCode }
-                ]
-            } as any);
-
-            xJet.mock(runInThisContext).mockImplementation((() => {
-                globalThis.module.exports.config = {
-                    variants: {
-                        esm: { esbuild: { format: 'esm' } },
-                        cjs: { esbuild: { format: 'cjs' } },
-                        production: { esbuild: { minify: true } }
-                    }
-                };
-            }) as any);
-
-            const result = await configFileProvider<xBuildConfigInterface>('config.ts');
-
-            expect(result.variants?.esm).toBeDefined();
-            expect(result.variants?.cjs).toBeDefined();
-            expect(result.variants?.production).toBeDefined();
-        });
-
-        test('should handle configuration with common settings', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: '' }
-                ]
-            } as any);
-
-            xJet.mock(runInThisContext).mockImplementation((() => {
-                globalThis.module.exports.config = {
-                    common: {
-                        types: true,
-                        declaration: { bundle: true }
-                    },
-                    variants: {
-                        esm: { esbuild: { format: 'esm' } }
-                    }
-                };
-            }) as any);
-
-            const result = await configFileProvider<xBuildConfigInterface>('config.ts');
-
-            expect(result.common?.types).toBe(true);
-            expect(result.common?.declaration).toBeDefined();
-        });
-
-        test('should handle configuration with lifecycle hooks', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: '' }
-                ]
-            } as any);
-
-            xJet.mock(runInThisContext).mockImplementation((() => {
-                globalThis.module.exports.config = {
-                    variants: {
-                        esm: {
-                            esbuild: { format: 'esm' },
-                            lifecycle: {
-                                onStart: async () => {
-                                },
-                                onEnd: async () => {
-                                }
-                            }
-                        }
-                    }
-                };
-            }) as any);
-
-            const result = await configFileProvider<xBuildConfigInterface>('config.ts');
-
-            expect(result.variants?.esm?.lifecycle).toBeDefined();
-        });
-
-        test('should handle nested configuration objects', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: '' }
-                ]
-            } as any);
-
-            xJet.mock(runInThisContext).mockImplementation((() => {
-                globalThis.module.exports.config = {
-                    variants: {
-                        esm: {
-                            esbuild: {
-                                format: 'esm',
-                                define: {
-                                    'process.env.NODE_ENV': 'production'
-                                },
-                                alias: {
-                                    '@': './src'
-                                }
-                            }
-                        }
-                    }
-                };
-            }) as any);
-
-            const result = await configFileProvider<any>('config.ts');
-
-            expect(result.variants.esm.esbuild.define).toBeDefined();
-            expect(result.variants.esm.esbuild.alias).toBeDefined();
-        });
-    });
-
-    describe('error handling', () => {
-        test('should propagate buildFiles errors', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            xJet.mock(buildFiles).mockRejectedValue(new Error('Transpilation failed') as any);
-
-            await expect(configFileProvider('config.ts')).rejects.toThrow('Transpilation failed');
-        });
-
-        test('should propagate VM execution errors', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: '' }
-                ]
-            } as any);
-
-            xJet.mock(runInThisContext).mockImplementation(() => {
-                throw new Error('Invalid config syntax');
+        test('should give back what the file exported by default', async () => {
+            sandboxMock.mockImplementation(async (_: string, sandbox: any) => {
+                sandbox.module.exports = { default: { variants: { cjs: {} } } };
             });
 
-            await expect(configFileProvider('config.ts')).rejects.toThrow('Invalid config syntax');
+            expect(await execConfigFile('built', path)).toEqual({ variants: { cjs: {} } });
         });
 
-        test('should handle missing outputFiles', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: undefined
-            } as any);
+        test('should keep the config export over the default one', async () => {
+            sandboxMock.mockImplementation(async (_: string, sandbox: any) => {
+                sandbox.module.exports = { config: { minify: true }, default: { minify: false } };
+            });
 
-            await expect(configFileProvider('config.ts')).rejects.toThrow();
+            expect(await execConfigFile('built', path)).toEqual({ minify: true });
         });
 
-        test('should handle empty outputFiles array', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: []
-            } as any);
+        test('should give back nothing for a file that exported neither', async () => {
+            sandboxMock.mockImplementation(async (_: string, sandbox: any) => {
+                sandbox.module.exports = {};
+            });
 
-            await expect(configFileProvider('config.ts')).rejects.toThrow();
-        });
-    });
-
-    describe('integration scenarios', () => {
-        test('should load real-world configuration structure', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: '' }
-                ]
-            } as any);
-
-            xJet.mock(runInThisContext).mockImplementation((() => {
-                globalThis.module.exports.config = {
-                    common: {
-                        types: true,
-                        declaration: { bundle: true, outDir: 'types' }
-                    },
-                    variants: {
-                        esm: {
-                            esbuild: {
-                                format: 'esm',
-                                entryPoints: [ 'src/index.ts' ],
-                                outdir: 'dist/esm',
-                                bundle: true,
-                                minify: false,
-                                sourcemap: true
-                            }
-                        },
-                        cjs: {
-                            esbuild: {
-                                format: 'cjs',
-                                entryPoints: [ 'src/index.ts' ],
-                                outdir: 'dist/cjs',
-                                bundle: true
-                            }
-                        }
-                    }
-                };
-            }) as any);
-
-            const result = await configFileProvider<xBuildConfigInterface>('xbuild.config.ts');
-
-            expect(result.common?.types).toBe(true);
-            expect(result.common?.declaration).toBeDefined();
-            expect(result.variants?.esm).toBeDefined();
-            expect(result.variants?.cjs).toBeDefined();
-            expect(result.variants?.esm?.esbuild.format).toBe('esm');
-            expect(result.variants?.cjs?.esbuild.format).toBe('cjs');
+            expect(await execConfigFile('built', path)).toEqual({});
         });
 
-        test('should handle absolute file paths', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: dummyCode }
-                ]
-            } as any);
+        test('should give back nothing for a file whose exports stayed empty', async () => {
+            sandboxMock.mockResolvedValue(undefined);
 
-            const absolutePath = '/absolute/path/to/config.ts';
-            const result = await configFileProvider(absolutePath);
-
-            expect(result).toBeDefined();
+            expect(await execConfigFile('built', path)).toEqual({});
         });
 
-        test('should handle relative file paths', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: dummyCode }
-                ]
-            } as any);
+        test('should reject with what the configuration threw as it ran', async () => {
+            sandboxMock.mockRejectedValue(new Error('region is not defined'));
 
-            const relativePath = './config/xbuild.config.ts';
-            const result = await configFileProvider(relativePath);
-
-            expect(result).toBeDefined();
-        });
-
-        test('should support .js configuration files', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: dummyCode }
-                ]
-            } as any);
-
-            const result = await configFileProvider('xbuild.config.js');
-
-            expect(result).toBeDefined();
+            await expect(execConfigFile('built', path)).rejects.toThrow('region is not defined');
         });
     });
 
-    describe('edge cases', () => {
-        test('should handle configuration with null values', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: '' }
-                ]
-            } as any);
+    describe('configFileProvider', () => {
+        describe('the file it reads', () => {
+            test('should read the file through the cache', async () => {
+                await configFileProvider(path);
 
-            xJet.mock(runInThisContext).mockImplementation((() => {
-                globalThis.module.exports.config = {
-                    variants: {
-                        esm: null
-                    }
-                };
-            }) as any);
+                expect(touchMock).toHaveBeenCalledWith(path);
+            });
 
-            const result = await configFileProvider<any>('config.ts');
+            test('should give back nothing for a file that is not there', async () => {
+                touchMock.mockReturnValue(<any> { version: 1, snapshot: undefined });
 
-            expect(result.variants.esm).toBeNull();
+                expect(await configFileProvider(path)).toEqual({});
+                expect(buildMock).not.toHaveBeenCalled();
+            });
+
+            test('should give back nothing for a file carrying no text', async () => {
+                touchMock.mockReturnValue(<any> { version: 1, snapshot: { text: '' } });
+
+                expect(await configFileProvider(path)).toEqual({});
+                expect(buildMock).not.toHaveBeenCalled();
+            });
         });
 
-        test('should handle configuration with array values', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: '' }
-                ]
-            } as any);
+        describe('the build it runs the file through', () => {
+            test('should build the file as a node module the runtime can require from', async () => {
+                await configFileProvider(path);
 
-            xJet.mock(runInThisContext).mockImplementation((() => {
-                globalThis.module.exports.config = {
-                    variants: {
-                        esm: {
-                            esbuild: {
-                                entryPoints: [ 'src/index.ts', 'src/utils.ts' ]
-                            }
-                        }
-                    }
-                };
-            }) as any);
+                expect(buildMock).toHaveBeenCalledWith(source, path, {
+                    minify: false,
+                    format: 'cjs',
+                    platform: 'node',
+                    logLevel: 'silent',
+                    packages: 'external',
+                    minifySyntax: true,
+                    minifyWhitespace: true,
+                    minifyIdentifiers: false
+                });
+            });
 
-            const result = await configFileProvider<any>('config.ts');
+            test('should register the map beside the code it built', async () => {
+                await configFileProvider(path);
 
-            expect(Array.isArray(result.variants.esm.esbuild.entryPoints)).toBe(true);
-            expect(result.variants.esm.esbuild.entryPoints).toHaveLength(2);
+                expect(sourceMapMock).toHaveBeenCalledWith(path, 'map-text');
+            });
+
+            test('should reject with what the build threw', async () => {
+                buildMock.mockRejectedValue(new Error('Expected ";" but found "}"'));
+
+                await expect(configFileProvider(path)).rejects.toThrow('Expected ";" but found "}"');
+                expect(sandboxMock).not.toHaveBeenCalled();
+            });
         });
 
-        test('should handle very large configurations', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: '' }
-                ]
-            } as any);
+        describe('the two runs it makes', () => {
+            test('should run the built code twice, the first run knowing no arguments', async () => {
+                await configFileProvider(path);
 
-            const largeConfig = {
-                variants: {} as Record<string, any>
-            };
+                expect(sandboxMock).toHaveBeenCalledTimes(2);
+                expect(sandboxMock.mock.calls[0][0]).toBe('built');
+                expect(sandboxMock.mock.calls[0][1].$argv).toEqual({});
+            });
 
-            for (let i = 0; i < 100; i++) {
-                largeConfig.variants[`variant${ i }`] = {
-                    esbuild: { format: 'esm' }
-                };
-            }
+            test('should isolate the logs of the first run alone', async () => {
+                await configFileProvider(path);
 
-            xJet.mock(runInThisContext).mockImplementation((() => {
-                globalThis.module.exports.config = largeConfig;
-            }) as any);
+                expect(sandboxMock.mock.calls[0][3]).toBe(true);
+                expect(sandboxMock.mock.calls[1][3]).toBe(false);
+            });
 
-            const result = await configFileProvider<any>('config.ts');
+            test('should hand the second run the arguments the first run made sense of', async () => {
+                const args = { config: path, env: 'prod' };
+                parseMock.mockReturnValue(args);
 
-            expect(Object.keys(result.variants)).toHaveLength(100);
+                await configFileProvider(path);
+
+                expect(sandboxMock.mock.calls[1][1].$argv).toBe(args);
+            });
+
+            test('should parse the command line with the options the file declares', async () => {
+                const userArgv = { env: { type: 'string' } };
+                sandboxMock.mockImplementation(async (_: string, sandbox: any) => {
+                    sandbox.module.exports.config = { userArgv, variants: {} };
+                });
+
+                await configFileProvider(path);
+
+                expect(parseMock).toHaveBeenCalledWith(process.argv, userArgv);
+            });
+
+            test('should parse the command line with no user options when the file declares none', async () => {
+                await configFileProvider(path);
+
+                expect(parseMock).toHaveBeenCalledWith(process.argv, {});
+            });
+
+            test('should write the parsed arguments into the record the caller handed it', async () => {
+                const argv: Record<string, unknown> = {};
+                parseMock.mockReturnValue({ config: path, watch: true });
+
+                await configFileProvider(path, argv);
+
+                expect(argv).toEqual({ config: path, watch: true });
+            });
         });
 
-        test('should handle configuration with special characters in strings', async () => {
-            xJet.mock(existsSync).mockReturnValue(true);
-            xJet.mock(buildFiles).mockResolvedValue({
-                outputFiles: [
-                    { text: dummySourceMap },
-                    { text: '' }
-                ]
-            } as any);
+        describe('the configuration it gives back', () => {
+            test('should lay what the file exported over the defaults', async () => {
+                expect(await configFileProvider(path)).toEqual({ ...defaults, variants: { esm: {} } });
+            });
 
-            xJet.mock(runInThisContext).mockImplementation((() => {
-                globalThis.module.exports.config = {
-                    variants: {
-                        esm: {
-                            esbuild: {
-                                banner: { js: '// Copyright © 2024\n// "Special" \'chars\'' }
-                            }
-                        }
-                    }
-                };
-            }) as any);
+            test('should give back the defaults alone for a file that exported nothing', async () => {
+                sandboxMock.mockImplementation(async (_: string, sandbox: any) => {
+                    sandbox.module.exports = {};
+                });
 
-            const result = await configFileProvider<any>('config.ts');
+                expect(await configFileProvider(path)).toEqual(defaults);
+            });
 
-            expect(result.variants.esm.esbuild.banner).toBeDefined();
+            test('should lay what the file names over the block the defaults name', async () => {
+                sandboxMock.mockImplementation(async (_: string, sandbox: any) => {
+                    sandbox.module.exports.config = { watch: { paths: [ 'src' ] } };
+                });
+
+                expect(await configFileProvider(path)).toEqual({
+                    watch: { ...defaults.watch, paths: [ 'src' ] }
+                });
+            });
+
+            test('should add to a list the defaults name rather than replacing it', async () => {
+                sandboxMock.mockImplementation(async (_: string, sandbox: any) => {
+                    sandbox.module.exports.config = { watch: { filter: [ 'docs/**' ] } };
+                });
+
+                expect(await configFileProvider(path)).toEqual({
+                    watch: { recursive: true, filter: [ '**/*.{js,ts,json}', '!**/*.d.ts', 'docs/**' ] }
+                });
+            });
+
+            test('should let the file overwrite a value the defaults name', async () => {
+                sandboxMock.mockImplementation(async (_: string, sandbox: any) => {
+                    sandbox.module.exports.config = { watch: { recursive: false } };
+                });
+
+                expect(await configFileProvider(path)).toEqual({
+                    watch: { filter: defaults.watch.filter, recursive: false }
+                });
+            });
+
+            test('should give back a record of its own rather than the exported one', async () => {
+                const config = { variants: { esm: {} } };
+                sandboxMock.mockImplementation(async (_: string, sandbox: any) => {
+                    sandbox.module.exports = { config };
+                });
+
+                const loaded: any = await configFileProvider(path);
+
+                expect(loaded).not.toBe(config);
+                expect(loaded.variants).not.toBe(config.variants);
+            });
         });
     });
 });

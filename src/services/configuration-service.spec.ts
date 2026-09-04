@@ -1,5 +1,5 @@
 /**
- * Import will remove at compile time
+ * Type-only imports erased during TypeScript compilation.
  */
 
 import type { ConfigurationInterface } from '@interfaces/configuration.interface';
@@ -9,191 +9,171 @@ import type { ConfigurationInterface } from '@interfaces/configuration.interface
  */
 
 import { URL } from 'url';
-import { ConfigurationService } from '@services/configuration.service';
-import { DEFAULTS_COMMON_CONFIG } from '@constants/configuration.constant';
+import { ConfigurationService } from './configuration.service';
+import { DefaultsCommonConfig } from '@constants/configuration.constant';
 
 /**
  * Tests
  */
 
 describe('ConfigurationService', () => {
-    (<any> globalThis).URL = URL;
-    let configService: ConfigurationService<any>;
-
-    const defaultConfig = DEFAULTS_COMMON_CONFIG;
-    const customConfig: ConfigurationInterface = <any> {
-        name: 'test-app',
-        verbose: true,
-        variants: {
-            dev: {
-                debug: true
-            }
-        }
-    };
-
-    beforeEach(() => {
-        xJet.resetAllMocks();
-        configService = new ConfigurationService(customConfig);
+    beforeAll(() => {
+        // `equals` reaches for a global URL, which the worker does not carry
+        (<any> globalThis).URL = URL;
     });
 
-    describe('constructor & initial value', () => {
-        test('uses provided initial config and deep copies it', () => {
-            const service = new ConfigurationService(customConfig);
+    const initial: any = {
+        variants: { esm: { esbuild: { format: 'esm', target: [ 'node22' ] } } },
+        common: { types: true, esbuild: { minify: true } }
+    };
 
-            expect(service.getValue()).toEqual(customConfig);
-            expect(service.getValue()).not.toBe(customConfig); // deep copy
+    let service: ConfigurationService<ConfigurationInterface>;
+
+    beforeEach(() => {
+        xJet.restoreAllMocks();
+        service = new ConfigurationService(<any> initial);
+    });
+
+    describe('constructor', () => {
+        test('should copy the configuration it was given rather than hold on to it', () => {
+            const value: any = service.getValue();
+
+            expect(value).toEqual(initial);
+            expect(value).not.toBe(initial);
+            expect(value.common).not.toBe(initial.common);
         });
 
-        test('falls back to DEFAULTS_COMMON_CONFIG when no initial provided', () => {
-            const service = new ConfigurationService();
+        test('should start from the built-in defaults when it is given nothing', () => {
+            expect(new ConfigurationService().getValue()).toEqual(DefaultsCommonConfig);
+        });
 
-            expect(service.getValue()).toEqual(defaultConfig);
+        test('should leave the frozen defaults untouched', () => {
+            const defaults = new ConfigurationService();
+            defaults.patch(<any> { common: { types: false } });
+
+            expect(DefaultsCommonConfig.common?.types).toBe(true);
         });
     });
 
     describe('getValue', () => {
-        test('returns full config without selector', () => {
-            expect(configService.getValue()).toEqual(customConfig);
+        test('should read the whole configuration when it is given no selector', () => {
+            expect(service.getValue()).toEqual(initial);
         });
 
-        test('returns selected value with selector', () => {
-            expect(configService.getValue(cfg => cfg.name)).toBe('test-app');
-            expect(configService.getValue(cfg => cfg.variants?.dev?.debug ?? false)).toBe(true);
-        });
-
-        test('handles undefined paths safely in selector', () => {
-            expect(configService.getValue(cfg => cfg.unknown?.deep?.path ?? 'fallback')).toBe('fallback');
+        test('should answer once with what the selector picked', () => {
+            expect(service.getValue(config => Object.keys(config.variants))).toEqual([ 'esm' ]);
         });
     });
 
     describe('subscribe', () => {
-        test('immediately calls observer with current value', () => {
+        test('should hand the configuration over as it stands and again on every change', () => {
             const observer = xJet.fn();
-
-            configService.subscribe(observer);
+            const stop = service.subscribe(observer);
 
             expect(observer).toHaveBeenCalledTimes(1);
-            expect(observer).toHaveBeenCalledWith(customConfig);
-        });
+            expect(observer).toHaveBeenCalledWith(expect.objectContaining({ variants: initial.variants }));
 
-        test('emits new value after patch', () => {
-            const observer = xJet.fn();
-
-            configService.subscribe(observer);
-
-            configService.patch({ name: 'updated' });
-
+            service.patch(<any> { common: { types: false } });
             expect(observer).toHaveBeenCalledTimes(2);
-            expect(observer).toHaveBeenNthCalledWith(2, expect.objectContaining({ name: 'updated' }));
-        });
 
-        test('returns unsubscribe function that stops emissions', () => {
-            const observer = xJet.fn();
-
-            const unsubscribe = configService.subscribe(observer);
-
-            configService.patch({ name: 'updated' });
-
-            unsubscribe();
-
-            configService.patch({ name: 'final' });
-
+            stop();
+            service.patch(<any> { common: { types: true } });
             expect(observer).toHaveBeenCalledTimes(2);
         });
     });
 
     describe('select', () => {
-        test('emits selected value immediately and on change', () => {
+        test('should report the value as it stands to a new subscriber', () => {
             const observer = xJet.fn();
-            configService.select(cfg => cfg.name).subscribe(observer);
+            service.select(config => config.common?.types).subscribe(observer);
 
+            expect(observer).toHaveBeenCalledWith(true);
+        });
+
+        test('should report only when the value it picked has actually moved', () => {
+            const observer = xJet.fn();
+            service.select(config => config.common?.types).subscribe(observer);
+
+            service.patch(<any> { variants: { cjs: { esbuild: { format: 'cjs' } } } });
             expect(observer).toHaveBeenCalledTimes(1);
-            expect(observer).toHaveBeenCalledWith('test-app');
 
-            configService.patch({ name: 'changed' });
-
+            service.patch(<any> { common: { types: false } });
             expect(observer).toHaveBeenCalledTimes(2);
-            expect(observer).toHaveBeenNthCalledWith(2, 'changed');
+            expect(observer).toHaveBeenLastCalledWith(false);
         });
 
-        test('uses distinctUntilChanged with deep equals', () => {
+        test('should compare the picked value by structure rather than by identity', () => {
             const observer = xJet.fn();
+            service.select(config => ({ types: config.common?.types })).subscribe(observer);
 
-            configService.select(cfg => cfg.variants).subscribe(observer);
-
-            // Same value (deep equal) → no emission
-            configService.patch({ variants: { dev: { debug: true } } });
+            service.patch(<any> { common: { esbuild: { minify: false } } });
 
             expect(observer).toHaveBeenCalledTimes(1);
         });
 
-        test('handles selector returning undefined/null', () => {
+        test('should stop reporting once its subscription ends', () => {
             const observer = xJet.fn();
+            const stop = service.select(config => config.common?.types).subscribe(observer);
 
-            configService.select(cfg => cfg.unknown?.path).subscribe(observer);
+            stop();
+            service.patch(<any> { common: { types: false } });
 
-            expect(observer).toHaveBeenCalledWith(undefined);
+            expect(observer).toHaveBeenCalledTimes(1);
         });
     });
 
-    describe('patch (deep merge)', () => {
-        test('merges partial update and emits new config', () => {
-            const observer = xJet.fn();
-            configService.subscribe(observer);
+    describe('patch', () => {
+        test('should merge the parts it was given and leave the rest standing', () => {
+            service.patch(<any> { common: { esbuild: { minify: false } } });
 
-            configService.patch({
-                name: 'patched',
-                verbose: false,
-                variants: { prod: { minify: true } }
-            });
+            const value: any = service.getValue();
 
-            expect(observer).toHaveBeenCalledTimes(2);
-            const updated: any = observer.mock.calls[1][0];
-
-            expect(updated.name).toBe('patched');
-            expect(updated.verbose).toBe(false);
-            expect(updated.variants).toEqual({
-                dev: { debug: true },
-                prod: { minify: true }
-            });
+            expect(value.common.esbuild.minify).toBe(false);
+            expect(value.common.types).toBe(true);
+            expect(value.variants.esm.esbuild.format).toBe('esm');
         });
 
-        test('preserves unchanged nested properties', () => {
-            configService.patch({ variants: { dev: { logLevel: 'debug' } } });
+        test('should concatenate an array rather than replace it', () => {
+            service.patch(<any> { variants: { esm: { esbuild: { target: [ 'node24' ] } } } });
 
-            const updated = configService.getValue();
+            expect((<any> service.getValue()).variants.esm.esbuild.target).toEqual([ 'node22', 'node24' ]);
+        });
 
-            expect(updated.variants.dev.debug).toBe(true); // preserved
-            expect(updated.variants.dev.logLevel).toBe('debug'); // added
+        test('should publish a configuration of its own rather than the one it merged over', () => {
+            const before = service.getValue();
+            service.patch(<any> { common: { types: false } });
+
+            expect(service.getValue()).not.toBe(before);
+            expect((<any> before).common.types).toBe(true);
         });
     });
 
-    describe('reload (full replace)', () => {
-        test('replaces entire config with new value', () => {
-            const observer = xJet.fn();
-            configService.subscribe(observer);
+    describe('reload', () => {
+        test('should start again from the initial configuration with the given one merged over it', () => {
+            service.patch(<any> { common: { types: false } });
+            service.reload(<any> { common: { declaration: false } });
 
-            const newConfig = {
-                name: 'reloaded',
-                verbose: false
-            };
+            const value: any = service.getValue();
 
-            configService.reload(newConfig);
-            expect(observer).toHaveBeenCalledTimes(2);
-            expect(observer.mock.calls[1][0]).toEqual(expect.objectContaining(newConfig));
-            expect(configService.getValue().variants).toEqual({
-                dev: {
-                    debug: true
-                }
-            });
+            expect(value.common.types).toBe(true);
+            expect(value.common.declaration).toBe(false);
         });
 
-        test('merges with initial config when partial reload', () => {
-            configService.reload({ name: 'partial-reload', verbose: false });
+        test('should tell every subscriber about the configuration it went back to', () => {
+            const observer = xJet.fn();
+            service.subscribe(observer);
 
-            const reloaded = configService.getValue();
-            expect(reloaded.name).toBe('partial-reload');
-            expect(reloaded.verbose).toBe(defaultConfig.verbose);
+            service.reload(<any> {});
+
+            expect(observer).toHaveBeenCalledTimes(2);
+            expect(observer).toHaveBeenLastCalledWith(expect.objectContaining({ variants: initial.variants }));
+        });
+
+        test('should leave the initial configuration untouched for the next reload', () => {
+            service.reload(<any> { common: { declaration: false } });
+            service.reload(<any> {});
+
+            expect((<any> service.getValue()).common.declaration).toBeUndefined();
         });
     });
 });

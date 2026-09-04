@@ -1,917 +1,344 @@
 /**
- * Import will remove at compile time
+ * Type-only imports erased during TypeScript compilation.
  */
 
-import type { MockState } from '@remotex-labs/xjet';
-import type { VariantService } from '@services/variant.service';
-import type { StateInterface } from '@directives/interfaces/macros-directive.interface';
-import type { MacrosStateInterface } from '@directives/interfaces/analyze-directive.interface';
-import type { LoadContextInterface } from '@providers/interfaces/lifecycle-provider.interface';
+import type { LifecycleContextInterface, LifecycleLogsType } from '@interfaces/lifecycle.interface';
 
 /**
  * Imports
  */
 
-import ts from 'typescript';
-import { readFileSync } from 'fs';
-import { SourceService } from '@remotex-labs/xmap';
-import { nodeContainsMacro, transformerDirective } from '@directives/macros.directive';
-import { astDefineVariable, astDefineCallExpression } from '@directives/define.directive';
-import { astInlineCallExpression, astInlineVariable } from '@directives/inline.directive';
-import { astProcess, isCallExpression, isVariableStatement  } from '@directives/macros.directive';
+import { parseSync } from 'oxc-parser';
+import { transformMacros } from './macros.directive';
+import { evaluate } from '@directives/inline.directive';
 
-describe('transformer.directive', () => {
-    let state: StateInterface;
-    let astDefineVariableMock: MockState;
-    let astInlineVariableMock: MockState;
-    let astDefineCallExpressionMock: MockState;
-    let astInlineCallExpressionMock: MockState;
+/**
+ * Tests
+ */
+
+describe('transformMacros', () => {
+    const target = '/project/src/feature.ts';
+
+    let logs: LifecycleLogsType;
+    let dropped: Set<string>;
+    let context: LifecycleContextInterface;
+    let evaluateMock: any;
+
+    /**
+     * Runs the transform over a source as the build would, parse and all.
+     */
+
+    async function transform(code: string, file = target): Promise<string> {
+        return await transformMacros(parseSync(file, code, { sourceType: 'module' }), file, code, context);
+    }
 
     beforeEach(() => {
         xJet.restoreAllMocks();
-        const dummySourceMap = JSON.stringify({
-            version: 3,
-            sources: [ 'framework.ts' ],
-            names: [],
-            mappings: 'AAAA'
-        });
 
-        xJet.mock(SourceService).mockImplementation((() => {}) as any);
-        xJet.mock(readFileSync).mockImplementation(() => dummySourceMap);
-
-        astDefineVariableMock = xJet.mock(astDefineVariable);
-        astInlineVariableMock = xJet.mock(astInlineVariable);
-        astDefineCallExpressionMock = xJet.mock(astDefineCallExpression);
-        astInlineCallExpressionMock = xJet.mock(astInlineCallExpression);
-
-        state = {
-            sourceFile: ts.createSourceFile('test.ts', '', ts.ScriptTarget.ESNext),
-            errors: [],
-            warnings: [],
-            defines: {},
-            contents: '',
-            stage: {
-                defineMetadata: {
-                    disabledMacroNames: new Set(),
-                    filesWithMacros: new Set(),
-                    replacementInfo: []
-                }
-            }
-        } as any;
+        logs = { debug: [], info: [], warning: [], error: [] };
+        dropped = new Set<string>();
+        context = <any> { logs, stage: { dropped }, options: { define: {} }, overrides: {} };
+        evaluateMock = xJet.mock(evaluate).mockResolvedValue('4');
     });
 
-    function parseCode(code: string) {
-        state.sourceFile = ts.createSourceFile('test.ts', code, ts.ScriptTarget.ESNext);
-        state.contents = code;
-        state.stage.defineMetadata.filesWithMacros.add('test.ts');
-
-        return state.sourceFile;
-    }
-
-    describe('nodeContainsMacro', () => {
-        test('detects $$ifdef macro', () => {
-            parseCode('const x = $$ifdef(\'DEBUG\', value);');
-            const node = state.sourceFile.statements[0];
-            expect(nodeContainsMacro(node, state.sourceFile)).toBe(true);
+    describe('the sources it passes over', () => {
+        test('should leave an empty source alone', async () => {
+            expect(await transform('')).toBe('');
         });
 
-        test('detects $$ifndef macro', () => {
-            parseCode('const x = $$ifndef(\'PROD\', value);');
-            const node = state.sourceFile.statements[0];
-            expect(nodeContainsMacro(node, state.sourceFile)).toBe(true);
+        test('should leave a dependency alone', async () => {
+            const code = 'export const $$dev = $$ifdef(\'DEV\', () => 1);';
+
+            expect(await transform(code, '/project/node_modules/pkg/index.js')).toBe(code);
         });
 
-        test('detects $$inline macro', () => {
-            parseCode('const x = $$inline(() => 42);');
-            const node = state.sourceFile.statements[0];
-            expect(nodeContainsMacro(node, state.sourceFile)).toBe(true);
+        test('should leave a source carrying no macro and no dropped name alone', async () => {
+            const code = 'export const answer = 42;';
+
+            expect(await transform(code)).toBe(code);
         });
 
-        test('detects multiple macros', () => {
-            parseCode('$$ifdef(\'DEBUG\', () => {}); $$inline(() => {});');
-            const node = state.sourceFile.statements[0];
-            expect(nodeContainsMacro(node, state.sourceFile)).toBe(true);
+        test('should leave a name that only looks like a macro alone', async () => {
+            const code = 'const $$total = 1 + 1;';
+
+            expect(await transform(code)).toBe(code);
         });
 
-        test('does not detect non-macro code', () => {
-            parseCode('const x = regularFunction(\'DEBUG\', value);');
-            const node = state.sourceFile.statements[0];
-            expect(nodeContainsMacro(node, state.sourceFile)).toBe(false);
-        });
+        test('should pass over a source carrying a dropped name but no macro', async () => {
+            dropped.add('$$dev');
 
-        test('returns true when sourceFile provided', () => {
-            parseCode('const x = $$ifdef(\'DEBUG\', value);');
-            const node = state.sourceFile.statements[0];
-            expect(nodeContainsMacro(node, state.sourceFile)).toBe(true);
+            expect(await transform('run($$dev);')).toBe('run(undefined);');
         });
     });
 
-    describe('isVariableStatement', () => {
-        test('processes ifdef variable declaration', async () => {
-            parseCode('const $$debug = $$ifdef("DEBUG", () => {});');
-            astDefineVariableMock.mockReturnValue('function $$debug() {}');
+    describe('the declarations it expands', () => {
+        test('should declare a function for a macro whose flag is set', async () => {
+            context.options.define = { DEV: 'true' };
+            const code = 'export const $$dev = $$ifdef(\'DEV\', () => 1);';
 
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.VariableStatement;
-
-            await isVariableStatement(node, replacements, state);
-
-            expect(astDefineVariableMock).toHaveBeenCalled();
-            expect(replacements.size).toBe(1);
+            expect(await transform(code)).toBe('export function $$dev() { return 1; }');
         });
 
-        test('processes ifndef variable declaration', async () => {
-            parseCode('const $$noProd = $$ifndef("PRODUCTION", () => {});');
-            astDefineVariableMock.mockReturnValue('function $$noProd() {}');
+        test('should drop a macro whose flag is not set', async () => {
+            const code = 'const before = 1;\nexport const $$dev = $$ifdef(\'DEV\', () => 1);\nconst after = 2;';
 
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.VariableStatement;
-
-            await isVariableStatement(node, replacements, state);
-
-            expect(astDefineVariableMock).toHaveBeenCalled();
-            expect(replacements.size).toBe(1);
+            expect(await transform(code)).toBe('const before = 1;\n\nconst after = 2;');
         });
 
-        test('processes inline variable declaration', async () => {
-            parseCode('const result = $$inline(() => 42);');
-            astInlineVariableMock.mockResolvedValue('const result = 42;');
+        test('should read an ifndef macro the other way round', async () => {
+            const code = 'const $$fallback = $$ifndef(\'DEV\', () => 1);';
 
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.VariableStatement;
-
-            await isVariableStatement(node, replacements, state);
-
-            expect(astInlineVariableMock).toHaveBeenCalled();
-            expect(replacements.size).toBe(1);
+            expect(await transform(code)).toBe('function $$fallback() { return 1; }');
+            context.options.define = { DEV: 'true' };
+            expect(await transform(code)).toBe('');
         });
 
-        test('handles export declarations', async () => {
-            parseCode('export const $$api = $$ifdef("DEBUG", () => {});');
-            astDefineVariableMock.mockReturnValue('export function $$api() {}');
+        test('should keep whatever the call carries', async () => {
+            context.options.define = { DEV: 'true' };
+            const code = 'const $$sum = $$ifdef(\'DEV\', (a) => a + 1)(41);';
 
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.VariableStatement;
-
-            await isVariableStatement(node, replacements, state);
-            expect(astDefineVariableMock).toHaveBeenCalledWith(
-                expect.any(Object),
-                expect.any(Object),
-                true,
-                state
-            );
+            expect(await transform(code)).toBe('const $$sum = ((a) => a + 1)(41);');
         });
 
-        test('processes const declarations', async () => {
-            parseCode('const $$x = $$ifdef(\'DEBUG\', value);');
-            astDefineVariableMock.mockReturnValue('function $$x() {}');
+        test('should read a macro through the assertion written over it', async () => {
+            context.options.define = { DEV: 'true' };
+            const code = 'const $$dev = $$ifdef(\'DEV\', () => 1) as number;';
 
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.VariableStatement;
-
-            await isVariableStatement(node, replacements, state);
-            expect(replacements.size).toBe(1);
+            expect(await transform(code)).toBe('function $$dev() { return 1; }');
         });
 
-        test('processes let declarations', async () => {
-            parseCode('let $$x = $$ifdef(\'DEBUG\', value);');
-            astDefineVariableMock.mockReturnValue('function $$x() {}');
+        test('should name the macros it dropped for the stages after it', async () => {
+            await transform('export const $$dev = $$ifdef(\'DEV\', () => 1);');
 
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.VariableStatement;
-
-            await isVariableStatement(node, replacements, state);
-            expect(replacements.size).toBe(1);
+            expect([ ...dropped ]).toEqual([ '$$dev' ]);
         });
 
-        test('processes var declarations', async () => {
-            parseCode('var $$x = $$ifdef(\'DEBUG\', value);');
-            astDefineVariableMock.mockReturnValue('function $$x() {}');
+        test('should name none of the macros it kept', async () => {
+            context.options.define = { DEV: 'true' };
+            await transform('export const $$dev = $$ifdef(\'DEV\', () => 1);');
 
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.VariableStatement;
-
-            await isVariableStatement(node, replacements, state);
-            expect(replacements.size).toBe(1);
+            expect([ ...dropped ]).toEqual([]);
         });
 
-        test('handles IIFE wrapped macro', async () => {
-            parseCode('const x = $$ifdef(\'DEBUG\', () => log)(\'test\');');
-            astDefineCallExpressionMock.mockReturnValue('function log() {}');
+        test('should stand undefined in for a macro it dropped in the same source', async () => {
+            const code = 'export const $$dev = $$ifdef(\'DEV\', () => 1);\nrun($$dev);';
 
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.VariableStatement;
-
-            await isVariableStatement(node, replacements, state);
-            expect(replacements.size).toBe(1);
-        });
-
-        test('handles IIFE with multiple arguments', async () => {
-            parseCode('const x = $$ifdef(\'DEBUG\', () => add)(1, 2, 3);');
-            astDefineCallExpressionMock.mockReturnValue('function add() {}');
-
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.VariableStatement;
-
-            await isVariableStatement(node, replacements, state);
-            expect(replacements.size).toBe(1);
-        });
-
-        test('handles as expression with macro', async () => {
-            parseCode('const x = $$ifdef(\'DEBUG\', value) as string;');
-            astDefineVariableMock.mockReturnValue('function x() {}');
-
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.VariableStatement;
-
-            await isVariableStatement(node, replacements, state);
-            expect(replacements.size).toBe(1);
-        });
-
-        test('handles multiple declarations', async () => {
-            parseCode('const a = 1, $$b = $$ifdef(\'DEBUG\', 2), c = 3;');
-            astDefineVariableMock.mockReturnValue('function $$b() {}');
-
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.VariableStatement;
-
-            await isVariableStatement(node, replacements, state);
-            expect(replacements.size).toBeGreaterThanOrEqual(1);
-        });
-
-        test('skips non-call-expression initializers', async () => {
-            parseCode('const x = 42;');
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.VariableStatement;
-
-            await isVariableStatement(node, replacements, state);
-            expect(replacements.size).toBe(0);
-        });
-
-        test('skips non-macro function calls', async () => {
-            parseCode('const x = someFunc();');
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.VariableStatement;
-
-            await expect(isVariableStatement(node, replacements, state))
-                .resolves.toBeFalsy();
-        });
-
-        test('skips variables with no initializer', async () => {
-            parseCode('const x;');
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.VariableStatement;
-
-            await isVariableStatement(node, replacements, state);
-            expect(replacements.size).toBe(0);
-        });
-
-        test('throws on insufficient arguments for ifdef', async () => {
-            parseCode('const x = $$ifdef(\'DEBUG\');');
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.VariableStatement;
-
-            await expect(isVariableStatement(node, replacements, state))
-                .rejects.toThrow('Invalid macro call');
-        });
-
-        test('throws on excess arguments for ifdef', async () => {
-            parseCode('const x = $$ifdef(\'DEBUG\', 1, 2, 3);');
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.VariableStatement;
-
-            await expect(isVariableStatement(node, replacements, state))
-                .rejects.toThrow('Invalid macro call');
-        });
-
-        test('throws on insufficient arguments for inline', async () => {
-            parseCode('const x = $$inline();');
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.VariableStatement;
-
-            await expect(isVariableStatement(node, replacements, state))
-                .rejects.toThrow('Invalid macro call');
-        });
-
-        test('throws on excess arguments for inline', async () => {
-            parseCode('const x = $$inline(() => 1, 2);');
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.VariableStatement;
-
-            await expect(isVariableStatement(node, replacements, state))
-                .rejects.toThrow('Invalid macro call');
-        });
-
-        test('does not add replacement when function returns false', async () => {
-            parseCode('const $$debug = $$ifdef("DEBUG", () => {});');
-            astDefineVariableMock.mockReturnValue(false);
-
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.VariableStatement;
-
-            await isVariableStatement(node, replacements, state);
-            expect(replacements.size).toBe(0);
-        });
-
-        test('stores correct replacement positions', async () => {
-            parseCode('const $$debug = $$ifdef("DEBUG", () => {});');
-            astDefineVariableMock.mockReturnValue('function $$debug() {}');
-
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.VariableStatement;
-
-            await isVariableStatement(node, replacements, state);
-
-            const [ replacement ] = Array.from(replacements) as any;
-            expect(replacement.end).toBeGreaterThan(replacement.start);
-            expect(replacement.replacement).toBe('function $$debug() {}');
+            expect(await transform(code)).toBe('\nrun(undefined);');
         });
     });
 
-    describe('isCallExpression', () => {
-        test('processes ifdef call expression', async () => {
-            parseCode('$$ifdef("DEBUG", () => {});');
-            astDefineCallExpressionMock.mockReturnValue('(() => {})()');
+    describe('the expressions it expands', () => {
+        test('should inline the body of a statement whose flag is set', async () => {
+            context.options.define = { DEV: 'true' };
 
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.ExpressionStatement;
-
-            await isCallExpression(node, replacements, state);
-
-            expect(astDefineCallExpressionMock).toHaveBeenCalled();
+            expect(await transform('$$ifdef(\'DEV\', () => { start(); });')).toBe('start();');
         });
 
-        test('processes ifndef call expression', async () => {
-            parseCode('$$ifndef("PROD", () => {});');
-            astDefineCallExpressionMock.mockReturnValue('(() => {})()');
-
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.ExpressionStatement;
-
-            await isCallExpression(node, replacements, state);
-
-            expect(astDefineCallExpressionMock).toHaveBeenCalled();
+        test('should drop a statement whose flag is not set', async () => {
+            expect(await transform('$$ifdef(\'DEV\', () => { start(); });')).toBe('');
         });
 
-        test('processes inline call expression', async () => {
-            parseCode('$$inline(() => 42);');
-            astInlineCallExpressionMock.mockResolvedValueOnce('42');
+        test('should call the payload of an expression whose flag is set', async () => {
+            context.options.define = { DEV: 'true' };
 
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.ExpressionStatement;
-
-            await isCallExpression(node, replacements, state);
-
-            expect(astInlineCallExpressionMock).toHaveBeenCalled();
-            expect(replacements.size).toBe(1);
+            expect(await transform('run($$ifdef(\'DEV\', () => 1));')).toBe('run((() => 1)());');
         });
 
-        test('skips non-macro function calls', async () => {
-            parseCode('someFunc();');
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.ExpressionStatement;
-
-            await isCallExpression(node, replacements, state);
-            expect(replacements.size).toBe(0);
+        test('should stand undefined in for an expression whose flag is not set', async () => {
+            expect(await transform('run($$ifdef(\'DEV\', () => 1));')).toBe('run(undefined);');
         });
 
-        test('skips non-identifier expressions', async () => {
-            parseCode('(() => {})();');
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.ExpressionStatement;
+        test('should keep the call an expression macro carries', async () => {
+            context.options.define = { DEV: 'true' };
 
-            await isCallExpression(node, replacements, state);
-            expect(replacements.size).toBe(0);
+            expect(await transform('run($$ifdef(\'DEV\', (a) => a)(1));')).toBe('run(((a) => a)(1));');
         });
 
-        test('throws on insufficient arguments for ifdef', async () => {
-            parseCode('$$ifdef("DEBUG");');
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.ExpressionStatement;
+        test('should read an expression macro through the assertion written over it', async () => {
+            context.options.define = { DEV: 'true' };
 
-            await expect(isCallExpression(node, replacements, state))
-                .rejects.toThrow('Invalid macro call: $$ifdef with 1 arguments');
+            expect(await transform('run($$ifdef(\'DEV\', () => 1) as number);')).toBe('run((() => 1)());');
         });
 
-        test('throws on excess arguments for ifdef', async () => {
-            parseCode('$$ifdef("DEBUG", 1, 2);');
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.ExpressionStatement;
+        test('should pass over a call that names no macro', async () => {
+            const code = 'run($$other(\'DEV\', () => 1));';
 
-            await expect(isCallExpression(node, replacements, state))
-                .rejects.toThrow('Invalid macro call');
+            expect(await transform(code)).toBe(code);
         });
 
-        test('throws on insufficient arguments for inline', async () => {
-            parseCode('$$inline();');
-            const replacements = new Set<any>();
-            const node = state.sourceFile.statements[0] as ts.ExpressionStatement;
+        test('should pass over a macro call the parser cannot read as one', async () => {
+            const code = 'run($$ifdef(flag, () => 1));';
 
-            await expect(isCallExpression(node, replacements, state))
-                .rejects.toThrow('Invalid macro call');
+            expect(await transform(code)).toBe(code);
         });
     });
 
-    describe('astProcess', () => {
-        test('returns original content when no macros', async () => {
-            parseCode('const x = 1;');
-            state.stage.defineMetadata.filesWithMacros.clear();
-            const result = await astProcess(state);
-
-            expect(result).toBe('const x = 1;');
+    describe('the inline calls it runs', () => {
+        test('should bind what the thunk produced', async () => {
+            expect(await transform('export const $$stamp = $$inline(() => 2 + 2);'))
+                .toBe('export const $$stamp = 4;');
         });
 
-        test('skips processing when no disabled macros', async () => {
-            parseCode('const x = 1;');
-            state.stage.defineMetadata.filesWithMacros.clear();
-            state.stage.defineMetadata.disabledMacroNames.clear();
+        test('should run the thunk against the source it sits in', async () => {
+            const code = 'export const $$stamp = $$inline(() => 2 + 2);';
+            await transform(code);
 
-            const result = await astProcess(state);
-
-            expect(result).toBe('const x = 1;');
+            expect(evaluateMock).toHaveBeenCalledTimes(1);
+            expect(evaluateMock.mock.calls[0][0]).toEqual(expect.objectContaining({ code, target }));
+            expect(evaluateMock.mock.calls[0][1].callee.name).toBe('$$inline');
         });
 
-        test('processes variable statement macros and replaces call boundaries', async () => {
-            parseCode('const $$debug = $$ifdef("DEBUG", () => {});');
-            astDefineVariableMock.mockReturnValue('function $$debug() {}');
-
-            const result = await astProcess(state);
-
-            expect(result).toContain('function $$debug()');
+        test('should stand what the thunk produced in for an expression', async () => {
+            expect(await transform('run($$inline(() => 2 + 2));')).toBe('run(4);');
         });
 
-        test('processes call expression macros', async () => {
-            parseCode('$$inline(() => 42);');
-            astInlineCallExpressionMock.mockResolvedValueOnce('42');
-
-            const result = await astProcess(state);
-            expect(result).toBe('undefined;');
+        test('should drop a statement that only runs a thunk', async () => {
+            expect(await transform('$$inline(() => log());')).toBe('');
         });
 
-        test('replaces disabled macro calls with undefined', async () => {
-            parseCode('$$disabledMacro();');
-            state.stage.defineMetadata.filesWithMacros.clear();
-            state.stage.defineMetadata.disabledMacroNames.add('$$disabledMacro');
-            const result = await astProcess(state);
+        test('should never drop an inline macro for a flag', async () => {
+            await transform('export const $$stamp = $$inline(() => 2 + 2);');
 
-            expect(result).toContain('undefined');
+            expect([ ...dropped ]).toEqual([]);
         });
 
-        test('replaces disabled macro identifiers with undefined', async () => {
-            parseCode('const x = $$disabledMacro;');
-            state.stage.defineMetadata.filesWithMacros.clear();
-            state.stage.defineMetadata.disabledMacroNames.add('$$disabledMacro');
+        test('should stand undefined in for a thunk that failed', async () => {
+            evaluateMock.mockRejectedValue(new Error('fetch is not defined'));
 
-            const result = await astProcess(state);
-
-            expect(result).toContain('undefined');
+            expect(await transform('export const $$stamp = $$inline(() => load());'))
+                .toBe('export const $$stamp = undefined;');
         });
 
-        test('handles multiple disabled macros', async () => {
-            parseCode('const a = $$disabled1; const b = $$disabled2;');
-            state.stage.defineMetadata.filesWithMacros.clear();
-            state.stage.defineMetadata.disabledMacroNames.add('$$disabled1');
-            state.stage.defineMetadata.disabledMacroNames.add('$$disabled2');
+        test('should report the thunk that failed', async () => {
+            const error = new Error('fetch is not defined');
+            evaluateMock.mockRejectedValue(error);
 
-            const result = await astProcess(state);
-            expect(result.match(/undefined/g)?.length).toBe(2);
-        });
+            await transform('const a = 1;\nexport const $$stamp = $$inline(() => load());');
 
-        test('handles macro inside function', async () => {
-            parseCode(`
-                function test() {
-                    const x = $$ifdef('DEBUG', 1);
+            expect(logs.error).toEqual([
+                {
+                    detail: error,
+                    id: 'macro-inline',
+                    text: '$$inline failed: fetch is not defined',
+                    location: { file: target, line: 2, column: 23 }
                 }
-            `);
-            astDefineVariableMock.mockReturnValue('function x() {}');
-
-            const result = await astProcess(state);
-            expect(result).toContain('function test()');
-        });
-
-        test('handles macro inside class method', async () => {
-            parseCode(`
-                class Test {
-                    method() {
-                        const x = $$ifdef('DEBUG', 1);
-                    }
-                }
-            `);
-            astDefineVariableMock.mockReturnValue('function x() {}');
-
-            const result = await astProcess(state);
-            expect(result).toContain('class Test');
-        });
-
-        test('handles macro inside async function', async () => {
-            parseCode(`
-                async function test() {
-                    const x = $$ifdef('DEBUG', 1);
-                }
-            `);
-            astDefineVariableMock.mockReturnValue('function x() {}');
-
-            const result = await astProcess(state);
-            expect(result).toContain('async function test()');
-        });
-
-        test('handles macro inside arrow function', async () => {
-            parseCode('const fn = () => { const x = $$ifdef("DEBUG", 1); };');
-            astDefineVariableMock.mockReturnValue('function x() {}');
-
-            const result = await astProcess(state);
-            expect(result).toContain('const fn');
-        });
-
-        test('handles macro inside if statement', async () => {
-            parseCode(`
-                if (condition) {
-                    const x = $$ifdef('DEBUG', 1);
-                }
-            `);
-            astDefineVariableMock.mockReturnValue('function x() {}');
-
-            const result = await astProcess(state);
-            expect(result).toContain('if');
-        });
-
-        test('handles macro inside for loop', async () => {
-            parseCode(`
-                for (let i = 0; i < 10; i++) {
-                    const x = $$ifdef('DEBUG', 1);
-                }
-            `);
-            astDefineVariableMock.mockReturnValue('function x() {}');
-
-            const result = await astProcess(state);
-            expect(result).toContain('for');
-        });
-
-        test('handles deeply nested macros', async () => {
-            parseCode(`
-                function a() {
-                    function b() {
-                        function c() {
-                            const x = $$ifdef('DEBUG', 1);
-                        }
-                    }
-                }
-            `);
-            astDefineVariableMock.mockReturnValue('function x() {}');
-
-            const result = await astProcess(state);
-            expect(result).toContain('function a()');
-        });
-
-        test('populates replacementInfo array', async () => {
-            parseCode('$$disabledMacro();');
-            state.stage.defineMetadata.filesWithMacros.clear();
-            state.stage.defineMetadata.disabledMacroNames.add('$$disabledMacro');
-
-            await astProcess(state, 'index');
-            expect(Array.isArray(state.stage.replacementInfo?.['index'])).toBe(true);
-        });
-
-        test('handles empty code', async () => {
-            parseCode('');
-            const result = await astProcess(state);
-            expect(result).toBe('');
-        });
-
-        test('processes multiple statements', async () => {
-            parseCode('const a = 1; const b = 2; const c = 3;');
-            state.stage.defineMetadata.filesWithMacros.clear();
-            const result = await astProcess(state);
-            expect(result).toBe('const a = 1; const b = 2; const c = 3;');
+            ]);
         });
     });
 
-    describe('transformerDirective', () => {
-        let variant: VariantService;
-        let context: LoadContextInterface & { stage: MacrosStateInterface };
-
+    describe('the imports and exports it prunes', () => {
         beforeEach(() => {
-            xJet.resetAllMocks();
-
-            variant = {
-                config: {
-                    define: { DEBUG: true },
-                    esbuild: { bundle: true }
-                },
-                typescript: {
-                    languageService: {
-                        getProgram: xJet.fn().mockReturnValue({
-                            getSourceFile: xJet.fn().mockReturnValue(null)
-                        })
-                    },
-                    languageHostService: {
-                        touchFile: xJet.fn(),
-                        aliasRegex: undefined,
-                        hasScriptSnapshot: xJet.fn().mockReturnValue(true),
-                        resolveAliases: xJet.fn((content: string) => content),
-                        getCompilationSettings: xJet.fn(() => ({
-                            target: 99
-                        }))
-                    }
-                }
-            } as any;
-
-            context = {
-                args: { path: 'test.ts' },
-                loader: 'ts',
-                stage: {
-                    defineMetadata: {
-                        disabledMacroNames: new Set(),
-                        filesWithMacros: new Set(),
-                        replacementInfo: []
-                    }
-                },
-                contents: Buffer.from('const x = 1;')
-            } as any;
+            dropped.add('$$dev');
         });
 
-        test('returns undefined for non-ts/js files', async () => {
-            context.args.path = 'test.css';
-            const result = await transformerDirective(variant, context);
-            expect(result).toBeUndefined();
+        test('should drop the specifier naming a dropped macro', async () => {
+            expect(await transform('import { keep, $$dev } from \'./x\';')).toBe('import { keep } from \'./x\';');
         });
 
-        test('returns undefined for empty contents', async () => {
-            context.contents = Buffer.from('');
-            const result = await transformerDirective(variant, context);
-            expect(result).toBeUndefined();
+        test('should keep the side effect when every specifier goes', async () => {
+            expect(await transform('import { $$dev } from \'./x\';')).toBe('import \'./x\';');
         });
 
-        test('processes TypeScript files', async () => {
-            context.stage.defineMetadata.filesWithMacros.add('test.ts');
-            context.contents = Buffer.from('const $$debug = $$ifdef("DEBUG", () => {});');
-            astDefineVariableMock.mockReturnValue('function $$debug() {}');
-
-            xJet.spyOn(variant.typescript.languageService, 'getProgram').mockReturnValue({
-                getSourceFile: xJet.fn().mockReturnValue(
-                    ts.createSourceFile('test.ts', context.contents.toString(), ts.ScriptTarget.ESNext)
-                )
-            } as any);
-
-            const result = await transformerDirective(variant, context);
-
-            expect(result?.contents).toContain('function $$debug()');
+        test('should keep a default import beside the specifiers it kept', async () => {
+            expect(await transform('import def, { $$dev, keep } from \'./x\';'))
+                .toBe('import def, { keep } from \'./x\';');
         });
 
-        test('processes JavaScript files', async () => {
-            context.args.path = 'test.js';
-            context.stage.defineMetadata.filesWithMacros.add('test.js');
-            context.contents = Buffer.from('const x = $$inline(() => 42);');
-
-            astInlineVariableMock.mockResolvedValueOnce('const x = 42;');
-
-            xJet.spyOn(variant.typescript.languageService, 'getProgram').mockReturnValue({
-                getSourceFile: xJet.fn().mockReturnValue(
-                    ts.createSourceFile('test.js', context.contents.toString(), ts.ScriptTarget.ESNext)
-                )
-            } as any);
-
-            const result = await transformerDirective(variant, context);
-
-            expect(result?.contents).toContain('const x = 42;');
+        test('should keep a default import on its own', async () => {
+            expect(await transform('import def, { $$dev } from \'./x\';')).toBe('import def from \'./x\';');
         });
 
-        test('skips node_modules', async () => {
-            context.args.path = 'node_modules/package/index.ts';
-            const result = await transformerDirective(variant, context);
-            expect(result).toBeUndefined();
+        test('should leave an import naming no dropped macro alone', async () => {
+            const code = 'import def, { keep } from \'./x\';';
+
+            expect(await transform(code)).toBe(code);
         });
 
-        test('skips .json files', async () => {
-            context.args.path = 'config.json';
-            const result = await transformerDirective(variant, context);
-            expect(result).toBeUndefined();
+        test('should drop the export specifier naming a dropped macro', async () => {
+            expect(await transform('export { keep, $$dev };')).toBe('export { keep };');
         });
 
-        test('returns OnLoadResult with loader', async () => {
-            xJet.spyOn(variant.typescript.languageService, 'getProgram').mockReturnValue({
-                getSourceFile: xJet.fn().mockReturnValue(
-                    ts.createSourceFile('test.ts', 'const x = 1;', ts.ScriptTarget.ESNext)
-                )
-            } as any);
-
-            const result = await transformerDirective(variant, context);
-
-            expect(result?.loader).toBe('ts');
+        test('should drop an export left with nothing', async () => {
+            expect(await transform('export { $$dev };')).toBe('');
         });
 
-        test('returns contents in result', async () => {
-            xJet.spyOn(variant.typescript.languageService, 'getProgram').mockReturnValue({
-                getSourceFile: xJet.fn().mockReturnValue(
-                    ts.createSourceFile('test.ts', 'const x = 1;', ts.ScriptTarget.ESNext)
-                )
-            } as any);
-
-            const result = await transformerDirective(variant, context);
-
-            expect(result?.contents).toBeDefined();
+        test('should read the local name of a renamed export', async () => {
+            expect(await transform('export { $$dev as thing };')).toBe('');
         });
 
-        test('returns warnings and errors arrays', async () => {
-            xJet.spyOn(variant.typescript.languageService, 'getProgram').mockReturnValue({
-                getSourceFile: xJet.fn().mockReturnValue(
-                    ts.createSourceFile('test.ts', 'const x = 1;', ts.ScriptTarget.ESNext)
-                )
-            } as any);
+        test('should leave a re-export alone', async () => {
+            const code = 'export { $$dev } from \'./x\';';
 
-            const result = await transformerDirective(variant, context);
-
-            expect(Array.isArray(result?.warnings)).toBe(true);
-            expect(Array.isArray(result?.errors)).toBe(true);
+            expect(await transform(code)).toBe(code);
         });
 
-        test('resolves path aliases when bundle is false', async () => {
-            variant.config.esbuild.bundle = false;
-            (<any> variant.typescript.languageHostService).aliasRegex = /@/;
+        test('should leave an export naming no dropped macro alone', async () => {
+            const code = 'export { keep };';
 
-            xJet.spyOn(variant.typescript.languageService, 'getProgram').mockReturnValue({
-                getSourceFile: xJet.fn().mockReturnValue(
-                    ts.createSourceFile('test.ts', 'const x = 1;', ts.ScriptTarget.ESNext)
-                )
-            } as any);
-
-            await transformerDirective(variant, context);
-
-            expect(variant.typescript.languageHostService.resolveAliases).toHaveBeenCalledWith(
-                expect.any(String),
-                'test.ts',
-                '.js'
-            );
-        });
-
-        test('does not resolve aliases when bundle is true', async () => {
-            variant.config.esbuild.bundle = true;
-
-            xJet.spyOn(variant.typescript.languageService, 'getProgram').mockReturnValue({
-                getSourceFile: xJet.fn().mockReturnValue(
-                    ts.createSourceFile('test.ts', 'const x = 1;', ts.ScriptTarget.ESNext)
-                )
-            } as any);
-
-            await transformerDirective(variant, context);
-
-            expect(variant.typescript.languageHostService.resolveAliases).not.toHaveBeenCalled();
-        });
-
-        test('does not resolve aliases when aliasRegex is undefined', async () => {
-            variant.config.esbuild.bundle = false;
-            (<any> variant.typescript.languageHostService).aliasRegex = undefined;
-
-            xJet.spyOn(variant.typescript.languageService, 'getProgram').mockReturnValue({
-                getSourceFile: xJet.fn().mockReturnValue(
-                    ts.createSourceFile('test.ts', 'const x = 1;', ts.ScriptTarget.ESNext)
-                )
-            } as any);
-
-            await transformerDirective(variant, context);
-
-            expect(variant.typescript.languageHostService.resolveAliases).not.toHaveBeenCalled();
-        });
-
-        test('uses defines from variant config', async () => {
-            variant.config.define = { MY_VAR: 'value' };
-
-            xJet.spyOn(variant.typescript.languageService, 'getProgram').mockReturnValue({
-                getSourceFile: xJet.fn().mockReturnValue(
-                    ts.createSourceFile('test.ts', 'const x = 1;', ts.ScriptTarget.ESNext)
-                )
-            } as any);
-
-            const result = await transformerDirective(variant, context);
-
-            expect(result).toBeDefined();
-        });
-
-        test('handles undefined define config', async () => {
-            variant.config.define = undefined;
-
-            xJet.spyOn(variant.typescript.languageService, 'getProgram').mockReturnValue({
-                getSourceFile: xJet.fn().mockReturnValue(
-                    ts.createSourceFile('test.ts', 'const x = 1;', ts.ScriptTarget.ESNext)
-                )
-            } as any);
-
-            const result = await transformerDirective(variant, context);
-
-            expect(result).toBeDefined();
-        });
-
-        test('handles buffer content', async () => {
-            context.contents = Buffer.from('const x = 1;');
-
-            xJet.spyOn(variant.typescript.languageService, 'getProgram').mockReturnValue({
-                getSourceFile: xJet.fn().mockReturnValue(
-                    ts.createSourceFile('test.ts', 'const x = 1;', ts.ScriptTarget.ESNext)
-                )
-            } as any);
-
-            const result = await transformerDirective(variant, context);
-
-            expect(typeof result?.contents).toBe('string');
+            expect(await transform(code)).toBe(code);
         });
     });
 
-    describe('integration tests', () => {
-        test('transforms ifdef macro in variable declaration', async () => {
-            const code = 'const $$debug = $$ifdef(\'DEBUG\', () => console.log);';
-            state.sourceFile = ts.createSourceFile('test.ts', code, ts.ScriptTarget.ESNext);
-            state.contents = code;
-            state.stage.defineMetadata.filesWithMacros.add('test.ts');
-            astDefineVariableMock.mockReturnValue('function $$debug() {}');
-
-            const result = await astProcess(state);
-            expect(result).toContain('function $$debug()');
+    describe('the references it rewrites', () => {
+        beforeEach(() => {
+            dropped.add('$$dev');
         });
 
-        test('transforms multiple macros in sequence', async () => {
-            const code = `
-                const $$a = $$ifdef('A', () => {});
-                const $$b = $$ifdef('B', () => {});
-                $$a();
-                $$b();
-            `;
-            state.sourceFile = ts.createSourceFile('test.ts', code, ts.ScriptTarget.ESNext);
-            state.contents = code;
-            state.stage.defineMetadata.filesWithMacros.add('test.ts');
-            astDefineVariableMock.mockReturnValue('function() {}');
-
-            const result = await astProcess(state);
-            expect(result).toBeDefined();
+        test('should drop a statement that only calls a dropped macro', async () => {
+            expect(await transform('$$dev();')).toBe('');
         });
 
-        test('handles conditional logging', async () => {
-            const code = `
-                const log = $$ifdef('DEBUG', () => console.log);
-                function app() {
-                    log('starting');
+        test('should stand undefined in for a call to a dropped macro', async () => {
+            expect(await transform('const x = $$dev();')).toBe('const x = undefined;');
+        });
+
+        test('should leave the property a dropped name spells alone', async () => {
+            const code = 'const o = { $$dev: 1 };\nread(o.$$dev);';
+
+            expect(await transform(code)).toBe(code);
+        });
+
+        test('should rewrite a dropped name a computed key reads', async () => {
+            expect(await transform('const o = { [$$dev]: 1 };')).toBe('const o = { [undefined]: 1 };');
+        });
+
+        test('should rewrite a dropped name a computed member reads', async () => {
+            expect(await transform('read(o[$$dev]);')).toBe('read(o[undefined]);');
+        });
+    });
+
+    describe('the messages it reports', () => {
+        test('should warn about a macro not carrying the prefix', async () => {
+            await transform('const a = 1;\nconst dev = $$ifdef(\'DEV\', () => 1);');
+
+            expect(logs.warning).toEqual([
+                {
+                    id: 'macro-prefix',
+                    text: 'Macro \'dev\' does not start with the \'$$\' prefix to avoid conflicts',
+                    location: { file: target, line: 2, column: 6 }
                 }
-            `;
-            state.sourceFile = ts.createSourceFile('test.ts', code, ts.ScriptTarget.ESNext);
-            state.contents = code;
-            state.stage.defineMetadata.filesWithMacros.add('test.ts');
-            astDefineVariableMock.mockReturnValue('function log() {}');
-
-            const result = await astProcess(state);
-            expect(result).toContain('function app()');
+            ]);
         });
 
-        test('handles feature flags', async () => {
-            const code = `
-                const features = {
-                    newUI: $$ifdef('FEATURE_NEW_UI', true),
-                    beta: $$ifndef('PRODUCTION', true)
-                };
-            `;
-            state.sourceFile = ts.createSourceFile('test.ts', code, ts.ScriptTarget.ESNext);
-            state.contents = code;
-            state.stage.defineMetadata.filesWithMacros.add('test.ts');
-            astDefineVariableMock.mockReturnValue('true');
+        test('should leave a macro carrying the prefix unreported', async () => {
+            await transform('const $$dev = $$ifdef(\'DEV\', () => 1);');
 
-            const result = await astProcess(state);
-            expect(result).toBeDefined();
+            expect(logs.warning).toEqual([]);
         });
 
-        test('handles environment-specific config', async () => {
-            const code = `
-                export const config = {
-                    apiUrl: $$inline(() => process.env.API_URL),
-                    debug: $$ifdef('DEBUG', true),
-                    production: $$ifdef('PRODUCTION', true)
-                };
-            `;
-            state.sourceFile = ts.createSourceFile('test.ts', code, ts.ScriptTarget.ESNext);
-            state.contents = code;
-            state.stage.defineMetadata.filesWithMacros.add('test.ts');
-            astDefineVariableMock.mockReturnValue('true');
-            astInlineCallExpressionMock.mockResolvedValueOnce('process.env.API_URL');
+        test('should file a warning under the level an override names', async () => {
+            context.overrides = { 'macro-prefix': 'error' };
+            await transform('const dev = $$ifdef(\'DEV\', () => 1);');
 
-            const result = await astProcess(state);
-            expect(result).toBeDefined();
+            expect(logs.warning).toEqual([]);
+            expect(logs.error).toHaveLength(1);
         });
 
-        test('handles service with debugging', async () => {
-            const code = `
-                class Service {
-                    constructor() {
-                        this.logger = $$ifdef('DEBUG', () => console.log);
-                    }
-                    execute() {
-                        this.logger('executing');
-                    }
-                }
-            `;
-            state.sourceFile = ts.createSourceFile('test.ts', code, ts.ScriptTarget.ESNext);
-            state.contents = code;
-            state.stage.defineMetadata.filesWithMacros.add('test.ts');
-            astDefineVariableMock.mockReturnValue('function() {}');
+        test('should drop a warning an override silenced', async () => {
+            context.overrides = { 'macro-prefix': 'silent' };
+            await transform('const dev = $$ifdef(\'DEV\', () => 1);');
 
-            const result = await astProcess(state);
-            expect(result).toContain('class Service');
+            expect(logs.warning).toEqual([]);
         });
     });
 });

@@ -1,235 +1,111 @@
 /**
- * Import will remove at compile time
+ * Type-only imports erased during TypeScript compilation.
  */
 
 import type { Options } from 'yargs';
-import type { PartialBuildConfigType } from '@interfaces/configuration.interface';
+import type { LogLevelType } from '@providers/interfaces/log-provider.interface';
+import type { PartialConfigurationType } from '@interfaces/configuration.interface';
 import type { ServerConfigurationInterface } from '@server/interfaces/server.interface';
+import type { WatchOptionsInterface } from '@services/interfaces/watch-service.interface';
 
 /**
- * Extended build configuration interface with user-defined CLI arguments and server settings.
+ * The shape a configuration file exports.
  *
  * @remarks
- * This interface extends the base build configuration with xBuild-specific features
- * that aren't part of the core build system but provide additional development and
- * deployment capabilities.
- *
- * **Additional features:**
- * - **User-defined CLI arguments**: Extend the command-line interface with custom options
- * - **Development server**: Configure and control the built-in HTTP server
- *
- * This is the top-level configuration interface used by configuration files and represents
- * the complete set of options available in `config.xbuild.ts` files.
- *
- * The interface combines:
- * - Build variant definitions from {@link PartialBuildConfigType}
- * - Common build settings
- * - Custom CLI arguments via `userArgv`
- * - Development server configuration via `serve`
+ * Every field of a whole configuration, each one optional,
+ * so a file may state one setting and leave the rest to the defaults.
+ * The four fields beside them are the ones only a file carries:
+ * the reporting level, the command line options it declares, the server it asks for, and the watcher it tunes.
  *
  * @example
  * ```ts
- * // Complete configuration file
  * const config: xBuildConfigInterface = {
- *   verbose: true,
- *   common: {
- *     types: true,
- *     declaration: { bundle: true }
- *   },
- *   variants: {
- *     esm: {
- *       esbuild: {
- *         entryPoints: ['src/index.ts'],
- *         format: 'esm',
- *         outdir: 'dist'
- *       }
- *     }
- *   },
- *   userArgv: {
- *     env: {
- *       type: 'string',
- *       choices: ['dev', 'prod'],
- *       default: 'dev'
- *     }
- *   },
- *   serve: {
- *     dir: 'dist',
- *     port: 3000,
- *     start: true
- *   }
+ *     common: { types: true },
+ *     watch: { debounce: 50 },
+ *     userArgv: { release: { type: 'boolean' } }
  * };
  * ```
  *
- * @see {@link configFileProvider}
- * @see {@link PartialBuildConfigType}
- * @see {@link ServerConfigurationInterface}
+ * @see configFileProvider
+ * @see PartialConfigurationType
  *
- * @since 2.0.0
+ * @since 3.0.0
  */
 
-export interface xBuildConfigInterface extends PartialBuildConfigType {
+export interface xBuildConfigInterface extends PartialConfigurationType  {
     /**
-     * Custom command-line argument definitions for the build system.
+     * The reporting level for the whole run.
      *
      * @remarks
-     * Defines additional CLI flags and options beyond xBuild's defaults using the yargs
-     * options format. These arguments are parsed from the command line and made available
-     * throughout the build system via the `argv` context parameter.
-     *
-     * **Use cases:**
-     * - Project-specific build modes (e.g., `--env`, `--target`)
-     * - Feature flags for conditional compilation
-     * - Custom output configurations
-     * - Integration parameters for external tools
-     * - Deployment targets and options
-     *
-     * Each option can specify:
-     * - `type`: Data type (string, number, boolean, array)
-     * - `description`: Help text displayed in `--help` output
-     * - `alias`: Short flag alternatives
-     * - `default`: Default value when not provided
-     * - `choices`: Valid values for validation
-     * - `demandOption`: Whether the option is required
-     *
-     * Parsed values are accessible in lifecycle hooks via `context.argv`, enabling
-     * dynamic build behavior based on command-line input.
-     *
-     * These options appear in the CLI help output under a dedicated "User Options"
-     * section, separate from xBuild's core options.
+     * It sits on the file itself rather than inside `common` or a variant,
+     * so one level covers every variant the file declares.
+     * The esbuild options a file passes through do not accept a `logLevel`, which is why the setting lives here.
+     * `silent` drops a message rather than filing it under a bucket.
      *
      * @example
      * ```ts
-     * userArgv: {
-     *   watch: {
-     *     type: 'boolean',
-     *     description: 'Enable watch mode',
-     *     default: false,
-     *     alias: 'w'
-     *   },
-     *   env: {
-     *     type: 'string',
-     *     description: 'Target environment',
-     *     choices: ['development', 'staging', 'production'],
-     *     default: 'development'
-     *   },
-     *   deploy: {
-     *     type: 'boolean',
-     *     description: 'Deploy after successful build',
-     *     default: false
-     *   }
-     * }
+     * { logLevel: 'warning' } // warnings and errors alone
      * ```
+     *
+     * @see LogLevelType
+     * @since 3.0.0
+     */
+
+    logLevel?: LogLevelType;
+
+    /**
+     * The command line options this configuration declares.
+     *
+     * @remarks
+     * Each entry is a yargs option keyed by the flag it defines,
+     * so a project can take a flag of its own and read the parsed value back through the `argv` of a lifecycle hook.
      *
      * @example
      * ```ts
-     * // Access in lifecycle hooks
-     * {
-     *   lifecycle: {
-     *     onSuccess: async (context) => {
-     *       if (context.argv.deploy) {
-     *         await deployToEnvironment(context.argv.env);
-     *       }
-     *     }
-     *   },
-     *   userArgv: {
-     *     deploy: { type: 'boolean' },
-     *     env: { type: 'string', choices: ['dev', 'prod'] }
-     *   }
-     * }
+     * { userArgv: { release: { type: 'boolean', describe: 'build for release' } } }
      * ```
      *
-     * @example
-     * ```ts
-     * // Command line usage
-     * // xBuild --env production --deploy
-     * // Parsed as: { env: 'production', deploy: true }
-     * ```
-     *
-     * @see {@link Options}
-     * @see {@link UserExtensionInterface}
-     * @see {@link ArgvModule.enhancedParse}
-     *
+     * @see LifecycleContextInterface
      * @since 2.0.0
      */
 
     userArgv?: Record<string, Options>;
 
     /**
-     * Development server configuration and control.
+     * The static server this configuration asks for.
      *
      * @remarks
-     * Configures the built-in HTTP development server for serving build output during
-     * development. The server supports live reloading, static file serving, and can be
-     * integrated with watch mode for an efficient development workflow.
-     *
-     * **Configuration options:**
-     * - `dir`: Directory to serve files from (required)
-     * - `start`: Whether to automatically start the server (optional)
-     * - Additional server options from {@link ServerConfigurationInterface}:
-     *   - Port number
-     *   - Host address
-     *   - HTTPS configuration
-     *   - CORS settings
-     *   - Custom middleware
-     *
-     * The server is particularly useful when combined with watch mode, automatically
-     * serving updated builds as files change.
-     *
-     * When `start` is true, the server starts automatically after the initial build.
-     * When false or omitted, the server configuration is available but must be started
-     * manually or via CLI flags.
+     * `dir` names the directory served, and it is required rather than inferred from the build output.
+     * `start` asks for the server to come up with the build rather than wait to be started.
      *
      * @example
      * ```ts
-     * // Basic server configuration
-     * serve: {
-     *   dir: 'dist',
-     *   port: 3000,
-     *   start: true
-     * }
+     * { serve: { dir: 'dist', start: true } }
      * ```
-     *
-     * @example
-     * ```ts
-     * // Advanced server with HTTPS
-     * serve: {
-     *   dir: 'public',
-     *   port: 8080,
-     *   host: '0.0.0.0',
-     *   start: true,
-     *   https: {
-     *     key: './certs/key.pem',
-     *     cert: './certs/cert.pem'
-     *   }
-     * }
-     * ```
-     *
-     * @example
-     * ```ts
-     * // Combined with watch mode
-     * {
-     *   variants: {
-     *     dev: {
-     *       esbuild: {
-     *         entryPoints: ['src/app.ts'],
-     *         outdir: 'dist'
-     *       }
-     *     }
-     *   },
-     *   serve: {
-     *     dir: 'dist',
-     *     port: 3000,
-     *     start: true
-     *   }
-     * }
-     * // Command: xBuild --watch
-     * // Serves from dist/ with auto-reload on file changes
-     * ```
-     *
-     * @see {@link ServerConfigurationInterface}
      *
      * @since 2.0.0
      */
 
     serve?: ServerConfigurationInterface & { dir: string, start?: boolean }
+
+    /**
+     * The watcher settings configuration tunes.
+     *
+     * @remarks
+     * Every setting of the watcher is optional, so a file names only what it changes - the debounce window, the
+     * recursion, the dotfiles, or the filters - and whatever it leaves out keeps its default.
+     * A `filter` named here joins the two globs {@link configFileProvider} supplies rather than replacing them.
+     *
+     * @example
+     * ```ts
+     * { watch: { debounce: 50, recursive: true } }
+     * ```
+     *
+     * @see configFileProvider
+     * @see WatchOptionsInterface
+     *
+     * @since 3.0.0
+     */
+
+    watch?: WatchOptionsInterface
 }

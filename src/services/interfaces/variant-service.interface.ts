@@ -1,182 +1,111 @@
 /**
- * Import will remove at compile time
+ * Type-only imports erased during TypeScript compilation.
  */
 
-import type { VariantBuildInterface, CommonBuildInterface } from '@interfaces/configuration.interface';
+import type { LifecyclePluginInterface } from '@interfaces/lifecycle.interface';
+import type { BaseConfigurationInterface, VariantConfigurationInterface } from '@interfaces/configuration.interface';
 
 /**
- * Represents a configuration snapshot passed to configuration change subscribers.
- * Contains both variant-specific and common configuration that may have been updated.
+ * The slice of the configuration a variant watches.
  *
  * @remarks
- * This interface is used by the configuration service's reactive subscription system
- * to notify subscribers when configuration changes occur. It provides a consistent
- * structure for configuration change events, allowing subscribers to receive both
- * the variant-specific configuration and the common configuration in a single callback.
- *
- * The interface is typically used with observable patterns where components subscribe
- * to configuration changes and receive updates through this data structure. Both
- * properties are optional to handle scenarios where:
- * - A variant is removed from configuration (variantConfig becomes undefined)
- * - Common configuration is not present (commonConfig is undefined)
- * - Configuration is being initialized or reset
- *
- * Subscribers should check for undefined values and handle missing configuration
- * appropriately, such as deactivating a variant when its configuration is removed.
+ * What the configuration service hands a variant whenever the configuration changes,
+ * holding the common block and the variant's own entry rather than the whole configuration.
+ * A missing `variant` means the entry was removed, which is what tells the variant to dispose of itself.
  *
  * @example
  * ```ts
- * // Subscribe to configuration changes
- * configService.select(config => ({
- *   variantConfig: config.variants?.['production'],
- *   commonConfig: config.common
- * })).subscribe(({ variantConfig, commonConfig }: ConfigSubscriptionInterface) => {
- *   if (!variantConfig) {
- *     console.log('Variant removed from configuration');
- *     return;
- *   }
- *
- *   // Merge and apply new configuration
- *   const merged = deepMerge(commonConfig, variantConfig);
- *   applyConfiguration(merged);
- * });
+ * const change: VariantSubscriptionInterface = {
+ *     common: { types: true },
+ *     variant: { esbuild: { format: 'esm', outdir: 'dist/esm', ... } }
+ * };
  * ```
  *
- * @example
- * ```ts
- * // Handle configuration updates in a variant service
- * private handleConfigChange({ variantConfig, commonConfig }: ConfigSubscriptionInterface): void {
- *   this.active = false;
- *   const config = this.getConfig(variantConfig, commonConfig);
+ * @see VariantService
+ * @see BaseConfigurationInterface
+ * @see VariantConfigurationInterface
  *
- *   if (!config) {
- *     console.warn('Variant configuration no longer available');
- *     return;
- *   }
- *
- *   this.active = true;
- *   this.buildConfig = config;
- *   this.reloadSettings();
- * }
- * ```
- *
- * @see {@link CommonBuildInterface}
- * @see {@link ConfigurationService}
- * @see {@link VariantBuildInterface}
- * @see {@link VariantService.handleConfigChange}
- *
- * @since 2.0.0
+ * @since 3.0.0
  */
 
-export interface ConfigSubscriptionInterface {
-
+export interface VariantSubscriptionInterface {
     /**
-     * Common build configuration shared across all variants.
+     * The settings every variant inherits, absent when the configuration declares none.
      *
      * @remarks
-     * Contains build settings that apply to all variants unless overridden by
-     * variant-specific configuration. This provides a base configuration layer
-     * that can be merged with variant settings.
-     *
-     * Common configuration typically includes:
-     * - Default esbuild options (minification, target, format)
-     * - Shared TypeScript settings
-     * - Common define replacements
-     * - Default lifecycle hooks
-     * - Shared banner/footer content
-     *
-     * This property is optional and may be undefined when:
-     * - No common configuration is defined in the build config file
-     * - Configuration is being reset or cleared
-     * - A minimal configuration is in use
-     *
-     * Subscribers should handle undefined by using an empty object as default
-     * or skipping the merge operation.
+     * Merged under the variant, so a setting the variant names wins over the one here.
      *
      * @example
      * ```ts
-     * const commonDefaults: CommonBuildInterface = {
-     *   esbuild: {
-     *     target: 'es2020',
-     *     format: 'esm',
-     *     minify: false
-     *   }
-     * };
-     *
-     * // Use common config if available, otherwise use defaults
-     * const effectiveCommon = commonConfig ?? commonDefaults;
+     * change.common?.types; // true
      * ```
      *
-     * @see {@link CommonBuildInterface}
-     *
-     * @since 2.0.0
+     * @see BaseConfigurationInterface
+     * @since 3.0.0
      */
 
-    commonConfig?: CommonBuildInterface;
+    common?: BaseConfigurationInterface;
 
     /**
-     * Variant-specific build configuration.
+     * The variant's own entry, absent once the configuration no longer declares it.
      *
      * @remarks
-     * Contains build settings specific to a particular variant (e.g., 'production',
-     * 'development', 'testing'). These settings override common configuration when
-     * merged, allowing variants to customize build behavior.
-     *
-     * Variant configuration typically includes:
-     * - Variant-specific esbuild options (minification, sourcemaps)
-     * - Custom entry points
-     * - Environment-specific define replacements
-     * - Variant-specific lifecycle hooks
-     * - TypeScript configuration overrides
-     *
-     * This property is optional and may be undefined when:
-     * - The variant has been removed from configuration
-     * - Configuration is being reset
-     * - An invalid variant name was used in the subscription selector
-     *
-     * When undefined, subscribers should typically:
-     * - Deactivate the variant to prevent builds
-     * - Clean up variant-specific resources
-     * - Log a warning or error about the missing configuration
-     * - Return early without processing the update
-     *
-     * The presence of variantConfig is critical for determining whether a variant
-     * should remain active and continue building.
+     * Its absence is what ends the variant, since a build with no entry left to describe it has nothing to run.
      *
      * @example
      * ```ts
-     * // Production variant configuration
-     * const productionConfig: VariantBuildInterface = {
-     *   esbuild: {
-     *     minify: true,
-     *     sourcemap: false,
-     *     target: 'es2018'
-     *   },
-     *   types: { failOnError: true },
-     *   declaration: { bundle: true }
-     * };
+     * change.variant?.esbuild.outdir; // 'dist/esm'
      * ```
      *
-     * @example
-     * ```ts
-     * // Handle missing variant configuration
-     * function handleConfigChange({ variantConfig, commonConfig }: ConfigSubscriptionInterface) {
-     *   if (!variantConfig) {
-     *     console.warn('Variant configuration removed - deactivating variant');
-     *     this.active = false;
-     *     this.dispose();
-     *     return;
-     *   }
-     *
-     *   // Continue with configuration update
-     *   this.updateConfig(variantConfig, commonConfig);
-     * }
-     * ```
-     *
-     * @see {@link VariantBuildInterface}
-     *
-     * @since 2.0.0
+     * @see VariantConfigurationInterface
+     * @since 3.0.0
      */
 
-    variantConfig?: VariantBuildInterface;
+    variant?: VariantConfigurationInterface;
 }
+
+/**
+ * The call a stage runs against each hook of a build.
+ *
+ * @remarks
+ * Names which hook of the set the stage wants and hands it whatever that stage receives,
+ * so one walk over the hooks serves every stage instead of each stage writing a walk of its own.
+ * The result is `unknown`, since a start hook and a load hook answer with different shapes,
+ * and the stage narrows it through the type parameter it dispatched with.
+ *
+ * @example
+ * ```ts
+ * const call: CallType = hook => hook.onStart?.({ context, esbuild });
+ * ```
+ *
+ * @see HandleType
+ * @see LifecyclePluginInterface
+ *
+ * @since 3.0.0
+ */
+
+export type CallType = (hook: LifecyclePluginInterface) => unknown;
+
+/**
+ * The test that decides whether a hook's result ends the walk.
+ *
+ * @typeParam T - Result the stage's hooks answer with
+ *
+ * @remarks
+ * Returning `true` settles the stage on that result and leaves the hooks after it unrun,
+ * which is what lets the first resolve hook to answer claim a path.
+ * Returning `false` carries the walk on, so a stage folding every answer together sees all of them.
+ * The test doubles as the place a stage folds each result into what it holds so far,
+ * since it runs as each one arrives.
+ *
+ * @example
+ * ```ts
+ * const first: HandleType<OnResolveResult> = () => true;  // the first answer settles it
+ * const every: HandleType<OnLoadResult> = () => false;    // every hook is consulted
+ * ```
+ *
+ * @see CallType
+ * @since 3.0.0
+ */
+
+export type HandleType<T> = (result: T) => boolean;
