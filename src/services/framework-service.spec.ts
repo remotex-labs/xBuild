@@ -86,6 +86,23 @@ describe('FrameworkService', () => {
             expect(framework.getSourceMap('dist/index.js')).toBe(registered);
         });
 
+        test('should replace the map a file already carries when the caller forces it', () => {
+            framework.addSourceMap('dist/index.js', sourceMap);
+            const registered = framework.getSourceMap('dist/index.js');
+            framework.addSourceMap('dist/index.js', sourceMap, true);
+
+            expect(framework.getSourceMap('dist/index.js')).toBeInstanceOf(SourceService);
+            expect(framework.getSourceMap('dist/index.js')).not.toBe(registered);
+        });
+
+        test('should keep the map a file carries when a forced registration maps nothing', () => {
+            framework.addSourceMap('dist/index.js', sourceMap);
+            const registered = framework.getSourceMap('dist/index.js');
+            framework.addSourceMap('dist/index.js', emptyMap, true);
+
+            expect(framework.getSourceMap('dist/index.js')).toBe(registered);
+        });
+
         test('should drop a map that maps nothing', () => {
             framework.addSourceMap('dist/index.js', emptyMap);
 
