@@ -75,7 +75,7 @@ export type RuntimeHandlerType = (name: string, args: Record<string, unknown>) =
  * @since 3.0.0
  */
 
-export type PrimitiveOrObjectType = PrimitiveType | Record<string | symbol, unknown>;
+export type PrimitiveOrObjectType = PrimitiveType | object | Record<string | symbol, unknown>;
 
 /**
  * What a hook returns when answering is optional.
