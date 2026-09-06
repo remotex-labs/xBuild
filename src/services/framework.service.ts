@@ -255,27 +255,34 @@ export class FrameworkService {
      *
      * @param path - Path of the file the map describes, relative or absolute
      * @param source - Raw source map content
+     * @param force - Whether a map the file already carries is replaced rather than kept
      *
      * @throws Error - When the content is not a source map the resolver can parse
      *
      * @remarks
      * A file that already carries a map keeps it, so the first registration wins, and a later call costs only a lookup.
+     * A caller that knows the file was written again says so with `force`, which parses the map it was handed and puts
+     * it in place of the one registered before: a watch rebuilding a file leaves the map registered for it describing
+     * text that is no longer there, and a stale map resolves a frame to the wrong line rather than to none.
      * A map with empty mappings is dropped rather than registered, resolving through such a map being the same as not
-     * resolving at all.
+     * resolving at all, and it leaves what was registered before it in place rather than clearing it.
      *
      * @example
      * ```ts
      * framework.addSourceMap('dist/index.js', readFileSync('dist/index.js.map', 'utf-8'));
      * framework.getSourceMap('dist/index.js'); // SourceService
+     *
+     * framework.addSourceMap('dist/index.js', rebuilt);       // kept - the first registration wins
+     * framework.addSourceMap('dist/index.js', rebuilt, true); // replaced - the file was written again
      * ```
      *
      * @see loadSourceMap
      * @since 3.0.0
      */
 
-    addSourceMap(path: string, source: string): void {
+    addSourceMap(path: string, source: string, force: boolean = false): void {
         const key = FrameworkService.resolve(path);
-        if (this.sourceMaps.has(key)) return;
+        if (!force && this.sourceMaps.has(key)) return;
 
         this.register(key, source);
     }
