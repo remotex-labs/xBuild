@@ -5,7 +5,7 @@ titleTemplate: 'A versatile JavaScript and TypeScript toolchain build system'
 hero:
   name: 'xBuild'
   text: 'Build, type-check, and serve TypeScript projects'
-  tagline: xBuild is a fast, esbuild-powered toolchain with variant builds, lifecycle hooks, and compile-time macros.
+  tagline: xBuild is an esbuild-powered toolchain with variant builds, lifecycle plugins, and oxc-driven compile-time macros.
   actions:
     - theme: brand
       text: Get Started
@@ -22,20 +22,20 @@ hero:
 features:
   - title: Multi-variant builds
     icon: 🧩
-    details: Define multiple build targets in one config and run selected variants with `--build`.
+    details: Declare several outputs in one file, order them with `dependOn`, and run a subset with `--build`.
   - title: TypeScript tooling
     icon: 🧠
-    details: Enable type checks and `.d.ts` generation with `types` and `declaration` options.
-  - title: Lifecycle hooks
+    details: Type-check with `types` and emit bundled or per-file `.d.ts` with `declaration`, both driven by the project tsconfig.
+  - title: Lifecycle hooks and plugins
     icon: 🪝
-    details: Extend the build process using `onStart`, `onResolve`, `onLoad`, `onEnd`, and `onSuccess`.
+    details: Extend a build with `onSetup`, `onStart`, `onResolve`, `onLoad`, `onEnd`, and `onSuccess`, as one set or as named plugins.
   - title: Compile-time macros
     icon: ⚡
-    details: Use `$$ifdef`, `$$ifndef`, and `$$inline` for conditional code and build-time evaluation.
-  - title: Dev workflow
+    details: '`$$ifdef`, `$$ifndef`, and `$$inline` rewrite the source as span edits over an oxc AST, dropping dead bindings across files.'
+  - title: Watch, serve, and shortcuts
     icon: 🔁
-    details: Use `--watch` and `--serve` for fast local iteration.
-  - title: Esbuild-compatible config
-    icon: ⚙️
-    details: Reuse familiar esbuild options while adding xBuild features on top.
+    details: '`--watch` and `--serve` share one interactive terminal with a status bar and single-key rebuild, reload, and verbose toggles.'
+  - title: Levelled reporting
+    icon: 🎚️
+    details: One `logLevel` for the run, and `logOverride` to lift, lower, or silence a single esbuild message by id or by pattern.
 ---

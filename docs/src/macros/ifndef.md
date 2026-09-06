@@ -1,179 +1,111 @@
 # ifndef
 
-`$$ifndef` is a compile-time macro that keeps code when a `define` key is missing or falsy.
+`$$ifndef` is the counterpart of [`$$ifdef`](/macros/ifdef): it keeps its value while a `define` flag is **not**
+set, and removes it, along with every reference to the name it bound, while the flag is.
 
-> [!IMPORTANT]
-> To get macro autocomplete in TypeScript, add `@remotex-labs/xBuild` to `types` in `tsconfig.json`.
->
-> ```json
-> {
->   "compilerOptions": {
->     "types": [
->       "node",
->       "@remotex-labs/xBuild"
->     ]
->   }
-> }
-> ```
+::: info 🧠 Add the types
+`$$ifndef` is declared globally by the package. Add it to `types` in `tsconfig.json` so TypeScript knows about it.
+
+```json
+{
+    "compilerOptions": {
+        "types": [ "node", "@remotex-labs/xbuild" ]
+    }
+}
+```
+
+:::
 
 ## Syntax
 
 ```ts
-$$ifndef('DEFINE_NAME', valueOrCallback)
+$$ifndef('FLAG', valueOrCallback)
 ```
 
-## Arguments
+| Argument          | Type           | Notes                                              |
+|-------------------|----------------|----------------------------------------------------|
+| `FLAG`            | string literal | Required, and a literal rather than a variable.    |
+| `valueOrCallback` | `unknown`      | Required. A function, an expression, or a literal. |
 
-| Argument          | Type             | Required | Notes                                  |
-|-------------------|------------------|----------|----------------------------------------|
-| `defineName`      | `string` literal | Yes      | Must be a string literal, ex: `'PROD'` |
-| `valueOrCallback` | `unknown`        | Yes      | Function, expression, or literal       |
+## When a flag counts as unset
 
-## Define Evaluation
+The same table `$$ifdef` reads, answered the other way round.
 
-`$$ifndef` is enabled when the key is missing from `define` or its value is falsy.
+| `define` entry     | `$$ifndef` keeps its value  |
+|--------------------|-----------------------------|
+| `PROD: false`      | yes                         |
+| `PROD: null`       | yes                         |
+| `PROD: undefined`  | yes                         |
+| not named at all   | yes                         |
+| `PROD: true`       | no                          |
+| `PROD: 0`          | no - `'0'` is text          |
+| `PROD: ''`         | no - so is the empty string |
+| `PROD: 'anything'` | no                          |
 
-```json
-define: {
-  DEBUG: true,        // disabled
-  PROD: false,        // enabled
-  LOG_LEVEL: 'info',  // disabled
-  RETRIES: 0          // enabled
-}
-```
+::: warning 🔢 `0` and `''` set the flag in 3.0.0
+v2 decided on truthiness, so `PROD: 0` kept an `$$ifndef` value. 3.0.0 decides on the substituted text, and only
+`false`, `null`, `undefined`, and an absent key leave a flag unset. Write `false` where `0` used to mean off.
+:::
 
-> [!NOTE]
-> To inspect real macro replacements, run build with `--verbose` or `-v`.
-> ![replacement](/images/replacement.png)
+## Forms
 
-## Examples
-
-### Variable macro (function transform)
-
-Source:
+Identical to [`$$ifdef`](/macros/ifdef#forms). How the second argument is written decides the shape:
 
 ```ts
-const $$devOnly = $$ifndef('PROD', () => console.log('dev mode'));
+export const $$devOnly = $$ifndef('PROD', () => console.log('dev mode'));
 ```
 
-Output when enabled:
-
 ```ts
-function $$devOnly() { return console.log('dev mode'); }
+// PROD unset
+export function $$devOnly() { return console.log('dev mode'); }
+
+// PROD set - the declaration is removed, and every read of $$devOnly becomes undefined
 ```
 
-Output when disabled:
+A function the source invokes stays invoked:
 
 ```ts
-undefined
+const $$label = $$ifndef('PROD', (name: string) => `${ name } dev`)('build');
+// PROD unset: const $$label = ((name: string) => `${ name } dev`)('build');
 ```
 
-### Immediate-call shape (IIFE expression)
-
-Source:
+A macro standing as a statement has its body inlined:
 
 ```ts
-const $$value = $$ifndef('PROD', (name: string) => {
-  return name + ' dev';
-})('test');
-```
-
-Output when enabled:
-
-```ts
-const $$value = ((name: string) => {
-  return name + ' dev';
-})('test');
-```
-
-Output when disabled:
-
-```ts
-// The macro call expression is removed (empty replacement).
-// Avoid this shape when the define may be truthy.
-```
-
-### Standalone expression
-
-Source:
-
-```ts
-function initDevTools(): void {
-  console.log('init dev tools');
-}
-
-$$ifndef('PROD', initDevTools());
-```
-
-Output when enabled:
-
-```ts
-function initDevTools(): void {
-  console.log('init dev tools');
-}
-
-(() => { return initDevTools(); })();
-```
-
-Output when disabled:
-
-```ts
-function initDevTools(): void {
-  console.log('init dev tools');
-}
-```
-
-### Exported typed function (complex example)
-
-Source:
-
-```ts
-export const $$complexFunction = $$ifndef('PROD', (value: string, key: number) => {
-  return `${value}-${key}`;
+$$ifndef('PROD', () => {
+    installDevTools();
 });
-
-$$complexFunction('test', 42);
+// PROD unset: installDevTools();
+// PROD set:   nothing
 ```
 
-Output when enabled:
+A literal or an expression is substituted as written:
 
 ```ts
-export function $$complexFunction(value: string, key: number) {
-  return `${value}-${key}`;
-}
-
-$$complexFunction('test', 42);
+export const $$assertions = $$ifndef('PROD', true);
+// PROD unset: export const $$assertions = true;
 ```
 
-Output when disabled:
+## The two together
+
+Write both to get a value either way, and only one of them survives any given build:
 
 ```ts
-undefined('test', 42);
+export const $$log = $$ifndef('PROD', (message: string) => console.log(message));
+export const $$noop = $$ifdef('PROD', () => undefined);
 ```
 
-### 5. Exported literals
+## Dropping reaches across files
 
-Source:
+Exactly as with `$$ifdef`: a name dropped where it was declared is pruned from the imports that name it, and its
+reads become `undefined`. See [Dropping reaches across files](/macros/ifdef#dropping-reaches-across-files).
 
-```ts
-export const $$feature = $$ifndef('PROD', true);
-export const $$someValue = $$ifndef('PROD', 40);
-```
+::: tip 🔍 Seeing the replacements
+Run with `logLevel: 'verbose'`, or press `v` in a watching run, to see what each macro was replaced with.
+:::
 
-Output when enabled:
+## See also
 
-```ts
-export const $$feature = true;
-export const $$someValue = 40;
-```
-
-## Validation Rules
-
-- `$$ifndef` requires exactly 2 arguments.
-- The first argument must be a string literal.
-- Invalid arg count throws a build error.
-- Non-string first argument is not transformed.
-
-## Related
-
-- [`ifdef`](./ifdef.md): inverse behavior (keeps code when key exists and is truthy).
+- [ifdef](/macros/ifdef) - the same, on the opposite answer.
+- [inline](/macros/inline) - evaluate at build time and substitute the result.
+- [`define`](/configuration/file#define) - where the flags come from.
