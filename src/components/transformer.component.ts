@@ -2,7 +2,9 @@
  * Type-only imports erased during TypeScript compilation.
  */
 
-import type { Span } from '@oxc-project/types';
+import type { ParseResult } from 'oxc-parser';
+import type { Span, StringLiteral } from '@oxc-project/types';
+import type { TypescriptService } from '@typescript/services/typescript.service';
 import type { SourceEditInterface } from './interfaces/transformer-component.interface';
 
 /**
@@ -98,3 +100,97 @@ export function applyEdits(content: string, edits: Array<SourceEditInterface>): 
 
     return parts.join('');
 }
+
+/**
+ * Queues an edit rewriting a specifier to the relative path of the project file it resolves to.
+ *
+ * @param source - Specifier literal to rewrite, or `null` when the statement carries none
+ * @param target - Resolved absolute path of the file the specifier was written in
+ * @param edits - Collector the rewrite is appended to
+ * @param ts - Service whose module resolution decides what the specifier names
+ *
+ * @remarks
+ * Only a project file is rewritten, so a specifier naming a package or resolving nowhere is left as it was written.
+ * So is a statement with no specifier at all, which is what `export { a }` without a `from` clause looks like.
+ * The replacement is measured from the importing file's own directory and carries no extension,
+ * so an alias or a `paths` mapping becomes a specifier that still resolves once the file no longer sits in the source
+ * tree.
+ *
+ * @example
+ * ```ts
+ * const edits: Array<SourceEditInterface> = [];
+ *
+ * rewrite(statement.source, 'D:/app/src/index.ts', edits, ts);
+ * edits; // [ { start: 21, end: 43, text: "'./components/builder.js'" } ]
+ * ```
+ *
+ * @see resolveSource
+ * @since 3.0.0
+ */
+
+export function rewrite(source: StringLiteral | null, target: string, edits: Array<SourceEditInterface>, ts: TypescriptService): void {
+    if (!source) return;
+
+    const resolved = ts.resolve(source.value, target);
+    if (!resolved || resolved.isExternalLibraryImport) return;
+    const { extension, relativeFileName } = resolved;
+    const path = extension ? relativeFileName.slice(0, -extension.length) : relativeFileName;
+
+    edits.push({ end: source.end, start: source.start, text: `'${ path }.js'` });
+}
+
+/**
+ * Rewrites every project specifier in a parsed file and returns the text with the rewrites applied.
+ *
+ * @param parse - Parse of the text, whose spans are offsets into `content`
+ * @param target - Resolved absolute path of the file the text belongs to
+ * @param content - The text the parse describes, handed back unchanged when it is empty
+ * @param ts - Service whose module resolution decides which specifiers name project files
+ * @returns The text with every project specifier rewritten, or `content` itself when none was
+ *
+ * @remarks
+ * Only top-level statements are visited, since only those can carry module syntax.
+ * An import, an `export *`, and a named export are read for their `from` clause,
+ * while `import x = require('m')` is read for its module name.
+ * `import A = B.C` names no module, so it is left alone, as is an `export { a }` that carries no `from` clause.
+ * Every specifier found goes through {@link rewrite}, so a package stays as it was written,
+ * and only a project file is rewritten.
+ * The parse and the text have to come from the same source, since the spans are offsets into it - a parse of one text
+ * applied to another lands its edits in the wrong places.
+ *
+ * @example
+ * ```ts
+ * const content = "import { build } from '@components/builder';\nexport const x = 1;";
+ * const parse = parseSync('src/index.ts', content, { sourceType: 'module' });
+ *
+ * resolveSource(parse, 'D:/app/src/index.ts', content, ts);
+ * // "import { build } from './components/builder';\nexport const x = 1;"
+ * ```
+ *
+ * @see rewrite
+ * @see applyEdits
+ *
+ * @since 3.0.0
+ */
+
+export function resolveSource(parse: ParseResult, target: string, content: string = '', ts: TypescriptService): string {
+    if(!content) return content;
+    const edits: Array<SourceEditInterface> = [];
+
+    for (const statement of parse.program.body) {
+        switch (statement.type) {
+            case 'ImportDeclaration':
+            case 'ExportAllDeclaration':
+            case 'ExportNamedDeclaration':
+                rewrite(statement.source, target, edits, ts);
+                break;
+
+            case 'TSImportEqualsDeclaration':
+                if (statement.moduleReference.type === 'TSExternalModuleReference')
+                    rewrite(statement.moduleReference.expression, target, edits, ts);
+        }
+    }
+
+    return applyEdits(content, edits);
+}
+

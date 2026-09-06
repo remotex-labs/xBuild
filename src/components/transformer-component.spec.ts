@@ -8,7 +8,8 @@ import type { SourceEditInterface } from './interfaces/transformer-component.int
  * Imports
  */
 
-import { removeNode, applyEdits } from './transformer.component';
+import { parseSync } from 'oxc-parser';
+import { removeNode, applyEdits, rewrite, resolveSource } from './transformer.component';
 
 /**
  * Tests
@@ -101,5 +102,143 @@ describe('applyEdits', () => {
         applyEdits('const a = 1;', edits);
 
         expect(edits.map(edit => edit.start)).toEqual([ 0, 6 ]);
+    });
+});
+
+describe('rewrite', () => {
+    const source = { value: '@components/builder', start: 22, end: 43 };
+
+    let ts: any;
+    let edits: Array<SourceEditInterface>;
+
+    beforeEach(() => {
+        edits = [];
+        ts = {
+            resolve: xJet.fn((specifier: string) => specifier.startsWith('@')
+                ? { extension: '.ts', isExternalLibraryImport: false, relativeFileName: `./${ specifier.slice(1) }.ts` }
+                : { extension: '.d.ts', isExternalLibraryImport: true, relativeFileName: '' })
+        };
+    });
+
+    test('should queue a rewrite pointing at the file emitted beside it', () => {
+        rewrite(<any> source, 'D:/app/src/index.ts', edits, ts);
+
+        expect(edits).toEqual([{ start: 22, end: 43, text: '\'./components/builder.js\'' }]);
+    });
+
+    test('should resolve the specifier against the file it was written in', () => {
+        rewrite(<any> source, 'D:/app/src/index.ts', edits, ts);
+
+        expect(ts.resolve).toHaveBeenCalledWith('@components/builder', 'D:/app/src/index.ts');
+    });
+
+    test('should append the emitted extension to a path the resolution reported without one', () => {
+        ts.resolve.mockReturnValue({ isExternalLibraryImport: false, relativeFileName: './builder' });
+        rewrite(<any> source, 'D:/app/src/index.ts', edits, ts);
+
+        expect(edits).toEqual([{ start: 22, end: 43, text: '\'./builder.js\'' }]);
+    });
+
+    test('should leave a specifier naming a package as it was written', () => {
+        rewrite(<any> { value: 'typescript', start: 22, end: 34 }, 'D:/app/src/index.ts', edits, ts);
+
+        expect(edits).toEqual([]);
+    });
+
+    test('should leave a specifier that resolves nowhere alone', () => {
+        ts.resolve.mockReturnValue(undefined);
+        rewrite(<any> source, 'D:/app/src/index.ts', edits, ts);
+
+        expect(edits).toEqual([]);
+    });
+
+    test('should ignore a statement that carries no specifier', () => {
+        rewrite(null, 'D:/app/src/index.ts', edits, ts);
+
+        expect(edits).toEqual([]);
+        expect(ts.resolve).not.toHaveBeenCalled();
+    });
+
+    test('should append to the collector rather than replacing it', () => {
+        edits.push({ start: 0, end: 5, text: 'let' });
+        rewrite(<any> source, 'D:/app/src/index.ts', edits, ts);
+
+        expect(edits).toHaveLength(2);
+    });
+});
+
+describe('resolveSource', () => {
+    const target = 'D:/app/src/index.ts';
+
+    let ts: any;
+
+    /**
+     * Parses a source text and rewrites its specifiers the way a caller would.
+     */
+
+    const resolve = (content: string): string =>
+        resolveSource(parseSync(target, content, { sourceType: 'module' }), target, content, ts);
+
+    beforeEach(() => {
+        ts = {
+            resolve: xJet.fn((specifier: string) => specifier.startsWith('@')
+                ? { extension: '.ts', isExternalLibraryImport: false, relativeFileName: `./${ specifier.slice(1) }.ts` }
+                : { extension: '.d.ts', isExternalLibraryImport: true, relativeFileName: '' })
+        };
+    });
+
+    test.each(
+        { case: 'an import', content: 'import { build } from "@components/builder";', expected: 'import { build } from \'./components/builder.js\';' },
+        { case: 'a star export', content: 'export * from "@components/builder";', expected: 'export * from \'./components/builder.js\';' },
+        { case: 'a namespace re-export', content: 'export * as api from "@components/builder";', expected: 'export * as api from \'./components/builder.js\';' },
+        { case: 'a named export', content: 'export { build } from "@components/builder";', expected: 'export { build } from \'./components/builder.js\';' },
+        { case: 'an import-equals', content: 'import builder = require("@components/builder");', expected: 'import builder = require(\'./components/builder.js\');' }
+    )('should rewrite the specifier of $case', ({ content, expected }) => {
+        expect(resolve(content)).toBe(expected);
+    });
+
+    test('should rewrite every specifier the file carries', () => {
+        const content = 'import { build } from "@components/builder";\nimport { files } from "@models/files";';
+
+        expect(resolve(content)).toBe(
+            'import { build } from \'./components/builder.js\';\nimport { files } from \'./models/files.js\';'
+        );
+    });
+
+    test('should leave a package specifier as it was written', () => {
+        const content = 'import ts from "typescript";';
+
+        expect(resolve(content)).toBe(content);
+    });
+
+    test('should leave an import-equals that names no module alone', () => {
+        const content = 'declare namespace A { const b: string; }\nimport C = A.b;';
+
+        expect(resolve(content)).toBe(content);
+        expect(ts.resolve).not.toHaveBeenCalled();
+    });
+
+    test('should leave an export that carries no from clause alone', () => {
+        const content = 'declare const a: string;\nexport { a };';
+
+        expect(resolve(content)).toBe(content);
+        expect(ts.resolve).not.toHaveBeenCalled();
+    });
+
+    test('should visit the top-level statements alone', () => {
+        const content = 'declare module "x" {\n    import { build } from "@components/builder";\n}';
+
+        expect(resolve(content)).toBe(content);
+    });
+
+    test('should hand the content back untouched when nothing was rewritten', () => {
+        const content = 'declare const a: string;';
+
+        expect(resolve(content)).toBe(content);
+    });
+
+    test('should hand empty content back without parsing anything out of it', () => {
+        expect(resolveSource(parseSync(target, '', { sourceType: 'module' }), target, '', ts)).toBe('');
+        expect(ts.resolve).not.toHaveBeenCalled();
     });
 });
