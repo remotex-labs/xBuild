@@ -424,18 +424,16 @@ describe('VariantService', () => {
         });
 
         test('should report a failure esbuild had already reported of its own', async () => {
+            const errors = [{ text: 'Could not resolve "./missing"', detail: undefined }];
             dependenciesMock.mockRejectedValue(Object.assign(new Error('Could not resolve "./missing"'), {
                 warnings: [],
-                errors: [{ text: 'Could not resolve "./missing"', detail: undefined }]
+                errors
             }));
 
             const { context } = await lifecycle();
 
-            expect(context.logs.error).toEqual([
-                expect.objectContaining({
-                    pluginName: '', text: 'Could not resolve "./missing"'
-                })
-            ]);
+            expect(context.logs.error).toEqual(errors);
+            expect(context.logs.error[0]).toBe(errors[0]);
         });
 
         test('should report a failure that was thrown as something other than an error', async () => {

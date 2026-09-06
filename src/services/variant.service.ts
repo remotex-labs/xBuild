@@ -28,7 +28,6 @@ import { FilesModel } from '@models/files.model';
 import { xBuildError } from '@errors/xbuild.error';
 import { collectLogs } from '@providers/log.provider';
 import { Typescript } from '@typescript/typescript.module';
-import { errorToMessage } from '@providers/message.provider';
 import { analyzeMacros } from '@directives/analyze.directive';
 import { transformMacros } from '@directives/macros.directive';
 import { resolveSource } from '@components/transformer.component';
@@ -36,6 +35,7 @@ import { deepMerge, stringify } from '@components/object.component';
 import { ConfigurationService } from '@services/configuration.service';
 import { extractEntryPoints } from '@components/entry-points.component';
 import { TextBlocks, DiagnosticLevels } from '@constants/variant.constant';
+import { errorToMessage, isEsbuildError } from '@providers/message.provider';
 import { buildFiles, analyzeDependencies } from '@services/transpiler.service';
 
 /**
@@ -747,7 +747,11 @@ export class VariantService {
             if (!options.bundle) options.entryPoints = files;
             context.stage.dropped = analyzeMacros(context.stage.reachableFiles, options.define ?? {});
         } catch (error) {
-            this.fail(context.logs, error, '');
+            if(isEsbuildError(error) && error.errors) {
+                context.logs.error.push(...error.errors);
+            } else {
+                this.fail(context.logs, error, '');
+            }
         }
 
         await this.dispatch(context.logs, hook => hook.onSetup?.(context));
