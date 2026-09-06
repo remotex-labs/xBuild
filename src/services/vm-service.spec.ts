@@ -94,11 +94,11 @@ describe('sandboxExecute', () => {
         expect(log).toHaveBeenCalledWith('from the sandbox');
     });
 
-    test('should drop a console the sandbox named while the logs are isolated', async () => {
+    test('should keep a console the sandbox named while the logs are isolated', async () => {
         const log = xJet.fn();
 
         expect(await sandboxExecute('console.log(\'from the sandbox\'); 42', { console: { log } }, {}, true)).toBe(42);
-        expect(log).not.toHaveBeenCalled();
+        expect(log).toHaveBeenCalledWith('from the sandbox');
     });
 
     test('should not leak an implicit global from one run into the next', async () => {
@@ -107,11 +107,15 @@ describe('sandboxExecute', () => {
         expect(await sandboxExecute('typeof leaked')).toBe('undefined');
     });
 
-    test('should write through to the host global when the code goes via globalThis', async () => {
+    test('should keep a write the code makes through globalThis off the host global', async () => {
         await sandboxExecute('globalThis.escaped = 1;');
 
-        expect((<any> globalThis).escaped).toBe(1);
-        delete (<any> globalThis).escaped;
+        expect((<any> globalThis).escaped).toBeUndefined();
+    });
+
+    test('should hand the code a globalThis of the context to write onto', async () => {
+        expect(await sandboxExecute('globalThis.escaped = 1; globalThis.escaped')).toBe(1);
+        expect(await sandboxExecute('typeof globalThis.escaped')).toBe('undefined');
     });
 
     test('should report errors against the filename it was given', async () => {

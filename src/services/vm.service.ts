@@ -60,12 +60,12 @@ import { Script, createContext } from 'vm';
 
 export async function sandboxExecute(code: string, sandbox: Context = {}, options: ScriptOptions = {}, isolateLogs = false): Promise<unknown> {
     const base: Record<string, unknown> = {};
-    Object.defineProperties(base, Object.getOwnPropertyDescriptors(globalThis));
-    Object.assign(base, sandbox);
+    const descriptors: { [x: string]: PropertyDescriptor; } = Object.getOwnPropertyDescriptors(globalThis);
+    delete descriptors.globalThis;
+    if(isolateLogs) delete descriptors.console;
 
-    if(isolateLogs) {
-        delete base['console'];
-    }
+    Object.defineProperties(base, descriptors);
+    Object.assign(base, sandbox);
 
     const context = createContext(base);
     const script = new Script(code, options);
