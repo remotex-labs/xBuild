@@ -20,7 +20,6 @@ import { inject } from '@remotex-labs/xinject';
 import { mkdir, writeFile } from 'fs/promises';
 import { Char } from '@constants/char.constant';
 import { FilesModel } from '@models/files.model';
-import { isolatedDeclarationSync } from 'oxc-transform';
 import { join, dirname, relative } from '@remotex-labs/xmap';
 import { applyEdits, removeNode } from '@components/transformer.component';
 import { HeaderDeclarationBundle } from '@typescript/constants/typescript.constant';
@@ -32,8 +31,8 @@ import { HeaderDeclarationBundle } from '@typescript/constants/typescript.consta
  * Each file is reduced to a {@link DeclarationEntryInterface}: the standalone declaration with its project specifiers
  * resolved, the same text stripped down to inlinable declarations, and the dependency, import, and export records that
  * stripping produced.
- * Declarations are produced by oxc's isolated-declarations pass, which needs no type checker,
- * so an entry costs one such pass and one parse.
+ * Declarations are emitted by the project's own program, so the checker writes the types an annotation leaves out,
+ * and an entry costs one declaration emit and one parse.
  * Both forms and every record come out of that single parse.
  * Entries are held against the snapshot version of their file,
  * so a file is rebuilt only once the file model has observed the change,
@@ -176,7 +175,7 @@ export class DeclarationModel {
 
         if (cached?.version === file.version) return cached;
 
-        const entry = this.build(target, file.snapshot?.text ?? '', file.version);
+        const entry = this.build(target, file.version);
         this.cache.set(target, entry);
 
         return entry;
@@ -551,26 +550,58 @@ export class DeclarationModel {
     }
 
     /**
+     * Emits the declarations of one file through the project's program.
+     *
+     * @param target - Resolved absolute path of the file
+     * @returns The emitted declaration text, empty when the program reaches the file not at all
+     *
+     * @remarks
+     * The emit runs against the shared program, so the checker supplies whatever an annotation leaves out
+     * rather than every exported symbol having to spell its own type.
+     * `forceDtsEmit` is what returns the text at all, since the parsed configuration forces `noEmit` on
+     * to keep the compiler off the disk the bundler writes to.
+     * A path the program has not reached is tracked and the program asked once more,
+     * which covers a file the build reaches while `tsconfig.json` neither lists nor includes it.
+     * A path its `exclude` globs match stays out even then, and yields no declarations rather than an error.
+     *
+     * @since 3.0.0
+     */
+
+    private emitDeclaration(target: string): string {
+        const service = this.ts.languageService;
+
+        if (!service.getProgram()?.getSourceFile(target)) {
+            this.ts.touchFiles([ target ]);
+            if (!service.getProgram()?.getSourceFile(target)) return '';
+        }
+
+        return service.getEmitOutput(target, true, true)
+            .outputFiles.find(file => file.name.endsWith('.d.ts'))?.text ?? '';
+    }
+
+    /**
      * Emits the declarations of one file and reduces them to a cache entry.
      *
      * @param target - Resolved absolute path of the file
-     * @param source - Current text of the file
      * @param version - Snapshot version the entry is recorded against
      * @returns The freshly built entry
      *
      * @remarks
      * The emitted text is parsed once, and that parse drives everything: the statement walk queues both edit lists and
      * records the graph, and the comment walk that follows it queues the doc comments the stripping orphaned.
-     * Emit diagnostics are not surfaced here - a declaration oxc cannot infer is reported by the type checker as an
-     * isolated-declarations error against the source file itself.
+     * Emit diagnostics are not surfaced here - a declaration the checker cannot write is reported against the source
+     * file itself by {@link TypescriptService.check}.
      *
      * @see strip
+     * @see emitDeclaration
      * @see pruneComments
+     *
      * @since 3.0.0
      */
 
-    private build(target: string, source: string, version: number): DeclarationEntryInterface {
-        const declaration = isolatedDeclarationSync(target, source, { stripInternal: true }).code;
+    private build(target: string, version: number): DeclarationEntryInterface {
+        // const declaration = isolatedDeclarationSync(target, source, { stripInternal: true }).code;
+        const declaration = this.emitDeclaration(target);
         const context: ParseContextInterface = {
             edits: [],
             target,

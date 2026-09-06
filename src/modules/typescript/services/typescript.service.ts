@@ -369,8 +369,8 @@ export class TypescriptService {
      * This path always passes a directory on, so `declarationDir` is never consulted.
      * Name it explicitly to write somewhere other than `outDir`.
      * The keys name the entries alone, while the files reached through them keep the layout of the source tree.
-     * Nothing is type-checked here: declarations are produced by an isolated-declarations pass,
-     * and a declaration the compiler cannot infer surfaces through {@link check} rather than as a failure to write.
+     * Declarations come out of this project's program, so the checker writes the types the source leaves out,
+     * and a type it cannot write surfaces through {@link check} rather than as a failure to write.
      *
      * @example
      * ```ts
