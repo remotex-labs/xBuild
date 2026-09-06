@@ -23,7 +23,6 @@ import { startInteractive } from '@ui/interactive.ui';
 import { BuildService } from '@services/build.service';
 import { WatchService } from '@services/watch.service';
 import { configFileProvider } from '@providers/config-file.provider';
-import { TypescriptService } from '@typescript/services/typescript.service';
 
 /**
  * Replaces the declared variants with one built from the entry points the command line named.
@@ -33,7 +32,7 @@ import { TypescriptService } from '@typescript/services/typescript.service';
  *
  * @remarks
  * Files named on the command line are a run of their own rather than an addition to what the file declares,
- * so the variants it declares are put aside and a single variant named `argv` takes their place.
+ * so the variants it declares are put aside, and a single variant named `argv` takes their place.
  * A command line naming no entry point leaves the configuration as the file wrote it.
  *
  * @example
@@ -138,7 +137,7 @@ async function executeBuild(build: BuildService, args: ArgumentsInterface): Prom
  *
  * @remarks
  * `--serve` carries the directory to serve, so asking for a server and choosing what it serves are the one flag,
- * and a configuration that starts one of its own is honoured even where the flag is absent.
+ * and a configuration that starts one of its own is honored even where the flag is absent.
  * The directory falls back to the configured one and then to `dist`, which is where a build writes by default.
  * The server reports through the screen rather than to the console,
  * so its address reaches the status line and its requests are held to the level the run reports at.
@@ -177,11 +176,13 @@ export async function startServer(config: xBuildConfigInterface, args: Arguments
  * @remarks
  * A run is watched where `--watch` asked for it, and also where a server is serving,
  * since output nobody rebuilds is not worth serving.
- * A change refreshes the file model and the TypeScript configuration before anything is rebuilt,
+ * A change refreshes the file model before anything is rebuilt,
  * so the rebuild reads the files as they now are rather than as they were read the first time.
+ * Reloading the TypeScript configuration belongs to the screen rather than to the watch,
+ * which puts a rebuild started by a key on the same footing as one started by a change.
  * The configuration file is watched by its own version rather than by its path,
  * so an edit to it is reparsed and reapplied while every other change goes straight to a rebuild.
- * The shortcuts are listened for last, since they take the last row of the terminal
+ * The shortcuts are listened for last, since they take the last row of the terminal,
  * and a run that never reaches here leaves the terminal as it found it.
  *
  * @example
@@ -209,7 +210,6 @@ export async function startWatchMode(
     const watchService = new WatchService(process.cwd(), config.watch);
     watchService.subscribe(async (changedFiles) => {
         files.refreshAll();
-        TypescriptService.reload();
 
         if(configVersion !== files.touch(args.config!).version) {
             configVersion = files.touch(args.config!).version;
@@ -236,7 +236,7 @@ export async function startWatchMode(
  * The screen is built around the build itself, so a key pressed later starts the same run the command line asked for.
  * A run asking for a type check reports it and leaves from there, since nothing is built for one.
  * The server and the watch are started before the first build,
- * so a rebuild reaches a screen and the output is served as soon as it is written.
+ * so a rebuild reaches a screen, and the output is served as soon as it is written.
  *
  * @since 3.0.0
  */
