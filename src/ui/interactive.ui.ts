@@ -77,7 +77,7 @@ let activity = '';
  * A viewport one row tall pinned to the foot of the terminal.
  * Its rows count from one, so the row it is offset by is the one above the last,
  * which is what puts its only row on the last one rather than a line past the bottom of the screen.
- * It holds what it drew, so a redraw writes only the cells that moved and a line too long for the terminal is cut
+ * It holds what it drew, so redrawing writes only the cells that moved, and a line too long for the terminal is cut
  * to fit rather than wrapping onto the row above and breaking the region the report scrolls in.
  *
  * @see ShadowRenderer
@@ -102,7 +102,7 @@ let repaint: NodeJS.Timeout | undefined;
  * @remarks
  * Where a run has printed to is the one thing it cannot know for itself, and it decides everything the row rests on:
  * a watch started on a screen already full leaves the cursor on the last row, which is the row the line is about
- * to take, and every line printed afterwards would land under the line and be painted over rather than scrolled.
+ * to take, and every line printed afterward would land under the line and be painted over rather than scrolled.
  * The terminal is asked outright, and it answers on the input the shortcuts have yet to claim,
  * so the reply is read before the keys are listened for rather than swallowed by them.
  * A terminal that does not answer is taken to be full, which is the safe half of the guess.
@@ -133,7 +133,7 @@ function cursorRow(): Promise<number> {
  *
  * @remarks
  * The command is spawned and left to itself, so a browser that takes its time does not hold the watch up,
- * and a platform without an opener fails silently rather than taking the run down with it.
+ * and a platform without an opener fails silently rather than taking down the run with it.
  *
  * @example
  * ```ts
@@ -190,7 +190,7 @@ export function helpMenu(): string {
  * @example
  * ```ts
  * drawStatusBar();
- * //  PASS main in 134 ms · http://localhost:3000 · verbose · press h for shortcuts
+ * // PASS main in 134 ms · http://localhost:3000 · verbose · press h for shortcuts
  * ```
  *
  * @since 3.0.0
@@ -241,7 +241,7 @@ export function setActivity(text: string): void {
  * Where the run has printed to is asked of the terminal before the keys are listened for, the answer coming back
  * on the same input: only a run that has reached the last row needs one scrolled free,
  * and one that has not keeps the blank line it would have cost.
- * The region is set so that everything printed afterwards scrolls above the line rather than over it,
+ * The region is set so that everything printed afterward scrolls above the line rather than over it,
  * which keeps it out of the scrollback.
  * The row is painted again on a beat, so a terminal cleared from outside the run gets the line back at once,
  * and the beat is unreferenced, so it never holds the process open on its own.
@@ -308,7 +308,7 @@ export function stopInteractive(): void {
  * the next line printed belongs under the last one written, not at the foot of a screen it has yet to fill,
  * and never on the row the line holds, where it would be painted over rather than read.
  * A resize is given no row to go back to and restores what was saved, the run printing inside the region by then.
- * The row is cleared before it is drawn, since what a resize reflowed onto it is not the line's to keep.
+ * The row is cleared before it is drawn, since the line has no claim on what a resize reflowed onto it.
  * A terminal too short to spare a row keeps all of itself and goes without the line until it is resized larger.
  *
  * @since 3.0.0
@@ -341,9 +341,12 @@ function claimRow(anchor?: number): void {
  * @remarks
  * Interrupts leave through the same door as `q`, so a watch stopped by a keystroke and one stopped by a signal
  * end the same way, and both hand the terminal back before they go.
- * The run leaves from inside the write that says so, since leaving outright would cut the terminal off before
- * what was written for it had reached it.
- * A key that nothing is bound to is passed over, since a watch is left running rather than surprised by a typo.
+ * The run leaves only once the line saying so has been written, since leaving outright would cut the terminal
+ * off before what was written for it had reached it.
+ * Building and reloading part on one flag: `b` builds again from the configurations as they were parsed,
+ * while `r` has every TypeScript project reparse its own first.
+ * That reparse is what catches a change their versions miss, such as an edit to a file one of them extends.
+ * A key with nothing bound to it is passed over, since a watch is left running rather than surprised by a typo.
  *
  * @see helpMenu
  * @since 3.0.0
@@ -375,6 +378,6 @@ async function handleKey(key: Key): Promise<void> {
         case 'b':
             return session?.rebuild('rebuilding');
         case 'r':
-            return session?.rebuild('reloading');
+            return session?.rebuild('reloading', true);
     }
 }
