@@ -1,459 +1,284 @@
 /**
- * Import will remove at compile time
+ * Type-only imports erased during TypeScript compilation.
  */
 
-import type { SourceFile } from 'typescript';
-import type { PartialMessage, BuildOptions } from 'esbuild';
-import type { MacrosStateInterface } from '@directives/interfaces/analyze-directive.interface';
+import type { LifecycleLogsType } from '@interfaces/lifecycle.interface';
+import type { LogOverridesType } from '@providers/interfaces/log-provider.interface';
+import type { SourceEditInterface } from '@components/interfaces/transformer-component.interface';
+import type { BindingIdentifier, CallExpression, IdentifierReference, Node } from '@oxc-project/types';
 
 /**
- * Type alias for build-time definition values used in conditional compilation.
+ * A call whose callee is a plain identifier.
  *
  * @remarks
- * This type represents the structure of the `define` configuration object that controls
- * conditional macro behavior. Each key is a definition name referenced by `$$ifdef` or
- * `$$ifndef` macros, and the value determines whether the macro is included or excluded.
+ * A macro call is narrowed to this shape,
+ * so the code reading the callee's name does not have to check its type again.
+ * It remains an ordinary call expression, and its `arguments` carry the flag and the value the macro was given.
  *
- * **Value interpretation**:
- * - Truthy values (`true`, non-zero numbers, non-empty strings): Definition is considered "defined"
- * - Falsy values (`false`, `0`, `''`, `null`, `undefined`): Definition is considered "not defined"
- *
- * The values can be any type, but are typically booleans for clarity. JavaScript's truthiness
- * rules are applied when evaluating macro conditions.
- *
- * @example Basic boolean definitions
+ * @example
  * ```ts
- * const defines: DefinesType = {
- *   DEBUG: true,
- *   PRODUCTION: false,
- *   TEST: false
- * };
+ * const call: MacroCallType = node;
+ * call.callee.name;       // '$$ifdef'
+ * call.arguments.length;  // 2
  * ```
  *
- * @example Mixed value types
- * ```ts
- * const defines: DefinesType = {
- *   DEBUG: true,
- *   LOG_LEVEL: 'info',        // Truthy (non-empty string)
- *   MAX_RETRIES: 3,            // Truthy (non-zero number)
- *   EXPERIMENTAL: 0,           // Falsy
- *   FEATURE_FLAG: undefined    // Falsy
- * };
- * ```
+ * @see Macros
+ * @see MacroTargetInterface
  *
- * @example Usage in configuration
- * ```ts
- * const config = {
- *   define: {
- *     DEBUG: process.env.NODE_ENV !== 'production',
- *     API_URL: process.env.API_URL || 'http://localhost:3000'
- *   }
- * };
- * ```
- *
- * @see {@link StateInterface.defines} for usage context
- * @see {@link isDefinitionMet} for condition evaluation logic
- *
- * @since 2.0.0
+ * @since 3.0.0
  */
 
-export type DefinesType = Record<string, unknown>;
+export type MacroCallType = CallExpression & { callee: IdentifierReference };
 
 /**
- * Build execution context available to macro transformation logic.
+ * A visitor that the tree walk runs at each node.
  *
  * @remarks
- * Groups runtime build metadata and configuration needed by macros during AST processing:
- * - `variantName`: active build variant identifier
- * - `argv`: provider command-line/config arguments
- * - `options`: effective esbuild `BuildOptions` for the current build
+ * Receives the node, the node it hangs from, and the property of that parent it sits under,
+ * which is what tells a rewrite whether an identifier names something or reads it.
+ * Returning `true` stops the walk from descending, so it never revisits a subtree an earlier rule replaced.
  *
- * This object is read by macro handlers to make variant-aware and build-aware decisions.
+ * @example
+ * ```ts
+ * const visit: NodeVisitorType = (node, parent, key) => key === 'id'; // prunes a declaration's name
+ * ```
  *
- * @since 2.2.0
+ * @see walk
+ * @since 3.0.0
  */
 
-export interface MacroContextInterface {
+export type NodeVisitorType = (node: Node, parent: Node | null, key: string) => boolean;
+
+/**
+ * The binding a declaration introduces, paired with the macro that initializes it.
+ *
+ * @remarks
+ * A tuple rather than an object, so a caller destructures both halves in one line.
+ * The identifier is the declared name, and the target carries the call along with whatever call text followed it.
+ *
+ * @example
+ * ```ts
+ * const [ id, target ] = declared;
+ * id.name;       // '$$dev'
+ * target.suffix; // '' - the source did not invoke it
+ * ```
+ *
+ * @see MacroTargetInterface
+ * @since 3.0.0
+ */
+
+export type DeclaredMacroType = [ BindingIdentifier, MacroTargetInterface ];
+
+/**
+ * A macro call, with whatever call text followed it in the source.
+ *
+ * @remarks
+ * Keeping the trailing text lets a rewrite put the same call back around the value it substitutes,
+ * which is what a macro whose value is a function immediately invoked needs.
+ *
+ * @example
+ * ```ts
+ * // const $$now = $$ifdef('DEV', () => 1 + 1)();
+ * target.call.callee.name; // '$$ifdef'
+ * target.suffix;           // '()'
+ * ```
+ *
+ * @see MacroCallType
+ * @since 3.0.0
+ */
+
+export interface MacroTargetInterface {
     /**
-     * The current build variant name.
+     * The macro call itself.
      *
      * @remarks
-     * Identifies which variant is being transformed (for example, `development`
-     * or `production`). This value is propagated through macro processing so
-     * diagnostics and generated output can be associated with the correct variant.
+     * Its callee names which macro this is, and its arguments carry the flag and the value that flag guards.
      *
      * @example
      * ```ts
-     * $$inline(() => {
-     *     console.log(variantName);
-     * });
+     * target.call.arguments.length; // 2 - a flag and a value
      * ```
      *
-     * @since 2.2.0
+     * @see MacroCallType
+     * @since 3.0.0
      */
 
-    variantName: string;
+    call: MacroCallType;
 
     /**
-     * Command-line arguments and configuration options passed to the provider.
+     * The call text that followed the macro in the source.
      *
      * @remarks
-     * Contains all CLI options and flags passed when the provider was created.
-     * Available to all handlers for accessing build-specific configuration like
-     * debug flags, output paths, or custom settings.
+     * Empty where the source left the macro's value alone,
+     * and otherwise the whole text of the outer call.
      *
      * @example
      * ```ts
-     * context.argv; // { debug: true, verbose: false, outdir: 'dist' }
+     * target.suffix; // '(1)' - the call the source wrote around the value
      * ```
      *
-     * @since 2.2.0
+     * @since 3.0.0
      */
 
-    argv: Record<string, unknown>;
-
-    /**
-     * esbuild configuration options used for this lifecycle execution.
-     *
-     * @remarks
-     * These options represent the active build configuration for the provider and
-     * are intended to be read by lifecycle handlers when build behavior depends on
-     * entry points, output settings, plugins, or other esbuild flags.
-     *
-     * @since 2.2.0
-     */
-
-    options: BuildOptions;
+    suffix: string;
 }
 
 /**
- * Represents the complete state during macro transformation of a source file.
+ * Everything the macro transform of one file reads and writes.
  *
  * @remarks
- * This interface encapsulates all data needed during AST traversal and macro transformation.
- * It provides:
- * - **Metadata access**: Build stage information including disabled macro names
- * - **Configuration**: Build-time definitions controlling conditional compilation
- * - **Source information**: TypeScript AST and original file content
- * - **Diagnostic collection**: Arrays for warnings and errors during transformation
+ * Built once per file and handed down through the walk,
+ * so a helper deep in the tree reaches the source, the collected edits, and the dropped names
+ * without every function above it passing them along.
  *
- * The state is passed through the entire transformation pipeline, allowing functions
- * to access configuration, collect diagnostics, and track the transformation process.
- *
- * **State lifecycle**:
- * 1. Created in {@link transformerDirective} with initial configuration
- * 2. Passed to {@link astProcess} for transformation
- * 3. Passed to individual node processors ({@link isVariableStatement}, {@link isCallExpression})
- * 4. Passed to macro transformers ({@link astInlineVariable}, {@link astDefineVariable})
- * 5. Diagnostics extracted and returned in the final result
- *
- * @example State initialization
+ * @example
  * ```ts
- * const state: StateInterface = {
- *   stage: stage as MacrosStaeInterface,
- *   defines: { DEBUG: true, PRODUCTION: false },
- *   sourceFile: languageService.getProgram()?.getSourceFile(path)!,
- *   contents: fileContents,
- *   errors: [],
- *   warnings: []
+ * const state: MacroStateInterface = {
+ *     target, code, logs, dropped, defines, overrides, edits: [], pending: []
  * };
  * ```
  *
- * @example Collecting diagnostics during transformation
- * ```ts
- * function processNode(node: Node, state: StateInterface): void {
- *   if (isInvalidMacro(node)) {
- *     state.warnings.push({
- *       text: 'Invalid macro usage',
- *       location: getLocation(node, state.sourceFile)
- *     });
- *   }
- * }
- * ```
- *
- * @example Accessing definitions
- * ```ts
- * function shouldIncludeMacro(name: string, state: StateInterface): boolean {
- *   const value = state.defines[name];
- *   return name in state.defines && !!value;
- * }
- * ```
- *
- * @see {@link transformerDirective} for state creation
- * @see {@link astProcess} for state usage during transformation
- * @see {@link MacrosStateInterface} for stage metadata structure
- *
- * @since 2.0.0
+ * @see transformMacros
+ * @since 3.0.0
  */
 
-export interface StateInterface {
+export interface MacroStateInterface {
     /**
-     * The build stage containing macro analysis metadata.
+     * The source text of the file being transformed.
      *
      * @remarks
-     * Provides access to metadata collected during the analysis phase, including:
-     * - Set of files containing macros
-     * - Set of disabled macro names (based on definitions)
-     *
-     * This metadata is used to optimize transformation by skipping files without
-     * macros and replacing disabled macro references with `undefined`.
-     *
-     * @see {@link MacrosStateInterface} for metadata structure
-     * @see {@link analyzeMacroMetadata} for metadata generation
-     *
-     * @since 2.0.0
-     */
-
-    stage: MacrosStateInterface;
-
-    /**
-     * Array of error messages collected during transformation.
-     *
-     * @remarks
-     * Contains partial esbuild messages representing errors that occurred during
-     * macro processing. Common error sources include:
-     * - Invalid macro syntax
-     * - Runtime errors during inline code evaluation
-     * - TypeScript compilation errors
-     *
-     * Errors are non-fatal during transformation but are reported in the final result
-     * and may cause the build to fail.
-     *
-     * @example Adding an error
-     * ```ts
-     * state.errors.push({
-     *   text: 'Cannot evaluate inline macro',
-     *   location: { file: filePath, line: 42, column: 10 }
-     * });
-     * ```
-     *
-     * @since 2.0.0
-     */
-
-    errors: Array<PartialMessage>;
-
-    /**
-     * Build-time definitions controlling conditional macro inclusion.
-     *
-     * @remarks
-     * A record mapping definition names to their values. Used by `$$ifdef` and `$$ifndef`
-     * macros to determine whether code should be included in the build output.
-     *
-     * Typically sourced from `variant.config.define` in the build configuration.
+     * Every span the parser reported points into this text,
+     * so a rewrite slices what it needs from here rather than rebuilding it from the tree.
      *
      * @example
      * ```ts
-     * const state: StateInterface = {
-     *   defines: {
-     *     DEBUG: true,
-     *     PRODUCTION: false,
-     *     API_URL: 'https://api.example.com'
-     *   },
-     *   // ... other properties
-     * };
+     * const { code } = state;
+     * code; // "export const $$dev = $$ifdef('DEV', fn);"
      * ```
      *
-     * @see {@link DefinesType} for type structure
-     * @see {@link isDefinitionMet} for evaluation logic
-     *
-     * @since 2.0.0
+     * @since 3.0.0
      */
 
-    defines: DefinesType;
+    code: string;
 
     /**
-     * Array of warning messages collected during transformation.
+     * The buckets this file's messages are filed into.
      *
      * @remarks
-     * Contains partial esbuild messages representing non-fatal issues discovered
-     * during macro processing. Common warning sources include:
-     * - Macro names missing the `$$` prefix convention
-     * - References to undefined functions in inline macros
-     * - Deprecated macro patterns
-     *
-     * Warnings do not prevent successful transformation but indicate potential issues.
-     *
-     * @example Adding a warning
-     * ```ts
-     * state.warnings.push({
-     *   text: `Function ${functionName} not found`,
-     *   location: { file: filePath, line: 10, column: 5 }
-     * });
-     * ```
-     *
-     * @since 2.0.0
-     */
-
-    warnings: Array<PartialMessage>;
-
-    /**
-     * The current file content being transformed.
-     *
-     * @remarks
-     * Contains the complete source file text. During transformation, this content
-     * is modified by applying replacement operations. The final transformed content
-     * is returned in the build result.
-     *
-     * Updated during the transformation process as macros are replaced with their
-     * expanded or evaluated forms.
-     *
-     * @since 2.0.0
-     */
-
-    contents: string;
-
-    /**
-     * The TypeScript source file AST.
-     *
-     * @remarks
-     * Provides the parsed Abstract Syntax Tree of the source file, used for:
-     * - AST traversal to locate macro calls
-     * - Text extraction from AST nodes
-     * - Position calculation for diagnostics
-     * - Source location mapping
-     *
-     * Obtained from TypeScript's language service and represents the current
-     * state of the file in the compilation.
-     *
-     * @since 2.0.0
-     */
-
-    sourceFile: SourceFile;
-
-    /**
-     * Build execution context available to macro transformation logic.
-     *
-     * @remarks
-     * Groups runtime build metadata and configuration needed by macros during AST processing:
-     * - `variantName`: active build variant identifier
-     * - `argv`: provider command-line/config arguments
-     * - `options`: effective esbuild `BuildOptions` for the current build
-     *
-     * This object is read by macro handlers to make variant-aware and build-aware decisions.
-     *
-     * @since 2.2.0
-     */
-
-    context: MacroContextInterface
-}
-
-/**
- * Represents a text substitution operation for macro replacement.
- *
- * @remarks
- * This interface defines a single replacement operation to be performed on source code
- * during macro transformation. Each substitution specifies:
- * - The region of text to replace (via start and end positions)
- * - The replacement text to insert
- *
- * Substitutions are collected during AST traversal and applied in reverse order
- * (from end to start) to avoid position invalidation as earlier replacements
- * are applied.
- *
- * **Position handling**:
- * - Positions are character offsets from the start of the file (0-based)
- * - `start` is inclusive (first character to replace)
- * - `end` is exclusive (one past the last character to replace)
- * - Region length: `end - start`
- *
- * **Application strategy**:
- * Replacements are sorted by `start` position in descending order before application,
- * ensuring that later positions are replaced first, preventing earlier replacements
- * from shifting positions of subsequent replacements.
- *
- * @example Basic substitution
- * ```ts
- * const subst: SubstInterface = {
- *   start: 50,  // Start of the macro call
- *   end: 85,    // End of macro call
- *   replacement: 'function $$debug() { return console.log; }'
- * };
- * ```
- *
- * @example Replacing a macro with undefined
- * ```ts
- * // Replace disabled macro reference
- * const subst: SubstInterface = {
- *   start: 120,
- *   end: 127,  // Length of '$$debug'
- *   replacement: 'undefined'
- * };
- * ```
- *
- * @example Multiple substitutions
- * ```ts
- * const replacements: SubstInterface[] = [
- *   { start: 100, end: 150, replacement: 'transformed1' },
- *   { start: 50, end: 80, replacement: 'transformed2' }
- * ];
- *
- * // Sort by start position (descending)
- * replacements.sort((a, b) => b.start - a.start);
- *
- * // Apply in reverse order
- * for (const subst of replacements) {
- *   content = content.slice(0, subst.start) +
- *             subst.replacement +
- *             content.slice(subst.end);
- * }
- * ```
- *
- * @see {@link isVariableStatement} for substitution creation
- * @see {@link astProcess} for substitution collection and application
- *
- * @since 2.0.0
- */
-
-export interface SubstInterface {
-    /**
-     * The exclusive end position of the text region to replace.
-     *
-     * @remarks
-     * Character offset representing one position past the last character to replace.
-     * The character at this position is not included in the replacement.
-     *
-     * Obtained from `node.getEnd()` on the AST node being replaced.
-     *
-     * @since 2.0.0
-     */
-
-    end: number;
-
-    /**
-     * The inclusive start position of the text region to replace.
-     *
-     * @remarks
-     * Character offset representing the first character to replace in the source text.
-     * The character at this position is included in the replacement.
-     *
-     * Obtained from `node.getStart(sourceFile)` on the AST node being replaced.
-     *
-     * @since 2.0.0
-     */
-
-    start: number;
-
-    /**
-     * The replacement text to insert at the specified position.
-     *
-     * @remarks
-     * The complete text that will replace the region defined by `start` and `end`.
-     * Can be:
-     * - Transformed macro code (function declarations, constants)
-     * - Evaluated inline results
-     * - The string `'undefined'` for disabled macros
-     * - Empty string for removed macros
+     * The build's own log record, so a warning raised here reaches the same reporter as an esbuild message.
      *
      * @example
      * ```ts
-     * replacement: 'function $$debug() { return console.log; }'
-     * replacement: 'undefined'
-     * replacement: 'export const API_URL = "https://api.example.com";'
-     * replacement: ''
+     * state.logs.warning.length; // 1
      * ```
      *
-     * @since 2.0.0
+     * @see LifecycleLogsType
+     * @since 3.0.0
      */
 
-    replacement: string;
+    logs: LifecycleLogsType;
+
+    /**
+     * The rewrites collected for this file.
+     *
+     * @remarks
+     * Applied together once the walk has finished, which is what keeps every offset valid while it runs.
+     *
+     * @example
+     * ```ts
+     * state.edits; // [ { start: 0, end: 34, text: '' } ]
+     * ```
+     *
+     * @see SourceEditInterface
+     * @since 3.0.0
+     */
+
+    edits: Array<SourceEditInterface>;
+
+    /**
+     * The absolute path of the file being transformed.
+     *
+     * @remarks
+     * Names the file in every message raised against it,
+     * and a deferred `inline` value resolves its own packages against it.
+     *
+     * @example
+     * ```ts
+     * state.target; // '/app/src/index.ts'
+     * ```
+     *
+     * @since 3.0.0
+     */
+
+    target: string;
+
+    /**
+     * The inline evaluations still running.
+     *
+     * @remarks
+     * Each one fills in an edit queued empty,
+     * so the caller awaits all of them before the edits are applied.
+     *
+     * @example
+     * ```ts
+     * state.pending.length; // 2 - two inline calls still to finish
+     * ```
+     *
+     * @see evaluate
+     * @since 3.0.0
+     */
+
+    pending: Array<Promise<void>>;
+
+    /**
+     * The macro names this build is not keeping.
+     *
+     * @remarks
+     * Shared across the files of a build rather than rebuilt per file,
+     * so dropping a name where it was declared also drops it where it is imported.
+     *
+     * @example
+     * ```ts
+     * state.dropped.has('$$dev'); // true
+     * ```
+     *
+     * @see analyzeMacros
+     * @since 3.0.0
+     */
+
+    dropped: Set<string>;
+
+    /**
+     * The definition table that holds the text of each flag.
+     *
+     * @remarks
+     * Holds source text rather than values, which is why {@link isDefined} compares each flag with a string.
+     *
+     * @example
+     * ```ts
+     * state.defines; // { DEV: 'false' }
+     * ```
+     *
+     * @see isDefined
+     * @since 3.0.0
+     */
+
+    defines: Record<string, string>;
+
+    /**
+     * The levels the build declared for its messages.
+     *
+     * @remarks
+     * Decides the level a message raised here is filed under, and drops the message where that level is `silent`.
+     *
+     * @example
+     * ```ts
+     * state.overrides; // [ [ /^macro-/, 'silent' ] ]
+     * ```
+     *
+     * @see LogOverridesType
+     * @since 3.0.0
+     */
+
+    overrides: LogOverridesType;
 }
