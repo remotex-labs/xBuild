@@ -14,6 +14,7 @@ import { exit } from 'process';
 import { setActivity } from '@ui/interactive.ui';
 import { Injectable, inject } from '@remotex-labs/xinject';
 import { ConfigurationService } from '@services/configuration.service';
+import { TypescriptService } from '@typescript/services/typescript.service';
 import { clearScreen, createActionPrefix, printGroup, printOutputs } from '@ui/print.ui';
 import { keywordColor, mutedColor, warnColor, errorColor, infoColor, okColor, pathColor } from '@ui/color.ui';
 import { WarningSymbol, ErrorSymbol, DotSymbol, ArrowSymbol, ReloadSymbol, SuccessSymbol, Levels } from '@constants/ui.constant';
@@ -97,7 +98,7 @@ export class Screen {
      *
      * @example
      * ```ts
-     * const screen = inject(Screen, () => build.build());
+     * const screen = inject(Screen, runBuild); // runBuild is what a key or a watch will call
      * ```
      *
      * @since 3.0.0
@@ -185,7 +186,7 @@ export class Screen {
     }
 
     /**
-     * Reports one end of a build, its start or its finish.
+     * Reports either end of a build: its start or its finish.
      *
      * @param event - What the variant reported, carrying its context and, at the end, its result
      *
@@ -231,12 +232,12 @@ export class Screen {
     /**
      * Reports what the development server is doing.
      *
-     * @param event - What the server reported, one of its start, its stop, a request, or a failure
+     * @param event - What the server reported: its start, its stop, a request, or a failure
      *
      * @remarks
      * A start is where the address comes from, and a stop is what takes it away again,
      * so the status line offers the URL for exactly as long as something answers on it.
-     * A stop that stopped nothing is passed over, since a run that never served has nothing to say about it.
+     * A stop is reported only where a server was running, since a stop is worth a line only where something was answering.
      * Requests are reported only at `verbose`, one line being worth little against a page that fetches thirty files.
      * A failed `favicon.ico` is dropped whatever the level, since browsers ask for one unprompted on every visit.
      *
@@ -313,25 +314,35 @@ export class Screen {
     }
 
     /**
-     * Clears what the last build left, says what set this one off, and runs it.
+     * Clears what the last build left, takes up any configuration change, says what asked for this build, and runs it.
      *
      * @param reason - What asked for the build, such as the files that changed or the key that was pressed
+     * @param force - Whether every TypeScript project reparses its configuration even where its file has not moved
      *
      * @remarks
      * Every rebuild of a watch goes through here, so the screen is cleared and the run announced the same way
-     * whichever set it off, and the build itself is the one the run handed over when the screen was made.
+     * whichever asked for it.
+     * The build itself is the one the run handed over when the screen was made.
+     * The TypeScript configurations are reloaded here rather than by the watch,
+     * so a rebuild started by a key reads them as freshly as one started by a changed file.
+     * A configuration that has stayed put costs a lookup and nothing more.
+     * Forcing reparses every project regardless, which is what the reload key asks for
+     * and what catches a change the configuration file's own version misses.
      *
      * @example
      * ```ts
-     * await screen.rebuild('2 files changed');
-     * // [xBuild] rebuild 2 files changed
+     * await screen.rebuild('2 files changed'); // [xBuild] rebuild 2 files changed
+     * await screen.rebuild('reloading', true); // the same, with every tsconfig reparsed first
      * ```
      *
+     * @see TypescriptService.reload
      * @since 3.0.0
      */
 
-    async rebuild(reason: string): Promise<void> {
+    async rebuild(reason: string, force: boolean = false): Promise<void> {
         clearScreen();
+        TypescriptService.reload(force);
+
         this.say(`${ infoColor.dim(ReloadSymbol) } ${ mutedColor(reason) }`,
             `${ createActionPrefix('rebuild', infoColor.dim(ReloadSymbol)) } ${ mutedColor(reason) }`);
 
