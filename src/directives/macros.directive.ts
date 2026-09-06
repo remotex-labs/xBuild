@@ -1,629 +1,538 @@
 /**
- * Import will remove at compile time
+ * Type-only imports erased during TypeScript compilation.
  */
 
-import type { OnLoadResult } from 'esbuild';
-import type { VariantService } from '@services/variant.service';
-import type { CallExpression, VariableStatement, ExpressionStatement } from 'typescript';
-import type { MacrosStateInterface } from '@directives/interfaces/analyze-directive.interface';
-import type { LoadContextInterface } from '@providers/interfaces/lifecycle-provider.interface';
-import type { SubstInterface, StateInterface } from '@directives/interfaces/macros-directive.interface';
-import ts from 'typescript';
+import type { PartialMessage } from 'esbuild';
+import type { ParseResult } from 'oxc-parser';
+import type { LifecycleContextInterface } from '@interfaces/lifecycle.interface';
+import type { LogLevelType } from '@providers/interfaces/log-provider.interface';
+import type { NodeVisitorType } from '@directives/interfaces/macros-directive.interface';
+import type { ExportNamedDeclaration, ImportDeclaration, Node, Span } from '@oxc-project/types';
+import type { SourceEditInterface } from '@components/interfaces/transformer-component.interface';
+import type { DeclaredMacroType, MacroCallType } from '@directives/interfaces/macros-directive.interface';
+import type { MacroStateInterface, MacroTargetInterface } from '@directives/interfaces/macros-directive.interface';
+
 /**
  * Imports
  */
-import { createSourceFile } from 'typescript';
-import { esBuildError } from '@errors/esbuild.error';
-import { highlightCode } from '@remotex-labs/xmap/highlighter.component';
-import { astDefineVariable, astDefineCallExpression } from '@directives/define.directive';
-import { astInlineCallExpression, astInlineVariable } from '@directives/inline.directive';
+
+import { visitorKeys } from 'oxc-parser';
+import { collectLog } from '@providers/log.provider';
+import { evaluate } from '@directives/inline.directive';
+import { applyEdits } from '@components/transformer.component';
+import { defineDeclaration, defineExpression, isDefined } from '@directives/define.directive';
+import { MacroNameKeys, MacroPrefix, Macros, MacroScanHint } from '@constants/macros.constant';
 
 /**
- * Array of recognized macro function names for conditional compilation and inline evaluation.
+ * Whether a value read out of a node is itself a node.
+ *
+ * @param value - Value read out of a parent node's property
+ * @returns `true` when the value is an object carrying a string `type`
  *
  * @remarks
- * Defines the complete set of macro directives supported by xBuild:
- * - `$$ifdef`: Conditional inclusion when definition is truthy
- * - `$$ifndef`: Conditional inclusion when definition is falsy or undefined
- * - `$$inline`: Runtime code evaluation during build time
+ * The test the walk applies before it steps into a property,
+ * since a visitor key can hold a node, an array of them, or a plain value such as a name or a flag.
  *
- * Used for:
- * - Validating macro calls during AST traversal
- * - Determining argument count requirements
- * - Filtering disabled macro references
- *
- * @since 2.0.0
+ * @since 3.0.0
  */
 
-const MACRO_FUNCTIONS = [ '$$ifdef', '$$ifndef', '$$inline' ];
-
-/**
- * Checks whether a given AST node’s source text contains any supported macro function name.
- *
- * @param node - AST node to inspect
- * @param sourceFile - Optional source file used by TypeScript to compute node text
- *
- * @returns `true` if the node text contains at least one macro identifier; otherwise `false`.
- *
- * @remarks
- * This is a fast, text-based pre-check used to avoid deeper macro parsing work when a node
- * clearly cannot contain macro calls.
- *
- * @since 2.0.0
- */
-
-export function nodeContainsMacro(node: ts.Node, sourceFile?: ts.SourceFile): boolean {
-    return (MACRO_FUNCTIONS as ReadonlyArray<string>).some(m => node.getText(sourceFile).includes(m));
+export function isNode(value: unknown): value is Node {
+    return typeof value === 'object' && value !== null && typeof (<Node> value).type === 'string';
 }
 
 /**
- * Returns the expected argument count for a supported macro function.
+ * Visits a node and everything under it, depth-first.
  *
- * @param fnName - Macro function name (e.g. `$$ifdef`, `$$ifndef`, `$$inline`)
- *
- * @returns The required number of arguments for the macro.
+ * @param node - Node the walk starts from
+ * @param visit - Called for each node, returning `true` to leave the subtree unvisited
+ * @param parent - Node the current one hangs from, `null` at the root
+ * @param key - Property of the parent the current node sits under, empty at the root
  *
  * @remarks
- * - `$$inline` expects 1 argument (a thunk/callback)
- * - `$$ifdef` / `$$ifndef` expect 2 arguments (name + callback/value)
+ * Child properties come from oxc's `visitorKeys`, so a node type that the table does not name is treated as a leaf.
+ * A visitor returning `true` prunes the subtree,
+ * so a rule further down never rewrites a node that an earlier one already replaced.
  *
- * @since 2.0.0
+ * @see NodeVisitorType
+ * @since 3.0.0
  */
 
-function expectedArgCount(fnName: string): number {
-    return fnName === MACRO_FUNCTIONS[2] ? 1 : 2;
+export function walk(node: Node, visit: NodeVisitorType, parent: Node | null = null, key = ''): void {
+    if (visit(node, parent, key)) return;
+
+    const keys: Array<string> | undefined = visitorKeys[node.type];
+
+    for (const childKey of keys ?? []) {
+        const value = (<Record<string, unknown>> <unknown> node)[childKey];
+
+        if (Array.isArray(value)) {
+            for (const item of value) if (isNode(item)) walk(item, visit, node, childKey);
+        } else if (isNode(value)) walk(value, visit, node, childKey);
+    }
 }
 
 /**
- * Processes variable statements containing macro calls and adds replacements to the replacement set.
+ * Files a message against a position in the file being transformed.
  *
- * @param node - The variable statement node to process
- * @param replacements - Set of code replacements to populate
- * @param state - The macro transformation state containing definitions and source file
- *
- * @returns A promise that resolves when all variable declarations have been processed
+ * @param state - Transform state, read for the source text and the file name
+ * @param offset - Offset in the source the message points at
+ * @param level - Level the message is filed under, before any override applies
+ * @param message - Message to file, whose `location` this fills in
  *
  * @remarks
- * This function handles macro variable declarations of the form:
- * ```ts
- * const $$myFunc = $$ifdef('DEFINITION', callback);
- * export const $$inline = $$inline(() => computeValue());
- * let $$feature = $$ifndef('PRODUCTION', devFeature);
- * ```
+ * The line and the column are counted by scanning the source up to the offset,
+ * since the parser reports spans rather than positions.
+ * The message is filled in where it stands rather than copied, and it reaches the log through {@link collectLog},
+ * so the overrides the build declared still decide the level it lands at.
  *
- * The processing flow:
- * 1. Iterates through all variable declarations in the statement
- * 2. Validates that the initializer is a macro call expression
- * 3. Checks that the macro function name is recognized
- * 4. Validates argument count (2 for ifdef/ifndef, 1 for inline)
- * 5. Detects export modifiers to preserve in the output
- * 6. Delegates to the appropriate transformer based on macro type
- * 7. Adds successful transformations to the replacement set
- *
- * **Macro type routing**:
- * - `$$inline`: Delegates to {@link astInlineVariable} (async evaluation)
- * - `$$ifdef`/`$$ifndef`: Delegates to {@link astDefineVariable} (conditional inclusion)
- *
- * Replacements track the start and end positions of the original statement
- * for accurate text substitution during the final transformation pass.
- *
- * @example Processing conditional macro
- * ```ts
- * // Source: const $$debug = $$ifdef('DEBUG', () => console.log);
- * // With: { DEBUG: true }
- * await isVariableStatement(node, replacements, state);
- * // replacements contains: {
- * //   start: 0,
- * //   end: 52,
- * //   replacement: 'function $$debug() { return console.log; }'
- * // }
- * ```
- *
- * @example Processing inline macro
- * ```ts
- * // Source: export const API_URL = $$inline(() => process.env.API);
- * await isVariableStatement(node, replacements, state);
- * // replacements contains: {
- * //   start: 0,
- * //   end: 59,
- * //   replacement: 'export const API_URL = undefined;'
- * // }
- * ```
- *
- * @example Invalid macro (skipped)
- * ```ts
- * // Source: const $$bad = $$ifdef('DEV'); // Missing callback argument
- * await isVariableStatement(node, replacements, state);
- * // No replacement added (insufficient arguments)
- * ```
- *
- * @see {@link astProcess} for the calling context
- * @see {@link astInlineVariable} for inline macro transformation
- * @see {@link astDefineVariable} for conditional macro transformation
- *
- * @since 2.0.0
+ * @see collectLog
+ * @since 3.0.0
  */
 
-export async function isVariableStatement(node: VariableStatement, replacements: Set<SubstInterface>, state: StateInterface): Promise<boolean> {
-    let replacement: string | false = false;
+export function report(state: MacroStateInterface, offset: number, level: LogLevelType, message: PartialMessage): void {
+    const { code } = state;
+    let line = 1;
+    let start = 0;
 
-    for (const decl of node.declarationList.declarations) {
-        let suffix = '';
-        let call: ts.CallExpression | undefined;
-        const init = decl.initializer;
-        if (!init) continue;
-
-        if (ts.isCallExpression(init) && ts.isIdentifier(init.expression)) {
-            // Plain: $$macro(...)
-            call = init;
-        } else if (
-            ts.isCallExpression(init) &&
-            ts.isCallExpression(init.expression) &&
-            ts.isIdentifier(init.expression.expression)
-        ) {
-            // IIFE: $$macro(...)(...outerArgs)
-            call = init.expression;
-            const args = init.arguments.map(a => a.getText(state.sourceFile)).join(', ');
-            suffix = `(${ args })`;
-        } else if (
-            ts.isAsExpression(init) &&
-            ts.isCallExpression(init.expression) &&
-            ts.isIdentifier(init.expression.expression)
-        ) {
-            call = init.expression;
-        }
-
-        if (!call) continue;
-
-        const fnName = (call.expression as ts.Identifier).text;
-        if (!MACRO_FUNCTIONS.includes(fnName)) continue;
-        if (call.arguments.length !== expectedArgCount(fnName)) {
-            const { line, character } = state.sourceFile.getLineAndCharacterOfPosition(call.getStart(state.sourceFile));
-            throw new esBuildError({
-                text: `Invalid macro call: ${ fnName } with ${ call.arguments.length } arguments`,
-                location: {
-                    file: state.sourceFile.fileName,
-                    line: line + 1,
-                    column: character
-                }
-            });
-        }
-
-        const hasExport =
-            node.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword) ?? false;
-
-        if (fnName === MACRO_FUNCTIONS[2]) replacement = await astInlineVariable(decl, node, call, hasExport, state);
-        else if (suffix) replacement = astDefineCallExpression(call, state, decl, hasExport, suffix);
-        else replacement = astDefineVariable(decl, call, hasExport, state);
-
-        if (replacement !== false) {
-            replacements.add({
-                replacement,
-                end: node.getEnd(),
-                start: node.getStart(state.sourceFile)
-            });
-        }
+    for (let index = code.indexOf('\n'); index !== -1 && index < offset; index = code.indexOf('\n', index + 1)) {
+        line++;
+        start = index + 1;
     }
 
-    return replacement !== false;
+    message.location = { file: state.target, line, column: offset - start };
+    collectLog(state.logs, state.overrides, message, level);
 }
 
 /**
- * Processes standalone macro call expressions and adds replacements to the replacement set.
+ * Queues an edit that replaces a span with text.
  *
- * @param node - The expression statement containing the macro call
- * @param replacements - Set of code replacements to populate
- * @param state - The macro transformation state containing definitions and source file
- *
- * @returns A promise that resolves when the expression has been processed
- *
- * @remarks
- * This function handles standalone macro calls that appear as expression statements:
- * ```ts
- * $$ifdef('DEBUG', () => console.log('debug'));
- * $$inline(() => initialize());
- * ```
- *
- * The processing flow:
- * 1. Validates that the expression is a macro call with identifier
- * 2. Checks that the macro function name is recognized
- * 3. Validates argument count (2 for ifdef/ifndef, 1 for inline)
- * 4. Delegates to the appropriate transformer based on macro type
- * 5. Adds successful transformations to the replacement set
- *
- * **Macro type routing**:
- * - `$$inline`: Delegates to {@link astInlineCallExpression} (async evaluation)
- * - `$$ifdef`/`$$ifndef`: Delegates to {@link astDefineCallExpression} (conditional inclusion)
- *
- * **Note**: The define call expression handler currently doesn't return a replacement
- * (returns `false` implicitly), so only inline macros result in replacements at this level.
- *
- * @example Processing inline call
- * ```ts
- * // Source: $$inline(() => configureApp());
- * await isCallExpression(node, replacements, state);
- * // replacements contains: {
- * //   start: 0,
- * //   end: 35,
- * //   replacement: 'undefined'
- * // }
- * ```
- *
- * @example Processing conditional call
- * ```ts
- * // Source: $$ifdef('DEBUG', () => enableDebugMode());
- * await isCallExpression(node, replacements, state);
- * // No replacement added (define expressions handle differently)
- * ```
- *
- * @see {@link astProcess} for the calling context
- * @see {@link astInlineCallExpression} for inline macro transformation
- * @see {@link astDefineCallExpression} for conditional macro transformation
- *
- * @since 2.0.0
- */
-
-export async function isCallExpression(
-    node: ExpressionStatement, replacements: Set<SubstInterface>, state: StateInterface
-): Promise<boolean> {
-    const callExpr = <CallExpression>node.expression;
-    if (!callExpr.expression || !ts.isIdentifier(callExpr.expression)) return false;
-
-    const fnName = callExpr.expression.text;
-    if (!MACRO_FUNCTIONS.includes(fnName)) return false;
-    if (callExpr.arguments.length !== expectedArgCount(fnName)) {
-        const { line, character } = state.sourceFile.getLineAndCharacterOfPosition(node.getStart(state.sourceFile));
-        throw new esBuildError({
-            text: `Invalid macro call: ${ fnName } with ${ callExpr.arguments.length } arguments`,
-            location: {
-                file: state.sourceFile.fileName,
-                line: line + 1,
-                column: character
-            }
-        });
-    }
-
-    let replacement: string | false = false;
-    if (fnName == MACRO_FUNCTIONS[2]) {
-        await astInlineCallExpression(callExpr.arguments, state);
-        replacement = 'undefined';
-    } else replacement = astDefineCallExpression(callExpr, state);
-
-    if (replacement !== false) {
-        replacements.add({
-            replacement,
-            end: callExpr.getEnd(),
-            start: callExpr.getStart(state.sourceFile)
-        });
-    }
-
-    return replacement !== false;
-}
-
-/**
- * Processes a `CallExpression` AST node that targets one of the supported macro functions and,
- * if possible, registers a text replacement.
- *
- * @param node - The AST node to process (must be a `CallExpression` to be meaningful)
- * @param replacements - Collection of replacements to apply later (sorted and spliced into the source)
- * @param state - Current macro processing state (includes `sourceFile`, `contents`, metadata, etc.)
- *
- * @returns `true` when a macro replacement was added; otherwise `false`.
+ * @param state - Transform state the edit is collected on
+ * @param span - Span of the source the edit replaces
+ * @param text - Replacement text, empty to delete the span
+ * @returns `true`, so a caller can hand it straight back to the walk
  *
  * @remarks
- * This handler is used for *nested* macro call sites (i.e. `CallExpression` nodes that are not
- * expression statements or variable statements), for example:
+ * Returning `true` is what tells the walk that this node is dealt with and that it should not descend into it.
+ * The edit is applied later along with the rest, so the offsets it carries stay valid for the whole walk.
  *
- * ```ts
- * const value = someFn($$inline(() => 123));
- * ```
- *
- * Routing:
- * - `$$inline(...)` → {@link astInlineCallExpression} (async)
- * - `$$ifdef(...)` / `$$ifndef(...)` → {@link astDefineCallExpression}
- *
- * The replacement range is based on the node’s `[start, end]` positions in {@link StateInterface.sourceFile}.
- *
- * @see {@link astInlineCallExpression}
- * @see {@link astDefineCallExpression}
- *
- * @since 2.0.0
+ * @see applyEdits
+ * @since 3.0.0
  */
 
-async function macroCallExpression(node: ts.Node, replacements: Set<SubstInterface>, state: StateInterface): Promise<boolean> {
-    if (!ts.isCallExpression(node)) return false;
-    if (!nodeContainsMacro(node, state.sourceFile)) return false;
-
-    const callNode = node as ts.CallExpression;
-    if (!ts.isIdentifier(callNode.expression)) return false;
-
-    const fnName = callNode.expression.text;
-
-    if (fnName === MACRO_FUNCTIONS[2]) {
-        // $$inline macro
-        const replacement = await astInlineCallExpression(callNode.arguments, state);
-        if (replacement === false) return false;
-
-        replacements.add({
-            start: node.getStart(state.sourceFile),
-            end: node.getEnd(),
-            replacement
-        });
-
-        return true;
-    }
-
-    // $$ifdef / $$ifndef macro
-    const replacement = astDefineCallExpression(callNode, state);
-    if (replacement === false) return false;
-
-    replacements.add({
-        start: node.getStart(state.sourceFile),
-        end: node.getEnd(),
-        replacement
-    });
+export function record(state: MacroStateInterface, span: Span, text: string): boolean {
+    state.edits.push({ start: span.start, end: span.end, text });
 
     return true;
 }
 
 /**
- * Recursively traverses the AST to find and transform all macro occurrences in the source file.
+ * Queues an edit whose text is known only once an inline call has run.
  *
- * @param state - The macro transformation state containing source file, definitions, and content
- * @param variant - The build variant name for tracking replacements (defaults to 'unknow')
- *
- * @returns A promise resolving to the transformed source code with all macro replacements applied
+ * @param state - Transform state the edit and the promise are collected on
+ * @param span - Span of the source the edit replaces
+ * @param call - The `$$inline` call to evaluate
+ * @param wrap - Turns the value that comes back into the text that replaces the span
+ * @returns `true`, so a caller can hand it straight back to the walk
  *
  * @remarks
- * This is the main transformation function that orchestrates macro processing across the entire
- * source file. It performs a recursive AST traversal to locate and transform different macro patterns:
+ * The edit is queued empty and filled in when the call finishes, so the walk carries on while it runs.
+ * The promise is collected on `state.pending` for the caller to await before the edits are applied.
+ * A failure fills the edit with `wrap('undefined')` and reports a `macro-inline` error,
+ * so a macro that cannot be evaluated still leaves the file parsable.
  *
- * **Macro patterns handled**:
- * 1. **Variable statements**: `const $$x = $$ifdef(...)` or `const x = $$inline(...)`
- * 2. **Expression statements**: Standalone `$$ifdef(...)` or `$$inline(...)` calls
- * 3. **Nested inline calls**: `$$inline(...)` within other expressions (not variable/expression statements)
- * 4. **Disabled macro calls**: Calls to macros marked as disabled in metadata
- * 5. **Disabled macro identifiers**: References to disabled macro names (replaced with `undefined`)
- *
- * @example Complete transformation
- * ```ts
- * // Original source:
- * const $$debug = $$ifdef('DEBUG', () => console.log);
- * const value = $$inline(() => 42);
- * $$debug();
- *
- * // With definitions: { DEBUG: false }
- * const result = await astProcess(state, 'production');
- *
- * // Transformed result:
- * const value = undefined;
- * undefined();
- *
- * // Tracked in state.stage.replacementInfo['production']
- * ```
- *
- * @example Handling disabled macros
- * ```ts
- * // Original source (with DEBUG=false):
- * const $$debug = $$ifdef('DEBUG', log);
- * if ($$debug) $$debug();
- *
- * // After processing:
- * if (undefined) undefined();
- * ```
- *
- * @example No macros (short circuit)
- * ```ts
- * const state = {
- *   contents: 'const x = 1;',
- *   sourceFile,
- *   stage: { defineMetadata: { filesWithMacros: new Set(), disabledMacroNames: new Set() } }
- * };
- * const result = await astProcess(state);
- * // Returns original content unchanged immediately
- * ```
- *
- * @see {@link macroCallExpression} for nested inline calls
- * @see {@link isCallExpression} for expression statement handling
- * @see {@link isVariableStatement} for variable declaration handling
- * @see {@link MacrosStateInterface.replacementInfo} for replacement tracking
- *
- * @since 2.0.0
+ * @see evaluate
+ * @since 3.0.0
  */
 
-export async function astProcess(state: StateInterface, variant: string = 'unknow'): Promise<string> {
-    const fnToRemove = state.stage.defineMetadata.disabledMacroNames;
-    const hasMacro = state.stage.defineMetadata.filesWithMacros.has(state.sourceFile.fileName);
-    if (!hasMacro && fnToRemove.size === 0) return state.contents;
+export function defer(state: MacroStateInterface, span: Span, call: MacroCallType, wrap: (value: string) => string): boolean {
+    const edit: SourceEditInterface = { start: span.start, end: span.end, text: '' };
 
-    const stack: Array<ts.Node> = [ state.sourceFile ];
-    const replacements: Set<SubstInterface> = new Set();
-
-    while (stack.length > 0) {
-        const node = stack.pop();
-        const kind = node?.kind;
-        if (!node || !kind) continue;
-        if (hasMacro) {
-            if (kind === ts.SyntaxKind.VariableStatement) {
-                if (await isVariableStatement(node as VariableStatement, replacements, state)) continue;
-            }
-
-            if (kind === ts.SyntaxKind.ExpressionStatement && nodeContainsMacro(node, state.sourceFile)) {
-                if (await isCallExpression(node as ExpressionStatement, replacements, state)) continue;
-            }
-
-            if (kind === ts.SyntaxKind.CallExpression && nodeContainsMacro(node, state.sourceFile)) {
-                if (await macroCallExpression(node as ExpressionStatement, replacements, state)) continue;
-            }
-        }
-
-        if (fnToRemove.size > 0) {
-            if (kind === ts.SyntaxKind.CallExpression) {
-                const callNode = node as ts.CallExpression;
-                if (ts.isIdentifier(callNode.expression) && fnToRemove.has(callNode.expression.text)) {
-                    replacements.add({
-                        start: node.getStart(state.sourceFile),
-                        end: node.getEnd(),
-                        replacement: 'undefined'
-                    });
-                }
-            } else if (kind === ts.SyntaxKind.Identifier) {
-                const identifier = node as ts.Identifier;
-                if (fnToRemove.has(identifier.text)) {
-                    const parent = node.parent ?? node;
-
-                    if (parent && !ts.isImportSpecifier(parent) && !ts.isExportSpecifier(parent)) {
-                        const parentText = parent?.getText(state.sourceFile);
-
-                        if (!ts.isCallExpression(parent) || parent.expression !== node) {
-                            if (!parentText || MACRO_FUNCTIONS.every(key => !parentText.includes(key))) {
-                                replacements.add({
-                                    start: node.getStart(state.sourceFile),
-                                    end: node.getEnd(),
-                                    replacement: 'undefined'
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        const children = node.getChildren(state.sourceFile);
-        for (let i = children.length - 1; i >= 0; i--) {
-            stack.push(children[i]);
-        }
-    }
-
-    if (replacements.size === 0) return state.contents;
-    const replacementsArray = Array.from(replacements);
-    replacementsArray.sort((a, b) => b.start - a.start);
-
-    state.stage.replacementInfo ??= {};
-    state.stage.replacementInfo[variant] ??= [];
-    const replacementInfo = state.stage.replacementInfo[variant];
-
-    for (const { start, end, replacement } of replacementsArray) {
-        replacementInfo.push({
-            source: highlightCode(state.contents.slice(start, end)),
-            replacement: highlightCode(replacement)
+    state.edits.push(edit);
+    state.pending.push(evaluate(state, call).then(value => {
+        edit.text = wrap(value);
+    }, (error: unknown) => {
+        edit.text = wrap('undefined');
+        report(state, call.start, 'error', {
+            detail: error,
+            id: 'macro-inline',
+            text: `${ Macros.inline } failed: ${ (<Error> error)?.message ?? String(error) }`
         });
+    }));
 
-        state.contents = state.contents.slice(0, start) + replacement + state.contents.slice(end);
-    }
-
-    return state.contents;
+    return true;
 }
 
 /**
- * Main transformer directive that processes macro transformations for a build variant.
+ * Whether a node is a macro call this transform handles.
  *
- * @param variant - The build variant service containing configuration and TypeScript services
- * @param context - The load context containing file information, loader type, and build stage
- *
- * @returns A promise resolving to the transformed file result with processed macros, warnings, and errors
+ * @param value - Node to test
+ * @returns `true` when the callee names a macro and the arguments match that name
  *
  * @remarks
- * This is the entry point for macro transformation during the build process, integrated as
- * an esbuild plugin loader. It orchestrates the complete transformation pipeline:
+ * The callee has to be a plain identifier naming one of {@link Macros}, and the arguments have to match the name:
+ * one for `inline`, and two for the conditional pair, the first of which is a string literal naming the flag.
+ * Anything else is an ordinary call and is left alone.
  *
- * **Transformation pipeline**:
- * 1. **File filtering**: Validates file extension and content length
- * 2. **Source file acquisition**: Retrieves or creates TypeScript source file
- * 3. **State initialization**: Prepares transformation state with definitions and metadata
- * 4. **Macro processing**: Applies AST transformations via {@link astProcess}
- * 5. **Alias resolution**: Resolves TypeScript path aliases for non-bundled builds
- * 6. **Result assembly**: Returns transformed content with diagnostics
- *
- * **Early exits**:
- * - Non-TypeScript/JavaScript files: Returns content unchanged
- * - Empty files: Returns content unchanged
- * - Files without macros: Processes but no transformations occur
- *
- * **Alias resolution**:
- * When not bundling (`variant.config.esbuild.bundle === false`), path aliases are
- * resolved to relative paths with `.js` extensions for proper module resolution.
- *
- * **Source file handling**:
- * If the source file isn't in the language service program, it's touched (loaded)
- * to ensure the TypeScript compiler has current file information.
- *
- * @example Basic transformation flow
- * ```ts
- * const context = {
- *   args: { path: 'src/index.ts' },
- *   loader: 'ts',
- *   stage: { defineMetadata: { ... } },
- *   contents: 'const $$debug = $$ifdef("DEBUG", log);'
- * };
- *
- * const result = await transformerDirective(variant, context);
- * // result.contents: transformed code
- * // result.warnings: macro warnings
- * // result.errors: transformation errors
- * ```
- *
- * @example Non-TypeScript file (skipped)
- * ```ts
- * const context = {
- *   args: { path: 'styles.css' },
- *   loader: 'css',
- *   contents: '.class { color: red; }'
- * };
- *
- * const result = await transformerDirective(variant, context);
- * // result.contents === original content (unchanged)
- * ```
- *
- * @example With alias resolution
- * ```ts
- * // Source contains: import { utils } from '@utils/helpers';
- * // Non-bundled build
- * const result = await transformerDirective(variant, context);
- * // Import resolved: import { utils } from './utils/helpers.js';
- * ```
- *
- * @see {@link astProcess} for macro transformation logic
- * @see {@link LanguageHostService.resolveAliases} for alias resolution
- * @see {@link LoadContextInterface} for context structure
- *
- * @since 2.0.0
+ * @see MacroCallType
+ * @since 3.0.0
  */
 
-export async function transformerDirective(variant: VariantService, context: LoadContextInterface): Promise<OnLoadResult | undefined> {
-    const { args, loader, stage, contents, variantName, options, argv } = context;
-    if (args.path.includes('node_modules')) return;
+export function isMacroCall(value: Node): value is MacroCallType {
+    if (value.type !== 'CallExpression' || value.callee.type !== 'Identifier') return false;
 
-    if (contents.length < 1) return;
-    const ext = args.path.slice(args.path.lastIndexOf('.'));
-    if (![ '.js', '.ts' ].includes(ext)) return;
+    const { name } = value.callee;
+    if (name === Macros.inline) return value.arguments.length === 1;
+    if (name !== Macros.ifdef && name !== Macros.ifndef || value.arguments.length !== 2) return false;
 
-    const tsOptions = variant.typescript.languageHostService.getCompilationSettings();
-    const sourceFile = createSourceFile(
-        args.path, contents.toString(), tsOptions.target ?? ts.ScriptTarget.Latest, true
+    const flag = value.arguments[0];
+
+    return flag.type === 'Literal' && typeof flag.value === 'string';
+}
+
+/**
+ * Whether a conditional macro keeps its value.
+ *
+ * @param state - Transform state, read for the definition table
+ * @param call - The `$$ifdef` or `$$ifndef` call to weigh
+ * @returns `true` when the macro's condition holds
+ *
+ * @remarks
+ * `$$ifdef` holds while its flag is set and `$$ifndef` while it is not, which {@link isDefined} answers.
+ * A flag that is not a string literal is read as the empty name, which no table sets.
+ *
+ * @see isDefined
+ * @since 3.0.0
+ */
+
+export function isActive(state: MacroStateInterface, call: MacroCallType): boolean {
+    const flag = call.arguments[0];
+    const name = flag.type === 'Literal' ? String(flag.value) : '';
+
+    return (call.callee.name === Macros.ifdef) === isDefined(state.defines, name);
+}
+
+/**
+ * Whether a node calls a macro that the build dropped.
+ *
+ * @param state - Transform state, read for the dropped names
+ * @param node - Node to test
+ * @returns `true` when the node calls an identifier that the build dropped
+ *
+ * @remarks
+ * How a use of a disabled macro is recognized once its own declaration is gone,
+ * which is what lets the transform replace the call rather than leave it to fail while the output runs.
+ *
+ * @since 3.0.0
+ */
+
+export function isDropped(state: MacroStateInterface, node: Node): boolean {
+    return node.type === 'CallExpression' && node.callee.type === 'Identifier' && state.dropped.has(node.callee.name);
+}
+
+/**
+ * The macro call a node holds, with whatever call followed it.
+ *
+ * @param state - Transform state, read for the source text
+ * @param node - Node to look in, which may be absent
+ * @returns The macro call and its trailing text, or `undefined` where the node holds none
+ *
+ * @remarks
+ * Three shapes reach here.
+ * A macro call on its own yields an empty suffix, a call whose callee is the macro yields the text of the outer
+ * call as the suffix, and a TypeScript `as` expression is unwrapped and retried.
+ *
+ * @see MacroTargetInterface
+ * @since 3.0.0
+ */
+
+export function macroTarget(state: MacroStateInterface, node?: Node | null): MacroTargetInterface | undefined {
+    if (!node) return;
+    if (isMacroCall(node)) return { call: node, suffix: '' };
+    if (node.type === 'TSAsExpression') return macroTarget(state, node.expression);
+    if (node.type !== 'CallExpression' || !isMacroCall(node.callee)) return;
+
+    return { call: node.callee, suffix: state.code.slice(node.callee.end, node.end) };
+}
+
+/**
+ * The name a declaration binds, together with the macro that initializes it.
+ *
+ * @param state - Transform state, read for the source text
+ * @param node - Declaration to look at, exported or bare
+ * @returns The declared name and its macro target, or `undefined` where the node declares no macro
+ *
+ * @remarks
+ * An `export` wrapper is stepped through first, so one test serves the exported form and the bare one alike.
+ * A single declarator alone qualifies, which leaves `const a = $$ifdef('DEV', 1), b = 2` untouched.
+ *
+ * @see DeclaredMacroType
+ * @since 3.0.0
+ */
+
+export function declaredMacro(state: MacroStateInterface, node: Node): DeclaredMacroType | undefined {
+    const declaration = node.type === 'ExportNamedDeclaration' ? node.declaration : node;
+    if (declaration?.type !== 'VariableDeclaration' || declaration.declarations.length !== 1) return;
+
+    const { id, init } = declaration.declarations[0];
+    if (id.type !== 'Identifier') return;
+
+    const target = macroTarget(state, init);
+
+    return target && [ id, target ];
+}
+
+/**
+ * Rewrites an import that names a dropped macro.
+ *
+ * @param state - Transform state the edit is collected on
+ * @param node - Import declaration to prune
+ * @returns `true` when the statement was rewritten
+ *
+ * @remarks
+ * A named specifier bound to a dropped macro is removed, while a default or a namespace import is kept as written.
+ * An import left with no specifiers at all becomes a bare `import 'source';`,
+ * so a module imported for its side effect still runs.
+ *
+ * @since 3.0.0
+ */
+
+export function pruneImport(state: MacroStateInterface, node: ImportDeclaration): boolean {
+    const named: Array<string> = [];
+    const parts: Array<string> = [];
+    let dropped = false;
+
+    for (const specifier of node.specifiers) {
+        const text = state.code.slice(specifier.start, specifier.end);
+
+        if (specifier.type !== 'ImportSpecifier') parts.push(text);
+        else if (state.dropped.has(specifier.local.name)) dropped = true;
+        else named.push(text);
+    }
+
+    if (!dropped) return false;
+    const source = state.code.slice(node.source.start, node.source.end);
+    if (named.length > 0) parts.push(`{ ${ named.join(', ') } }`);
+
+    if (parts.length < 1) return record(state, node, `import ${ source };`);
+
+    return record(state, node, `import ${ parts.join(', ') } from ${ source };`);
+}
+
+/**
+ * Rewrites an export list that names a dropped macro.
+ *
+ * @param state - Transform state the edit is collected on
+ * @param node - Export declaration to prune
+ * @returns `true` when the statement was rewritten
+ *
+ * @remarks
+ * The specifiers that survive are re-emitted as they were written, and a list left with none is deleted outright.
+ * A list that names nothing dropped is reported untouched, so the walk descends into it as usual.
+ *
+ * @since 3.0.0
+ */
+
+export function pruneExport(state: MacroStateInterface, node: ExportNamedDeclaration): boolean {
+    const { specifiers } = node;
+    const kept = specifiers.filter(
+        ({ local }) => !state.dropped.has(local.type === 'Literal' ? local.value : local.name)
     );
 
-    const state: StateInterface = {
-        stage: stage as MacrosStateInterface,
-        errors: [],
-        contents: contents.toString(),
-        warnings: [],
-        defines: variant.config.define ?? {},
-        sourceFile: sourceFile!,
-        context: {
-            argv,
-            options,
-            variantName
-        }
-    };
+    if (kept.length === specifiers.length) return false;
+    if (kept.length < 1) return record(state, node, '');
 
-    let content = await astProcess(state, variant.name);
-    if (!variant.config.esbuild.bundle) {
-        const alias = variant.typescript.languageHostService.aliasRegex;
-        if (alias) {
-            content = variant.typescript.languageHostService.resolveAliases(content, args.path, '.js');
+    return record(state, node, `export { ${ kept.map(item => state.code.slice(item.start, item.end)).join(', ') } };`);
+}
+
+/**
+ * Replaces a declaration whose value comes from a macro.
+ *
+ * @param state - Transform state the edit is collected on
+ * @param node - Declaration to expand, exported or bare
+ * @returns `true` when the declaration was rewritten
+ *
+ * @remarks
+ * A name that does not open with {@link MacroPrefix} draws a `macro-prefix` warning and expands either way.
+ * An `inline` declaration is deferred until its value has run.
+ * A conditional declaration becomes what {@link defineDeclaration} builds while it is active
+ * and is deleted where it is not.
+ *
+ * @since 3.0.0
+ */
+
+export function expandDeclaration(state: MacroStateInterface, node: Node): boolean {
+    const declared = declaredMacro(state, node);
+    if (!declared) return false;
+
+    const [ id, target ] = declared;
+    const { call, suffix } = target;
+    const prefix = node.type === 'ExportNamedDeclaration' ? 'export ' : '';
+
+    if (!id.name.startsWith(MacroPrefix)) report(state, id.start, 'warning', {
+        id: 'macro-prefix',
+        text: `Macro '${ id.name }' does not start with the '${ MacroPrefix }' prefix to avoid conflicts`
+    });
+
+    if (call.callee.name === Macros.inline)
+        return defer(state, node, call, value => `${ prefix }const ${ id.name } = ${ value }${ suffix };`);
+
+    return record(state, node, isActive(state, call) ? defineDeclaration(state.code, id.name, target, prefix) : '');
+}
+
+/**
+ * Replaces a macro used as a value.
+ *
+ * @param state - Transform state the edit is collected on
+ * @param node - Node the replacement stands in for
+ * @param target - The macro call and whatever call followed it
+ * @param statement - Whether the macro stands as a statement of its own
+ * @returns `true`, since every call that reaches here rewrites something
+ *
+ * @remarks
+ * An `inline` call is deferred until its value has run.
+ * A conditional call becomes what {@link defineExpression} builds while it is active.
+ * An inactive one leaves nothing behind as a statement, and `undefined` where a value is expected.
+ *
+ * @since 3.0.0
+ */
+
+export function expand(state: MacroStateInterface, node: Node, target: MacroTargetInterface, statement: boolean): boolean {
+    const { call, suffix } = target;
+
+    if (call.callee.name === Macros.inline)
+        return defer(state, node, call, value => statement ? '' : `${ value }${ suffix }`);
+
+    if (!isActive(state, call)) return record(state, node, statement ? '' : 'undefined');
+
+    return record(state, node, defineExpression(state.code, target, statement));
+}
+
+/**
+ * Rewrites one node and reports whether the walk should stop there.
+ *
+ * @param state - Transform state the edits are collected on
+ * @param node - Node the walk arrived at
+ * @param parent - Node it hangs from, `null` at the root
+ * @param key - Property of the parent it sits under
+ * @returns `true` when the node was rewritten and the walk should not descend into it
+ *
+ * @remarks
+ * The visitor the rewriting walk runs, dispatching on the type of the node:
+ *
+ * - **An identifier** - a dropped name becomes `undefined` where it is read, and is left alone where it only names
+ *   something, which {@link MacroNameKeys} and the parent's `computed` flag decide between.
+ * - **An import or an export list** - pruned of the names the build dropped.
+ * - **A declaration** - expanded, or pruned where it re-exports rather than declares.
+ * - **An expression statement or a call** - expanded, or replaced where it calls something dropped.
+ *
+ * Any other node is reported untouched, so the walk descends into it.
+ *
+ * @since 3.0.0
+ */
+
+export function expandNode(state: MacroStateInterface, node: Node, parent: Node | null, key: string): boolean {
+    switch (node.type) {
+        case 'Identifier': {
+            if (!state.dropped.has(node.name) || !parent) return false;
+
+            const keyed = key === 'key' || key === 'property';
+            const named = keyed ? !('computed' in parent) || !parent.computed : MacroNameKeys.has(key);
+
+            return !named && record(state, node, 'undefined');
+        }
+
+        case 'ImportDeclaration':
+            return pruneImport(state, node);
+
+        case 'ExportNamedDeclaration':
+            if (expandDeclaration(state, node)) return true;
+            if (node.source || node.specifiers.length < 1) return false;
+
+            return pruneExport(state, node);
+
+        case 'VariableDeclaration':
+            return expandDeclaration(state, node);
+
+        case 'ExpressionStatement': {
+            if (isDropped(state, node.expression)) return record(state, node, '');
+            const target = macroTarget(state, node.expression);
+
+            return target !== undefined && expand(state, node, target, true);
+        }
+
+        case 'CallExpression':
+        case 'TSAsExpression': {
+            if (isDropped(state, node)) return record(state, node, 'undefined');
+            const target = macroTarget(state, node);
+
+            return target !== undefined && expand(state, node, target, false);
         }
     }
 
-    return { loader, contents: content, warnings: state.warnings, errors: state.errors };
+    return false;
+}
+
+/**
+ * Expands every macro in a file and returns the rewritten source.
+ *
+ * @param parse - The file's parse result, walked rather than parsed again
+ * @param target - Absolute path of the file, named in messages and used to resolve an inline value's packages
+ * @param content - Source text of the file
+ * @param context - Lifecycle context, read for the logs, the flags, and the names the build has dropped
+ * @returns The rewritten source, or `content` itself where there was nothing to expand
+ *
+ * @remarks
+ * An empty file comes back untouched, and so does any file under `node_modules`.
+ * So does a file that carries no {@link MacroPrefix}, unless an earlier file dropped a name this one may still use.
+ * A first walk over a file carrying {@link MacroScanHint} collects the conditional macros that are not active and
+ * adds their names to the set the build shares, so dropping a name where it was declared.
+ * also drops it where it is imported.
+ * The rewriting walk follows, and any deferred `inline` value is awaited before the edits are applied.
+ *
+ * @example
+ * ```ts
+ * // source: export const $$dev = $$ifdef('DEV', () => log());
+ * await transformMacros(parse, '/src/a.ts', content, context);
+ * // result: export function $$dev() { return log(); } - while DEV is set
+ * ```
+ *
+ * @see analyzeMacros
+ * @see MacroStateInterface
+ *
+ * @since 3.0.0
+ */
+
+export async function transformMacros(
+    parse: ParseResult, target: string, content: string, context: LifecycleContextInterface
+): Promise<string> {
+    if (content.length < 1 || target.includes('node_modules')) return content;
+
+    const { dropped } = context.stage;
+    if (dropped.size < 1 && !content.includes(MacroPrefix)) return content;
+
+    const state: MacroStateInterface = {
+        target,
+        dropped,
+        code: content,
+        logs: context.logs,
+        edits: [],
+        pending: [],
+        defines: context.options.define ?? {},
+        overrides: context.overrides
+    };
+
+    if (content.includes(MacroScanHint)) walk(parse.program, node => {
+        const declared = declaredMacro(state, node);
+        if (!declared) return false;
+
+        const [ id, { call }] = declared;
+        if (call.callee.name !== Macros.inline && !isActive(state, call)) dropped.add(id.name);
+
+        return false;
+    });
+
+    walk(parse.program, expandNode.bind(null, state));
+    if (state.pending.length > 0) await Promise.all(state.pending);
+
+    return applyEdits(content, state.edits);
 }
