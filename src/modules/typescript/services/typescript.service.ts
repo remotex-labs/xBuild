@@ -227,15 +227,22 @@ export class TypescriptService {
     /**
      * Reparses the configuration of every shared instance whose file has changed.
      *
+     * @param force - Whether every instance reparses regardless of whether its configuration file has moved
      * @returns The configuration paths reparsed by this call, in the order their instances were acquired
      *
      * @remarks
      * This walks the whole shared cache rather than reaching one instance through a holder.
      * A single call after a watch event covers every project in the process,
      * and a configuration several consumers share is reparsed once rather than once per consumer.
+     *
      * Each version comes from the shared file model as it stands rather than from disk,
      * since re-reading a changed file is the watcher's part,
      * so an instance whose configuration has not moved costs a map lookup and nothing more.
+     *
+     * Forcing skips that comparison and reparses every instance
+     * that catches a change the configuration file's own version misses, such as an edit to a file it extends.
+     * The cost is the state of every project in the process rather than the state of what moved.
+     *
      * A change discards everything the old options fed:
      * the file set, the resolution cache, the cached declarations, the cached diagnostics, and the builder program,
      * so the next {@link check} runs as a full pass.
@@ -245,8 +252,9 @@ export class TypescriptService {
      * ```ts
      * const service = inject(TypescriptService, 'tsconfig.json');
      *
-     * TypescriptService.reload(); // [] - nothing has been written since the configuration was read
-     * TypescriptService.reload(); // [ 'tsconfig.json' ] - reparsed, and service.config describes the edit
+     * TypescriptService.reload();     // [] - nothing has been written since the configuration was read
+     * TypescriptService.reload();     // [ 'tsconfig.json' ] - reparsed, and service.config describes the edit
+     * TypescriptService.reload(true); // [ 'tsconfig.json' ] - reparsed with nothing written since
      * ```
      *
      * @see check
@@ -255,10 +263,10 @@ export class TypescriptService {
      * @since 3.0.0
      */
 
-    static reload(): Array<string> {
+    static reload(force: boolean = false): Array<string> {
         const reloaded: Array<string> = [];
         for (const [ path, entry ] of TypescriptService.cache) {
-            if (entry.instance.refresh()) reloaded.push(path);
+            if (entry.instance.refresh(force)) reloaded.push(path);
         }
 
         return reloaded;
@@ -571,6 +579,7 @@ export class TypescriptService {
     /**
      * Rebuilds everything this instance derives from its compiler options once its configuration file has moved.
      *
+     * @param force - Whether the rebuild runs even though the configuration file's version has not moved
      * @returns Whether the configuration was reparsed
      *
      * @remarks
@@ -579,14 +588,18 @@ export class TypescriptService {
      * The version is the one the shared file model already holds,
      * since re-reading a file that changed is the watcher's part,
      * so this observes a change rather than going looking for one.
+     * Forcing drops that guard and rebuilds regardless,
+     * which is the only way through for a change the version leaves out.
+     * The version is taken and stored either way,
+     * so a forced rebuild leaves nothing behind for the next call to mistake for a change.
      *
      * @see reload
      * @since 3.0.0
      */
 
-    private refresh(): boolean {
+    private refresh(force: boolean = false): boolean {
         const { version } = this.languageHostService.filesCache.touch(this.configPath);
-        if (version === this.configVersion) return false;
+        if (!force && version === this.configVersion) return false;
 
         this.configVersion = version;
         this.parsedConfig = this.parseConfig();
