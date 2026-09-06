@@ -1,233 +1,82 @@
 /**
- * Import will remove at compile time
- */
-
-import type { VariantService } from '@services/variant.service';
-import type { PartialMessage, Location, OnLoadResult } from 'esbuild';
-import type { BuildContextInterface } from '@providers/interfaces/lifecycle-provider.interface';
-import type { MacrosMetadataInterface } from '@directives/interfaces/analyze-directive.interface';
-
-/**
  * Imports
  */
 
-import { inject } from '@symlinks/symlinks.module';
-import { FilesModel } from '@typescript/models/files.model';
+import { parseSync } from 'oxc-parser';
+import { inject } from '@remotex-labs/xinject';
+import { FilesModel } from '@models/files.model';
+import { isDefined } from '@directives/define.directive';
+import { Macros, MacroScanHint } from '@constants/macros.constant';
 
 /**
- * Constants
- */
-
-const MACRO_PREFIX = '$$';
-const IFDEF_REGEX = /(?:(?:export\s+)?(?:const|let|var)\s+([\w$]+)\s*=\s*)?\$\$(ifdef|ifndef|inline)\s*\(\s*(?:['"]([^'"]+)['"])?/g;
-
-/**
- * Calculates the line and column position of a macro name within source text.
+ * Collects the names of the macro declarations a build is to drop.
  *
- * @param text - The complete source file content
- * @param name - The macro name to locate
- * @param file - The file path for location reporting
- * @param index - The starting index in the text where the match was found
- * @returns A partial {@link Location} object containing file, line, and column information
- *
- * @since 2.0.0
- */
-
-export function getLineAndColumn(text: string, name: string, file: string, index: number): Partial<Location> {
-    let line = 1;
-    for (let i = 0; i < index; i++) if (text[i] === '\n') line++;
-    const startLinePosition = text.lastIndexOf('\n', index - 1) + 1;
-
-    return {
-        file,
-        line,
-        column: text.indexOf(name, startLinePosition) - startLinePosition
-    };
-}
-
-/**
- * Determines whether a given position in source code is within a comment.
- *
- * @param content - The complete source file content
- * @param index - The position to check
- * @returns `true` if the position is within a single-line (`//`), multi-line (`\/* *\/`), or JSDoc comment, otherwise `false`
+ * @param files - Paths to scan, relative or absolute
+ * @param defines - The definition table the build substitutes, holding the source text each flag stands for
+ * @returns The names bound to a conditional macro whose condition does not hold
  *
  * @remarks
- * Scans backward from the given index to the start of the line, skipping whitespace.
- * Checks if the first non-whitespace characters form a comment start sequence.
- * This is used to avoid processing macros that appear in comments.
+ * Each file is read through {@link FilesModel}, so a path already tracked is served from the cache rather than
+ * from the disk, and a path that is missing is skipped.
+ * A file is parsed only once it contains {@link MacroScanHint}, which spares the parse where no conditional
+ * macro can be.
  *
- * @example Single-line comment detection
+ * - **What is looked at** - an exported top-level binding alone, `export const NAME = $$ifdef('FLAG')` or its
+ *   `$$ifndef` counterpart. A macro nested in a block, or bound without an export, is not seen.
+ * - **What counts as defined** - a definition holds source text rather than a value, so the text is what decides.
+ *   Anything in {@link MacroFalsyDefines} leaves the flag unset, as does a flag that the table does not name.
+ *   Every other text sets the flag, `'0'` and the empty string among them.
+ * - **What ends up in the set** - an `$$ifdef` name whose flag is absent, and an `$$ifndef` name whose flag is
+ *   present. {@link Macros.inline} is not read here.
+ *
+ * @example
  * ```ts
- * const code = '// const $$debug = $$ifdef("DEBUG");\nconst $$prod = $$ifdef("PROD");';
+ * // src/feature.ts
+ * export const $$dev = $$ifdef('DEV');
+ * export const $$release = $$ifndef('DEV');
  *
- * const debugIndex = code.indexOf('$$debug');
- * console.log(isCommentLine(code, debugIndex)); // true
- *
- * const prodIndex = code.indexOf('$$prod');
- * console.log(isCommentLine(code, prodIndex)); // false
+ * analyzeMacros([ 'src/feature.ts' ], { DEV: 'true' });  // Set { '$$release' }
+ * analyzeMacros([ 'src/feature.ts' ], { DEV: 'false' }); // Set { '$$dev' }
  * ```
  *
- * @example Multi-line comment detection
- * ```ts
- * const code = `/*
- *  * const $$feature = $$ifdef("FEATURE");
- *  *\/
- * const $$active = $$ifdef("ACTIVE");`;
+ * @see Macros
+ * @see isDefined
+ * @see MacroScanHint
  *
- * const featureIndex = code.indexOf('$$feature');
- * console.log(isCommentLine(code, featureIndex)); // true
- *
- * const activeIndex = code.indexOf('$$active');
- * console.log(isCommentLine(code, activeIndex)); // false
- * ```
- *
- * @example Indented code
- * ```ts
- * const code = '    // Commented macro\n    const $$real = $$ifdef("REAL");';
- * const index = code.indexOf('// Commented');
- * console.log(isCommentLine(code, index)); // true
- * ```
- *
- * @since 2.0.0
+ * @since 3.0.0
  */
 
-export function isCommentLine(content: string, index: number): boolean {
-    let lineStart = content.lastIndexOf('\n', index - 1) + 1;
-
-    while (lineStart < index && (content[lineStart] === ' ' || content[lineStart] === '\t')) {
-        lineStart++;
-    }
-
-    if (lineStart >= index) return false;
-
-    const char1 = content[lineStart];
-    const char2 = content[lineStart + 1];
-
-    return (char1 === '/' && (char2 === '/' || char2 === '*')) || char1 === '*';
-}
-
-/**
- * Analyzes all project files for macro usage and generates metadata about disabled macros.
- *
- * @param variant - The current build variant containing define configurations
- * @param context - The build context to store metadata and configuration
- * @returns A promise resolving to an {@link AnalyzerMessageInterface} containing any warnings
- *
- * @remarks
- * Scans all entry point dependencies for `$$ifdef` and `$$ifndef` macro declarations.
- * Determines which macros should be disabled based on the variant's definition configuration.
- * Generates warnings for macros that don't follow the `$$` naming convention.
- * Stores results in `context.stage.defineMetadata` for use during the build process.
- *
- * @example Basic macro analysis with definitions
- * ```ts
- * const variant = {
- *   config: {
- *     define: {
- *       DEBUG: true,
- *       PRODUCTION: false
- *     }
- *   }
- * };
- *
- * const context = {
- *   build: {
- *     initialOptions: {
- *       entryPoints: ['src/index.ts']
- *     }
- *   },
- *   stage: {}
- * };
- *
- * const result = await analyzeMacroMetadata(variant, context);
- *
- * // context.stage.defineMetadata now contains:
- * // {
- * //   disabledMacroNames: Set(['$$noProd']),  // from $$ifndef('PRODUCTION')
- * //   filesWithMacros: Set(['src/index.ts', 'src/config.ts'])
- * // }
- *
- * console.log(result.warnings); // Array of warnings for improperly named macros
- * ```
- *
- * @example Handling ifdef vs. ifndef
- * ```ts
- * // the Source file contains:
- * // const $$hasDebug = $$ifdef('DEBUG'); // enabled when DEBUG=true
- * // const $$noDebug = $$ifndef('DEBUG'); // enabled when DEBUG=false
- *
- * const variant = {
- *   config: {
- *     define: { DEBUG: true }
- *   }
- * };
- *
- * await analyzeMacroMetadata(variant, context);
- * // disabledMacroNames will contain: Set(['$$noDebug'])
- * ```
- *
- * @example Warning generation for invalid macro names
- * ```ts
- * // Source contains: const myMacro = $$ifdef('FEATURE');
- * // (missing $$ prefix)
- *
- * const result = await analyzeMacroMetadata(variant, context);
- *
- * console.log(result.warnings);
- * // [{
- * //   text: "Macro function 'myMacro' not start with '$$' prefix to avoid conflicts",
- * //   location: { file: 'src/feature.ts', line: 10, column: 6 }
- * // }]
- * ```
- *
- * @see {@link MacrosMetadataInterface}
- *
- * @since 2.0.0
- */
-
-export async function analyzeMacroMetadata(variant: VariantService, context: BuildContextInterface): Promise<OnLoadResult> {
-    const metadata: MacrosMetadataInterface = {
-        disabledMacroNames: new Set(),
-        filesWithMacros: new Set()
-    };
-
-    context.stage.defineMetadata = metadata;
-
-    const warnings: Array<PartialMessage> = [];
+export function analyzeMacros(files: Iterable<string>, defines: Record<string, string>): Set<string> {
+    const dropped = new Set<string>();
     const filesModel = inject(FilesModel);
-    const defines = variant.config.define ?? {};
-    const files = Object.values(variant.dependencies ?? {});
 
     for (const file of files) {
-        const content = filesModel.getOrTouchFile(file)?.contentSnapshot?.text;
-        if (!content) continue;
+        const content = filesModel.touch(file).snapshot?.text;
 
-        const resolvedFile = filesModel.resolve(file);
+        if (!content?.includes(MacroScanHint)) continue;
+        const { program } = parseSync(file, content, { sourceType: 'module' });
 
-        IFDEF_REGEX.lastIndex = 0;
-        for (const match of content.matchAll(IFDEF_REGEX)) {
-            const matchIndex = match.index!;
-            if (isCommentLine(content, matchIndex)) continue;
+        for (const node of program.body) {
+            if (node.type !== 'ExportNamedDeclaration') continue;
+            if (node.declaration?.type !== 'VariableDeclaration') continue;
 
-            const [ , fn, directive, define ] = match;
-            metadata.filesWithMacros.add(resolvedFile);  // always register the file
-            if (!fn) continue;
+            for (const declarator of node.declaration.declarations) {
+                const call = declarator.init;
+                if (call?.type !== 'CallExpression' || call.callee.type !== 'Identifier') continue;
 
-            if (!fn.startsWith(MACRO_PREFIX)) {
-                warnings.push({
-                    text: `Macro function '${ fn }' not start with '${ MACRO_PREFIX }' prefix to avoid conflicts`,
-                    location: getLineAndColumn(content, fn, file, matchIndex)
-                });
-            }
+                const directive = call.callee.name;
+                if (directive !== Macros.ifdef && directive !== Macros.ifndef) continue;
 
-            if(directive === 'inline') continue;
-            const isDefined = !!defines[define];
-            if ((directive === 'ifndef') === isDefined) {
-                metadata.disabledMacroNames.add(fn);
+                const arg = call.arguments[0];
+                if (arg?.type !== 'Literal' || typeof arg.value !== 'string') continue;
+                if (declarator.id.type !== 'Identifier') continue;
+
+                if ((directive === Macros.ifdef) !== isDefined(defines, arg.value)) {
+                    dropped.add(declarator.id.name);
+                }
             }
         }
     }
 
-    return { warnings };
+    return dropped;
 }
