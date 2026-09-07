@@ -64,12 +64,11 @@ describe('VariantService', () => {
     }
 
     /**
-     * Runs the plugin build registers and hands back what it wired up.
+     * The esbuild plugin build, collecting each callback the plugin registers on it.
      */
 
-    async function lifecycle(options: any = {}): Promise<any> {
-        const handlers: any = {};
-        const build = {
+    function pluginBuild(handlers: any, options: any = {}): any {
+        return {
             esbuild: <any> { version: '0.28.2' },
             onEnd: (fn: any): void => handlers.end = fn,
             onStart: (fn: any): void => handlers.start = fn,
@@ -77,6 +76,15 @@ describe('VariantService', () => {
             onResolve: (_: unknown, fn: any): void => handlers.resolve = fn,
             initialOptions: { outdir: 'dist', entryPoints: { index: 'src/index.ts' }, ...options }
         };
+    }
+
+    /**
+     * Runs the plugin build registers and hands back what it wired up.
+     */
+
+    async function lifecycle(options: any = {}): Promise<any> {
+        const handlers: any = {};
+        const build = pluginBuild(handlers, options);
 
         await service.build();
         handlers.plugin = buildFilesMock.mock.calls[0][0].plugins[0];
@@ -246,6 +254,76 @@ describe('VariantService', () => {
             buildFilesMock.mockRejectedValue(new Error('esbuild died'));
 
             expect(await service.build()).toEqual({ info: [], verbose: [], errors: [], warnings: [] });
+        });
+
+        test('should announce the end of a build esbuild turned away before the start stage', async () => {
+            buildFilesMock.mockImplementation(async (options: any) => {
+                await options.plugins[0].setup(pluginBuild({}));
+
+                throw Object.assign(new Error('Build failed with 1 error'), {
+                    errors: [{ text: '"target" must be a string or an array of strings' }],
+                    warnings: []
+                });
+            });
+
+            await service.build();
+
+            expect(events.next).toHaveBeenCalledWith(expect.objectContaining({
+                type: 'end',
+                duration: expect.any(Number),
+                buildResult: expect.objectContaining({ metafile: undefined, outputFiles: undefined })
+            }));
+        });
+
+        test('should announce that end under the context the plugin was handed', async () => {
+            let handed: unknown;
+            buildFilesMock.mockImplementation(async (options: any) => {
+                const handlers: any = {};
+                await options.plugins[0].setup(pluginBuild(handlers, { minify: true }));
+                handed = events.next.mock.calls[0][0].context;
+
+                throw new Error('"target" must be a string or an array of strings');
+            });
+
+            await service.build();
+            const [ event ] = events.next.mock.calls[events.next.mock.calls.length - 1];
+
+            expect(event.type).toBe('end');
+            expect(event.context).toBe(handed);
+            expect(event.context.options).toEqual(expect.objectContaining({ minify: true }));
+        });
+
+        test('should carry the messages the setup stage filed on that end', async () => {
+            dependenciesMock.mockRejectedValue(Object.assign(new Error('Build failed with 1 error'), {
+                errors: [{ text: '"target" must be a string or an array of strings', detail: undefined }],
+                warnings: []
+            }));
+
+            buildFilesMock.mockImplementation(async (options: any) => {
+                await options.plugins[0].setup(pluginBuild({}));
+
+                throw new Error('Build failed with 1 error');
+            });
+
+            const result = await service.build();
+
+            expect(result.errors).toEqual([ expect.objectContaining({ text: '"target" must be a string or an array of strings' }) ]);
+            expect(result.errors).toHaveLength(1);
+        });
+
+        test('should leave the end of a build that reached the start stage to the plugin', async () => {
+            buildFilesMock.mockImplementation(async (options: any) => {
+                const handlers: any = {};
+                await options.plugins[0].setup(pluginBuild(handlers));
+                await handlers.start();
+
+                throw new Error('Build failed with 1 error');
+            });
+
+            await service.build();
+
+            expect(events.next).toHaveBeenCalledWith(expect.objectContaining({ type: 'start' }));
+            expect(events.next.mock.calls.filter(([ event ]: any) => event.type === 'end')).toHaveLength(0);
         });
 
         test('should refuse to build once it is disposed', async () => {
