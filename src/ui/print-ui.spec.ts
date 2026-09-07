@@ -150,6 +150,13 @@ describe('print.ui', () => {
             expect(resolveMock).not.toHaveBeenCalled();
         });
 
+        test('should leave a path inside the framework tree as it stands', () => {
+            const dependency = `${ cwd }/node_modules/@remotex-labs/xbuild/node_modules/esbuild/lib/main.js`;
+
+            expect(sourcePath(dependency)).toBe(dependency);
+            expect(resolveMock).not.toHaveBeenCalled();
+        });
+
         test('should leave a source naming a url as it stands', () => {
             expect(sourcePath('https://github.com/x/y.ts')).toBe('https://github.com/x/y.ts');
             expect(resolveMock).not.toHaveBeenCalled();

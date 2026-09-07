@@ -14,10 +14,10 @@ import type { ResolveMetadataInterface } from '@providers/interfaces/stack-provi
 import { resolve } from 'path';
 import { stdout } from 'process';
 import { prefix } from '@ui/banner.ui';
-import { relative } from '@remotex-labs/xmap';
 import { inject } from '@remotex-labs/xinject';
 import { stripAnsi } from '@remotex-labs/xansi';
 import { cursorTo, clearScreenDown } from 'readline';
+import { dirname, relative } from '@remotex-labs/xmap';
 import { xterm } from '@remotex-labs/xansi/xterm.component';
 import { getErrorMetadata } from '@providers/stack.provider';
 import { FrameworkService } from '@services/framework.service';
@@ -124,9 +124,11 @@ export function pad(text: string, size: number): string {
 
 export function sourcePath(file: string): string {
     if (file.includes('://')) return file;
-    const absolute = file.startsWith('.')
-        ? resolve(inject(FrameworkService).frameworkRoot, file)
-        : FrameworkService.resolve(file);
+
+    const frameworkRoot = inject(FrameworkService).frameworkRoot;
+    if (file.includes(dirname(frameworkRoot))) return file;
+
+    const absolute = file.startsWith('.') ? resolve(frameworkRoot, file) : FrameworkService.resolve(file);
 
     return relative(process.cwd(), absolute);
 }
