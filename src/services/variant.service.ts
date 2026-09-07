@@ -269,10 +269,15 @@ export class VariantService {
      * @throws xBuildError - When the variant has already been disposed
      *
      * @remarks
+     * The context is raised here rather than inside the plugin, so it outlives a run the plugin never filled in.
+     * Its `options` block stands empty until the plugin writes the ones esbuild resolved onto it.
      * esbuild runs at `silent` with no log limit, so every message reaches the result through the plugin
      * instead of the console, and nothing is dropped for being the hundredth of its kind.
      * A build that fails resolves to an empty esbuild result rather than rejecting,
      * since what went wrong is already in the logs the plugin collected.
+     * A rejection the start stage never saw is announced here instead:
+     * esbuild validates the options only once every plugin is set up,
+     * so an option it turns away leaves the run with no stage left to report its end.
      *
      * @example
      * ```ts
@@ -282,21 +287,57 @@ export class VariantService {
      * ```
      *
      * @see BuildResultInterface
+     * @see LifecycleContextInterface
+     *
      * @since 3.0.0
      */
 
     async build(): Promise<BuildResultInterface> {
         if (this.isDisposed) throw new xBuildError(`Variant ${ this.name } is disposed`);
 
-        const logs: LifecycleLogsType = { info: [], verbose: [], error: [], warning: [] };
+        const context: LifecycleContextInterface = {
+            argv: this.argv,
+            options: {},
+            overrides: this.buildConfig.logOverride!,
+            variantName: this.name,
+            logs: {
+                info: [],
+                error: [],
+                verbose: [],
+                warning: []
+            },
+            stage: {
+                startTime: new Date(),
+                dropped: new Set<string>(),
+                reachableFiles: new Set<string>()
+            }
+        };
+
         const result = await buildFiles({
             ...this.buildConfig.esbuild,
-            plugins: [ this.lifecycle(logs) ],
+            plugins: [ this.lifecycle(context) ],
             logLimit: 0,
             logLevel: 'silent'
-        }).catch(() => <BuildResult> {});
+        }).catch(() => {
+            if(!context.stage.start) {
+                this.events$.next({
+                    context,
+                    type: 'end',
+                    duration: Date.now() - context.stage.startTime.getTime(),
+                    buildResult: this.toResult({
+                        errors: [],
+                        warnings: [],
+                        metafile: undefined,
+                        outputFiles: undefined,
+                        mangleCache: undefined
+                    }, context.logs)
+                });
+            }
 
-        return this.toResult(result, logs);
+            return <BuildResult> {};
+        });
+
+        return this.toResult(result, context.logs);
     }
 
     /**
@@ -580,7 +621,10 @@ export class VariantService {
      * @returns The errors collected so far, which is what fails the build when any were
      *
      * @remarks
-     * The start hooks run first, and the sources are type-checked only where nothing has failed yet,
+     * The stage marks itself on `stage.start` ahead of everything else,
+     * which is what tells {@link VariantService.build} that a rejection belongs to a build that began
+     * rather than to options esbuild turned away before it did.
+     * The start hooks run next, and the sources are type-checked only where nothing has failed yet,
      * since diagnostics against a build that already broke report noise rather than a cause.
      * The check covers the files the setup stage recorded on the stage,
      * so a build reports against its own inputs without scanning for them a second time.
@@ -594,6 +638,8 @@ export class VariantService {
 
     private async start(context: LifecycleContextInterface, esbuild: PluginBuild['esbuild']): Promise<OnStartResult> {
         const { logs } = context;
+        context.stage.start = true;
+
         await this.dispatch(logs, hook => hook.onStart?.({ context, esbuild }));
         if (this.buildConfig.types && logs.error.length < 1) {
             const types = this.buildConfig.types;
@@ -794,13 +840,14 @@ export class VariantService {
     /**
      * Builds the esbuild plugin this variant runs as.
      *
-     * @param logs - Buckets every stage of the run files its messages under
+     * @param context - Context shared by every hook of this build, which the plugin writes the resolved options onto
      * @returns The plugin, named after the variant
      *
      * @remarks
-     * The context is created once per build and handed to every stage,
+     * The context comes from the caller rather than being raised here and is handed to every stage,
      * which is what makes `stage` a place one hook leaves a value for a later one.
-     * Its two sets start empty, and setup fills them before the first hook reads one.
+     * Its `options` are written as the plugin is set up, since esbuild settles them only by then,
+     * and its two sets start empty for setup to fill before the first hook reads one.
      * The four esbuild callbacks are registered before setup runs,
      * so a hook changing an option during setup is still ahead of the first file being read.
      * The plugin carries the variant's name, so message esbuild attributes to it read as the variant.
@@ -809,23 +856,11 @@ export class VariantService {
      * @since 3.0.0
      */
 
-    private lifecycle(logs: LifecycleLogsType): Plugin {
+    private lifecycle(context: LifecycleContextInterface): Plugin {
         return {
             name: this.name,
             setup: async (build: PluginBuild): Promise<void> => {
-                const context: LifecycleContextInterface = {
-                    logs,
-                    argv: this.argv,
-                    options: build.initialOptions,
-                    overrides: this.buildConfig.logOverride!,
-                    variantName: this.name,
-                    stage: {
-                        startTime: new Date(),
-                        dropped: new Set<string>(),
-                        reachableFiles: new Set<string>()
-                    }
-                };
-
+                context.options = build.initialOptions;
                 build.onEnd(this.end.bind(this, context));
                 build.onStart(this.start.bind(this, context, build.esbuild));
                 build.onLoad({ filter: /.*/ }, this.load.bind(this, context));
