@@ -512,7 +512,14 @@ export class VariantService {
      * A value resolving to `null` or `undefined` is left out rather than written as text,
      * which is how a definition can decline to apply to a given variant.
      *
+     * A `banner` and a `footer` hold code, so a string is written as it stands.
+     * A `define` holds an expression instead and takes the quoted form {@link stringify} gives it,
+     * since esbuild reads a bare `1.0.0` as an expression rather than as text.
+     * A value of any other type goes through {@link stringify} whichever block it belongs to.
+     *
+     * @see stringify
      * @see TextBlocks
+     *
      * @since 3.0.0
      */
 
@@ -523,7 +530,8 @@ export class VariantService {
         const target = options[type] ??= {};
         for (const [ key, value ] of Object.entries(source)) {
             const content = typeof value === 'function' ? value(this.name, this.argv) : value;
-            if (content !== undefined && content !== null) target[key] = stringify(content);
+            if (content === undefined || content === null) continue;
+            target[key] = type !== 'define' && typeof content === 'string' ? content : stringify(content);
         }
     }
 

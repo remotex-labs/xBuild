@@ -459,7 +459,7 @@ describe('VariantService', () => {
             configure({ banner: { js: '// built by xbuild' }, define: { __VERSION: '1.0.0' } });
             const { build } = await lifecycle();
 
-            expect(build.initialOptions.banner).toEqual({ js: '"// built by xbuild"' });
+            expect(build.initialOptions.banner).toEqual({ js: '// built by xbuild' });
             expect(build.initialOptions.define).toEqual({ __VERSION: '"1.0.0"' });
         });
 
@@ -469,7 +469,7 @@ describe('VariantService', () => {
             const { build } = await lifecycle();
 
             expect(footer).toHaveBeenCalledWith('esm', { watch: true });
-            expect(build.initialOptions.footer).toEqual({ js: '"the end"' });
+            expect(build.initialOptions.footer).toEqual({ js: 'the end' });
         });
 
         test('should pass over a block that stands for nothing', async () => {
@@ -483,7 +483,7 @@ describe('VariantService', () => {
             configure({ banner: { js: 'from the configuration' } });
             const { build } = await lifecycle({ banner: { css: '/* kept */' } });
 
-            expect(build.initialOptions.banner).toEqual({ css: '/* kept */', js: '"from the configuration"' });
+            expect(build.initialOptions.banner).toEqual({ css: '/* kept */', js: 'from the configuration' });
         });
 
         test('should leave the options alone when it names no block', async () => {
