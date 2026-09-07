@@ -2,6 +2,28 @@
 
 What changed in the notable releases of `@remotex-labs/xbuild`.
 
+## v3.0.2
+
+- **Fixed**: A [`banner`](/configuration/file#define) or a `footer` written as a string now reaches esbuild as the
+  code it is, rather than as a JSON string. `banner: { js: '#!/usr/bin/env node' }` emitted
+  `"#!/usr/bin/env node"` at the top of the output, a string expression standing where the shebang belonged.
+  A `define` is unchanged, since it holds an expression rather than code, so a string there still arrives quoted
+  as `"1.0.0"`.
+- **Fixed**: A build esbuild turns away over an invalid option now reports the option and announces its end.
+  esbuild sets a plugin up before it validates the options, so such a build had its start announced and nothing
+  left to announce its end: `onEnd` and `onSuccess` never ran, no end event reached the terminal or a watcher,
+  and the result carried no errors at all. The messages are filed once, whichever stage found the option first.
+
+## v3.0.1
+
+- **Fixed**: Declarations are emitted through the project's own TypeScript program rather than through oxc's
+  isolated-declarations pass, which carries no type checker. A property whose type had to be inferred was dropped
+  from the emitted type literal rather than degraded. `const Num = { UInt8: Uint8Array } as const` came out as
+  `declare const Num: {}`, and every `keyof typeof Num` downstream then resolved against an empty object. Macros
+  stay on oxc, so only the declaration half of the 3.0.0 move went back to the compiler.
+- **Removed**: `oxc-transform` as a dependency, and the platform binaries of its pass with it. `oxc-parser` stays,
+  since the emitted declaration text is still parsed with it.
+
 ## v3.0.0
 
 A rewrite of the compiler-facing half of xBuild. Macros and the declaration pipeline moved from TypeScript's own

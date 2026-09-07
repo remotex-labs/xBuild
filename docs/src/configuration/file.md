@@ -211,7 +211,7 @@ Declarations are emitted after a build that produced no errors. Which emit runs 
 - **`bundle: false`** - one `.d.ts` per input file.
 
 ::: warning 🗑️ Removed in 3.0.0
-`declaration.bundle` is gone. The declaration pipeline was rebuilt on oxc and now follows `esbuild.bundle`, so a
+`declaration.bundle` is gone. The declaration pipeline was rebuilt and now follows `esbuild.bundle`, so a
 bundled build gets bundled types and an unbundled one gets per-file types with nothing extra to state.
 :::
 
@@ -234,6 +234,10 @@ started with, and its result is substituted. `banner` and `footer` accept the sa
 banner: { js: '#!/usr/bin/env node' }
 footer: { js: (name, argv) => `//# built ${ argv.build ?? 'all' }` }
 ```
+
+`banner` and `footer` hold code, so a string is written into the output as it stands. `define` holds an
+expression, so a string there is substituted as a quoted literal - `__VERSION: '1.0.0'` reaches the source as
+`"1.0.0"`. Any other type is serialized as JSON for all three.
 
 ::: tip ⚡ Macros read this table
 `$$ifdef` and `$$ifndef` decide on the text a flag holds here. `false`, `null`, and `undefined` leave a flag
