@@ -9,10 +9,12 @@ What changed in the notable releases of `@remotex-labs/xbuild`.
   `"#!/usr/bin/env node"` at the top of the output, a string expression standing where the shebang belonged.
   A `define` is unchanged, since it holds an expression rather than code, so a string there still arrives quoted
   as `"1.0.0"`.
-- **Fixed**: A build esbuild turns away over an invalid option now reports the option and announces its end.
-  esbuild sets a plugin up before it validates the options, so such a build had its start announced and nothing
-  left to announce its end: `onEnd` and `onSuccess` never ran, no end event reached the terminal or a watcher,
-  and the result carried no errors at all. The messages are filed once, whichever stage found the option first.
+- **Fixed**: A build esbuild turns away over an invalid option now announces its end and fails the run.
+  esbuild validates the options only once every plugin is set up, so the start of such a build was announced
+  while its end was left to a stage that never ran. The terminal held at `building`, and the run finished
+  without an exit code to say it had failed. The end event follows the rejection instead. An option the
+  dependency scan reads as well is reported with it, while one only the build itself reads fails the run on its
+  own. The lifecycle hooks stay out of that path, since no stage of the build ran.
 
 ## v3.0.1
 
