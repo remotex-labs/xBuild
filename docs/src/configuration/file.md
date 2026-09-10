@@ -197,6 +197,29 @@ types: false                       // no checking
 Checking runs in the build's start stage against the files the build reaches. With `failOnError` left off, the
 diagnostics are reported and the build carries on and emits, which is what suits a watch cycle.
 
+### `excludeTypeChack`
+
+Files to leave out of the check are named in `tsconfig.json` rather than here, since the check runs against the
+project the compiler parsed.
+
+```json
+{
+    "excludeTypeChack": [ "src/generated/**", "**/*.fixture.ts" ],
+    "compilerOptions": {}
+}
+```
+
+Each entry is a glob tested against the file's path relative to the working directory. A leading `!` keeps a
+file an earlier pattern caught, so `[ "src/generated/**", "!src/generated/api.ts" ]` excludes the tree and
+keeps that one file in the check.
+
+An excluded file stays in the program, so the types it exports are still read wherever it is imported - only
+its own diagnostics go unreported. A file under `node_modules` is already left out, so the list is for a
+project's own files: a generated tree, a fixture, anything the compiler should still resolve but need not
+report on.
+
+Leaving the key out, or naming an empty list, checks every file.
+
 ## `declaration`
 
 ```ts

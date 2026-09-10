@@ -4,6 +4,11 @@ What changed in the notable releases of `@remotex-labs/xbuild`.
 
 ## v3.0.3
 
+- **Added**: [`excludeTypeChack`](/configuration/file#excludetypechack) in `tsconfig.json` - the globs naming
+  files the type check leaves out. Each entry is tested against the file's path relative to the working
+  directory, and a leading `!` keeps a file an earlier pattern caught. An excluded file stays in the program,
+  so the types it exports are still read wherever it is imported and only its own diagnostics go unreported.
+  Leaving the key out, or naming an empty list, checks every file.
 - **Fixed**: A rebuild that no watch event asked for now re-reads the files that changed on disk.
   Only a watch event swept the cached file contents, so a build started by the `b` or `r` [key](/guide#watch-and-serve)
   recompiled the text of the first read, and an edit the watcher missed never reached the output.
