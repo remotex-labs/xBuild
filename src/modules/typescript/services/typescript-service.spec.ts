@@ -258,6 +258,76 @@ describe('TypescriptService', () => {
         });
     });
 
+    describe('excludeTypeChack', () => {
+        /**
+         * The test the check hands each affected file, taken from the last builder call.
+         */
+
+        function skipOf(instance: TypescriptService): (file: unknown) => boolean {
+            instance.check();
+
+            return builder.getSemanticDiagnosticsOfNextAffectedFile.mock.calls.at(-1)[1];
+        }
+
+        /**
+         * A source file under the working directory, which is what the exclusions are tested against.
+         */
+
+        function fileAt(path: string): unknown {
+            return { fileName: `${ cwd() }/${ path }` };
+        }
+
+        test('should turn away a file the configuration excludes', () => {
+            config.raw = { excludeTypeChack: [ 'src/generated/**' ] };
+            const skip = skipOf(new TypescriptService('tsconfig.json'));
+
+            expect(skip(fileAt('src/generated/api.ts'))).toBe(true);
+            expect(host.ignoreSourceFile).not.toHaveBeenCalled();
+        });
+
+        test('should keep a file the exclusions do not name', () => {
+            config.raw = { excludeTypeChack: [ 'src/generated/**' ] };
+            const skip = skipOf(new TypescriptService('tsconfig.json'));
+
+            expect(skip(fileAt('src/index.ts'))).toBe(false);
+        });
+
+        test('should test the path relative to the working directory', () => {
+            config.raw = { excludeTypeChack: [ '**/*.generated.ts' ] };
+            const skip = skipOf(new TypescriptService('tsconfig.json'));
+
+            expect(skip(fileAt('src/models/user.generated.ts'))).toBe(true);
+            expect(skip(fileAt('src/models/user.ts'))).toBe(false);
+        });
+
+        test('should turn nothing away where the configuration names an empty list', () => {
+            config.raw = { excludeTypeChack: [] };
+            const skip = skipOf(new TypescriptService('tsconfig.json'));
+
+            expect(skip(fileAt('src/index.ts'))).toBe(false);
+        });
+
+        test('should turn nothing away where the configuration names no exclusion at all', () => {
+            config.raw = {};
+            const skip = skipOf(new TypescriptService('tsconfig.json'));
+
+            expect(skip(fileAt('src/index.ts'))).toBe(false);
+        });
+
+        test('should take up an edit to the list on a reload', () => {
+            const shared = inject(TypescriptService, 'tsconfig.json');
+            expect(skipOf(shared)(fileAt('src/generated/api.ts'))).toBe(false);
+
+            parseConfigMock.mockReturnValue({
+                ...config, raw: { excludeTypeChack: [ 'src/generated/**' ] }
+            });
+            host.filesCache.touch.mockReturnValue({ version: 2 });
+            TypescriptService.reload();
+
+            expect(skipOf(shared)(fileAt('src/generated/api.ts'))).toBe(true);
+        });
+    });
+
     describe('emit', () => {
         test('should write into the output directory the configuration names', async () => {
             await expect(service.emit({ index: 'src/index.ts' })).resolves.toEqual([ 'dist/index.d.ts' ]);

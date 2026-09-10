@@ -15,6 +15,7 @@ import type { DiagnosticInterface, ResolvedModuleInterface } from './interfaces/
 
 import ts from 'typescript';
 import { Injectable } from '@remotex-labs/xinject';
+import { createMatcher } from '@components/glob.component';
 import { normalize, relative, dirname } from '@remotex-labs/xmap';
 import { DeclarationModel } from '@typescript/models/declaration.model';
 import { LanguageHostService } from '@typescript/services/host.service';
@@ -192,6 +193,22 @@ export class TypescriptService {
     private builder?: EmitAndSemanticDiagnosticsBuilderProgram;
 
     /**
+     * The test that decides whether a file is left out of the type check.
+     *
+     * @remarks
+     * Compiled from the configuration's `excludeTypeChack` globs rather than read on every file,
+     * since {@link check} tests it once per affected file while a glob costs more to compile than to run.
+     * The path it is handed is relative to the working directory, which is what lets a pattern read as the
+     * project writes one.
+     * {@link refresh} rebuilds it, so an edit to the list takes effect on the next check.
+     *
+     * @see createTypeCheckFilter
+     * @since 3.0.3
+     */
+
+    private excludeTypeChack: (path: string) => boolean;
+
+    /**
      * Creates a service for one configuration file.
      *
      * @param configPath - Path of the `tsconfig.json` to run against
@@ -214,6 +231,7 @@ export class TypescriptService {
 
     constructor(readonly configPath: string  = 'tsconfig.json') {
         this.parsedConfig = this.parseConfig();
+        this.excludeTypeChack = this.createTypeCheckFilter();
         this.languageHostService = new LanguageHostService(this.parsedConfig);
         this.configVersion = this.languageHostService.filesCache.touch(this.configPath).version;
         this.resolutionCache = this.createResolutionCache();
@@ -244,7 +262,8 @@ export class TypescriptService {
      * The cost is the state of every project in the process rather than the state of what moved.
      *
      * A change discards everything the old options fed:
-     * the file set, the resolution cache, the cached declarations, the cached diagnostics, and the builder program,
+     * the file set, the resolution cache, the type-check exclusions, the cached declarations, the cached
+     * diagnostics, and the builder program,
      * so the next {@link check} runs as a full pass.
      * An instance the constructor built rather than the cache is never reached here.
      *
@@ -305,8 +324,10 @@ export class TypescriptService {
      * their semantic, syntactic, and suggestion diagnostics replacing what was cached for them,
      * while untouched files keep the diagnostics they already had.
      * That is what makes the result whole-project without rechecking it whole.
-     * A file matched by the configuration's `exclude` globs is skipped,
-     * and a file that has left the program loses its cached diagnostics
+     * A file under `node_modules` never reaches the check,
+     * a file with the configuration's `excludeTypeChack` globs name is turned away next,
+     * and a file matched by the configuration's `exclude` globs is skipped after that.
+     * A file that has left the program loses its cached diagnostics
      * rather than reporting them against a file that is no longer there.
      *
      * The check covers the program while the report covers `reachable`,
@@ -327,6 +348,7 @@ export class TypescriptService {
      *
      * @see DiagnosticInterface
      * @see reconcileDiagnostics
+     * @see createTypeCheckFilter
      *
      * @since 3.0.0
      */
@@ -335,9 +357,11 @@ export class TypescriptService {
         const program = this.languageService.getProgram();
         if (!program) return [];
 
+        const skipIndex = process.cwd().length + 1;
         const ignore = this.languageHostService.ignoreSourceFile;
         const skip = (file: SourceFile): boolean => {
             if(file.fileName.includes('node_modules')) return true;
+            if(this.excludeTypeChack(file.fileName.slice(skipIndex))) return true;
 
             return ignore(file);
         };
@@ -603,6 +627,7 @@ export class TypescriptService {
 
         this.configVersion = version;
         this.parsedConfig = this.parseConfig();
+        this.excludeTypeChack = this.createTypeCheckFilter();
         this.languageHostService.options = this.parsedConfig;
         this.resolutionCache = this.createResolutionCache();
         this.declaration.clear();
@@ -631,6 +656,29 @@ export class TypescriptService {
             path => this.languageHostService.realpath(path),
             this.parsedConfig.options
         );
+    }
+
+    /**
+     * Compiles the configuration's `excludeTypeChack` globs into a test over a project-relative path.
+     *
+     * @returns A test reporting whether a path is left out of the type check
+     *
+     * @remarks
+     * A configuration naming no glob is answered here rather than by {@link createMatcher},
+     * which reads a set carrying no inclusion as one of the exclusions alone and so accepts every path.
+     * A project that excludes nothing would otherwise have every one of its files turned away from its own
+     * type check.
+     *
+     * @see check
+     * @see createMatcher
+     *
+     * @since 3.0.3
+     */
+
+    private createTypeCheckFilter(): (path: string) => boolean {
+        const globs: Array<string> = this.config.raw?.excludeTypeChack ?? [];
+
+        return globs.length > 0 ? createMatcher(globs) : (): boolean => false;
     }
 
     /**
