@@ -11,6 +11,7 @@ import type { LifecycleEventsType, LifecycleLogsType } from '@interfaces/lifecyc
  */
 
 import { exit } from 'process';
+import { FilesModel } from '@models/files.model';
 import { setActivity } from '@ui/interactive.ui';
 import { Injectable, inject } from '@remotex-labs/xinject';
 import { ConfigurationService } from '@services/configuration.service';
@@ -61,6 +62,19 @@ export class Screen {
      */
 
     readonly config$ = inject(ConfigurationService);
+
+    /**
+     * The file cache a rebuild sweeps before the build reads anything.
+     *
+     * @remarks
+     * The injected instance rather than one of its own,
+     * so the sweep reaches the very entries the language service and the transpiler read their text from.
+     *
+     * @see FilesModel
+     * @since 3.0.3
+     */
+
+    private readonly filesModel = inject(FilesModel);
 
     /**
      * The address a running server answers on, absent while none is running.
@@ -323,7 +337,12 @@ export class Screen {
      * Every rebuild of a watch goes through here, so the screen is cleared and the run announced the same way
      * whichever asked for it.
      * The build itself is the one the run handed over when the screen was made.
-     * The TypeScript configurations are reloaded here rather than by the watch,
+     * A sweep of the cached file contents comes first,
+     * so a rebuild that no watch event announced compiles the files as they now are
+     * rather than as the first read left them.
+     * The sweep asks the filesystem rather than a watcher and re-reads only the files whose time moved,
+     * so it costs a `stat` per tracked path and nothing more.
+     * The screen reloads the TypeScript configurations rather than the watch,
      * so a rebuild started by a key reads them as freshly as one started by a changed file.
      * A configuration that has stayed put costs a lookup and nothing more.
      * Forcing reparses every project regardless, which is what the reload key asks for
@@ -335,12 +354,15 @@ export class Screen {
      * await screen.rebuild('reloading', true); // the same, with every tsconfig reparsed first
      * ```
      *
+     * @see FilesModel.refreshAll
      * @see TypescriptService.reload
+     *
      * @since 3.0.0
      */
 
     async rebuild(reason: string, force: boolean = false): Promise<void> {
         clearScreen();
+        this.filesModel.refreshAll();
         TypescriptService.reload(force);
 
         this.say(`${ infoColor.dim(ReloadSymbol) } ${ mutedColor(reason) }`,
@@ -403,7 +425,7 @@ export class Screen {
      * @param logs - Messages to print, filed under the level each was reported at
      *
      * @remarks
-     * The groups run loudest first, so what failed a build is read before what merely remarked on it.
+     * The groups run loudest first, so what failed a build is read before what is merely remarked on it.
      * Each group is compared against the level the run is set to,
      * which is what leaves a quiet run its errors and drops everything under them.
      * An error always carries its code window and its trace, since that is what an error is read for,

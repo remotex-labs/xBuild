@@ -2,6 +2,15 @@
 
 What changed in the notable releases of `@remotex-labs/xbuild`.
 
+## v3.0.3
+
+- **Fixed**: A rebuild that no watch event asked for now re-reads the files that changed on disk.
+  Only a watch event swept the cached file contents, so a build started by the `b` or `r` [key](/guide#watch-and-serve)
+  recompiled the text of the first read, and an edit the watcher missed never reached the output.
+  The sweep moved into the rebuild itself, which puts a build a key asks for on the same footing as one a changed file asks for.
+  It asks the filesystem rather than the watcher and re-reads only the files whose time moved,
+  so it costs a `stat` per tracked path.
+
 ## v3.0.2
 
 - **Fixed**: A [`banner`](/configuration/file#define) or a `footer` written as a string now reaches esbuild as the

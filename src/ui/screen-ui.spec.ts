@@ -11,6 +11,7 @@ import type { LifecycleLogsType } from '@interfaces/lifecycle.interface';
 import { exit } from 'process';
 import { Screen } from './screen.ui';
 import { inject } from '@remotex-labs/xinject';
+import { FilesModel } from '@models/files.model';
 import { setActivity } from '@ui/interactive.ui';
 import { clearScreen, printGroup, printOutputs } from '@ui/print.ui';
 import { ConfigurationService } from '@services/configuration.service';
@@ -30,6 +31,7 @@ describe('Screen', () => {
     let groupMock: any;
     let clearMock: any;
     let outputsMock: any;
+    let refreshMock: any;
     let activityMock: any;
 
     /**
@@ -67,6 +69,7 @@ describe('Screen', () => {
         config = { logLevel: 'info' };
         logMock = xJet.spyOn(console, 'log').mockReturnValue(undefined);
         buildMock = xJet.fn(async () => undefined);
+        refreshMock = xJet.fn(() => undefined);
 
         const configuration = {
             getValue: xJet.fn(() => config),
@@ -75,6 +78,7 @@ describe('Screen', () => {
 
         xJet.mock(inject).mockImplementation(<any> ((token: unknown) => {
             if (token === ConfigurationService) return configuration;
+            if (token === FilesModel) return { refreshAll: refreshMock };
 
             return {};
         }));
@@ -349,6 +353,29 @@ describe('Screen', () => {
             await screen.rebuild('a key was pressed');
 
             expect(finished).toBe(true);
+        });
+
+        test('should sweep the cached file contents before it runs the build', async () => {
+            let sweptFirst = false;
+            buildMock.mockImplementation(async () => {
+                sweptFirst = refreshMock.mock.calls.length === 1;
+            });
+
+            await screen.rebuild('a key was pressed');
+
+            expect(sweptFirst).toBe(true);
+        });
+
+        test('should sweep every tracked path rather than the ones an event named', async () => {
+            await screen.rebuild('2 files changed');
+
+            expect(refreshMock).toHaveBeenCalledWith();
+        });
+
+        test('should sweep the same way for a reload that reparses every project', async () => {
+            await screen.rebuild('reloading', true);
+
+            expect(refreshMock).toHaveBeenCalledTimes(1);
         });
     });
 
