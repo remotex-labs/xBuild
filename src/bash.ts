@@ -209,7 +209,7 @@ export async function startWatchMode(
 
     const watchService = new WatchService(process.cwd(), config.watch);
     watchService.subscribe(async (changedFiles) => {
-        if(configVersion !== files.touch(args.config!).version) {
+        if(configVersion !== files.refresh(args.config!).version) {
             configVersion = files.touch(args.config!).version;
             const config = await configFileProvider(args.config!);
             applyCommandLineOverrides(config, args);
