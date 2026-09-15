@@ -127,6 +127,24 @@ entryPoints: { index: 'src/index.ts' }               // already in the target sh
 A glob list is expanded before the build runs, so a lifecycle hook reading `context.options.entryPoints` sees the
 resolved record rather than the pattern.
 
+### `outbase`
+
+The directory output names are shortened against. Without it a match keeps its whole path, so `src/index.ts` is
+written to `dist/src/index.js`; with `outbase: 'src'` the same file is written to `dist/index.js`.
+
+```ts
+esbuild: {
+    outdir: 'dist',
+    outbase: 'src',
+    entryPoints: [ 'src/**/*.ts' ] // src/components/glob.ts is written to dist/components/glob.js
+}
+```
+
+It applies to the names xBuild resolves the entry points into, so it reaches a glob list, an unbundled build's
+per-file outputs, and the declarations emitted beside them. A file the globs reach from outside `outbase` keeps its
+whole path rather than stepping out of `outdir`. The `in` and `out` form names its own outputs, so `outbase` leaves
+it alone. An unbundled build that names no `outbase` falls back to the `rootDir` of its `tsconfig.json`.
+
 ### `dependOn`
 
 A variant may declare the variants that have to finish before it starts. Independent variants run in parallel.
