@@ -110,9 +110,9 @@ export const config: xBuildConfig = {
 
 ## Earlier releases
 
-- [v2.5.x](v2.5.x/release) - the last of the TypeScript-AST line (archived docs).
-- [v2.0.0 / v2.1.x](v2.1.x/release) - the variant/directive rewrite and the `$argv` global (archived docs).
-- [v1.x](v1.x.x/release) - the original hooks-based toolchain (archived docs).
+- [v2.5.x](../v2.5.x/release) - the last of the TypeScript-AST line (archived docs).
+- [v2.0.0 / v2.1.x](../v2.1.x/release) - the variant/directive rewrite and the `$argv` global (archived docs).
+- [v1.x](../v1.x.x/release) - the original hooks-based toolchain (archived docs).
 
 ## See also
 

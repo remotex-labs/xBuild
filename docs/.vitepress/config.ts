@@ -59,6 +59,16 @@ const LegacyPages: VersionPagesInterface = {
 };
 
 /**
+ * The v3 layout, which the current line and v3.0.x share.
+ */
+
+const CurrentPages: VersionPagesInterface = {
+    macros: [ Pages.ifdef, Pages.ifndef, Pages.inline ],
+    advanced: [ Pages.programmatic ],
+    configuration: [ Pages.cli, Pages.file, Pages.watch, Pages.serve, Pages.plugins, Pages.lifecycle ]
+};
+
+/**
  * What each version carries, keyed by the directory it is archived under, `root` being the current line.
  *
  * @remarks
@@ -67,11 +77,8 @@ const LegacyPages: VersionPagesInterface = {
  */
 
 const VersionPages: Record<string, VersionPagesInterface> = {
-    root: {
-        macros: [ Pages.ifdef, Pages.ifndef, Pages.inline ],
-        advanced: [ Pages.programmatic ],
-        configuration: [ Pages.cli, Pages.file, Pages.watch, Pages.serve, Pages.plugins, Pages.lifecycle ]
-    },
+    root: CurrentPages,
+    'v3.0.x': CurrentPages,
     'v2.5.x': LegacyPages,
     'v2.1.x': LegacyPages,
     'v1.x.x': {
@@ -137,7 +144,7 @@ export default defineVersionedConfig({
         ]
     ],
     versionsConfig: {
-        current: 'v3.0.0',
+        current: 'v3.1.x',
         versionSwitcher: false
     },
     themeConfig: {
