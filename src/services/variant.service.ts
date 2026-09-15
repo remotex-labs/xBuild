@@ -816,26 +816,33 @@ export class VariantService {
     /**
      * Maps every input the build reaches to the output name it takes.
      *
-     * @returns The inputs, keyed by their path below the root directory with the extension dropped
+     * @returns The inputs, keyed by their path below the base directory with the extension dropped
      *
      * @remarks
      * The scan runs with the plugins stripped, so it does not re-enter this variant's own hooks
      * and cannot recurse into the build it is preparing.
-     * Each path is made relative to the root directory and loses its extension,
+     * Each path is made relative to the base directory and loses its extension,
      * which is what gives an unbundled build one output per input rather than one bundle.
+     * The base is what `outbase` names, falling back to the TypeScript `rootDir` where the configuration names none,
+     * since esbuild reads `outbase` for plain paths alone and what it receives here is a record.
+     * An input the base does not contain keeps its whole path instead of the `..` steps that would carry it out of
+     * the output directory, which is what {@link extractEntryPoints} does with the same file.
      *
+     * @see extractEntryPoints
      * @since 3.0.0
      */
 
     private async buildDependencyMap(): Promise<Record<string, string>> {
-        const rootDir = this.typescriptModule.config.options.rootDir!;
+        const { outbase } = this.buildConfig.esbuild;
+        const base = VariantService.filesModel.resolve(outbase ?? this.typescriptModule.config.options.rootDir!);
         const { metafile } = await analyzeDependencies({ ...this.buildConfig.esbuild, plugins: undefined });
 
         return Object.fromEntries(Object.keys(metafile.inputs).map(file => {
-            const path = relative(rootDir, VariantService.filesModel.resolve(file));
-            const dot = path.lastIndexOf('.');
+            const path = relative(base, VariantService.filesModel.resolve(file));
+            const name = path.startsWith('../') ? file : path;
+            const dot = name.lastIndexOf('.');
 
-            return [ dot > 0 ? path.slice(0, dot) : path, file ];
+            return [ dot > 0 ? name.slice(0, dot) : name, file ];
         }));
     }
 
