@@ -461,6 +461,20 @@ describe('VariantService', () => {
             });
         });
 
+        test('should name the dependencies against the base directory rather than the root', async () => {
+            dependenciesMock.mockResolvedValue(<any> {
+                metafile: { inputs: { 'src/index.ts': {}, 'src/components/glob.component.ts': {} } }
+            });
+
+            configure({ esbuild: { outbase: 'src/components' } });
+            const { build } = await lifecycle({ bundle: false });
+
+            expect(build.initialOptions.entryPoints).toEqual({
+                'src/index': 'src/index.ts',
+                'glob.component': 'src/components/glob.component.ts'
+            });
+        });
+
         test('should leave the entry points alone when it bundles', async () => {
             const { build } = await lifecycle({ bundle: true });
 
