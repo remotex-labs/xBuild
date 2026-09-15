@@ -202,7 +202,14 @@ describe('VariantService', () => {
             notify({ common: {}, variant: variant({ esbuild: { entryPoints: [ 'src/**' ] } }) });
             await service.build();
 
-            expect(extractEntryPoints).toHaveBeenCalledWith([ 'src/**' ]);
+            expect(extractEntryPoints).toHaveBeenCalledWith([ 'src/**' ], undefined);
+        });
+
+        test('should name the entry points against the base directory', async () => {
+            notify({ common: {}, variant: variant({ esbuild: { entryPoints: [ 'src/**' ], outbase: 'src' } }) });
+            await service.build();
+
+            expect(extractEntryPoints).toHaveBeenCalledWith([ 'src/**' ], 'src');
         });
 
         test('should build the typescript module the entry names', () => {

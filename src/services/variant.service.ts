@@ -520,6 +520,8 @@ export class VariantService {
      * The common block is merged under the variant, entry points are resolved,
      * and the TypeScript module is swapped before the one it replaces is disposed of,
      * so a failure part-way through does not leave the variant without a module.
+     * Entry points are named against `outbase`, since esbuild applies that setting to plain paths alone,
+     * and what it reads here is the record those paths were resolved into.
      * The hook list is rebuilt with the declared plugins ahead of the variant's own `lifecycle` set.
      *
      * @see VariantSubscriptionInterface
@@ -533,7 +535,7 @@ export class VariantService {
         const config = deepMerge(<VariantConfigurationInterface> {}, common ?? {}, variant);
 
         this.typescriptModule = inject(Typescript, config.esbuild.tsconfig);
-        config.esbuild.entryPoints = extractEntryPoints(config.esbuild.entryPoints);
+        config.esbuild.entryPoints = extractEntryPoints(config.esbuild.entryPoints, config.esbuild.outbase);
         config.logOverride ??= {};
         previous?.dispose();
 
