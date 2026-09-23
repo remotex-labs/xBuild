@@ -2,6 +2,13 @@
 
 What changed in the notable releases of `@remotex-labs/xbuild`.
 
+## v3.1.1
+
+- **Fixed**: A build sets the exit code on what it found rather than throwing `Cannot set property exitCode of
+  #<process> which has only a getter`. The process reached through the bare `process` import exposes `exitCode`
+  as a getter alone, so the write that ends a build threw before the run could say how it went. The process is
+  taken from `node:process` now, which is the object the write lands on.
+
 ## v3.1.0
 
 - **Fixed**: [`outbase`](/configuration/file#outbase) decides the names a build writes its outputs under. Entry
