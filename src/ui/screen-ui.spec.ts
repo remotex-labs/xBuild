@@ -23,6 +23,8 @@ import { ArrowSymbol, DotSymbol, ErrorSymbol, WarningSymbol } from '@constants/u
  */
 
 describe('Screen', () => {
+    const workerExitCode = process.exitCode;
+
     let config: any;
     let screen: any;
     let logMock: any;
@@ -52,6 +54,14 @@ describe('Screen', () => {
             context: { variantName: 'esm' },
             buildResult: { ...logs(), errors: [], warnings: [], metafile: { outputs: {} }, ...overrides }
         };
+    }
+
+    /**
+     * The last line written to the console, which is where the verdict of a build lands.
+     */
+
+    function verdict(): string {
+        return logMock.mock.calls[logMock.mock.calls.length - 1][0];
     }
 
     /**
@@ -89,6 +99,10 @@ describe('Screen', () => {
         activityMock = xJet.mock(setActivity).mockReturnValue(undefined);
 
         screen = new Screen(buildMock);
+    });
+
+    afterEach(() => {
+        process.exitCode = workerExitCode;
     });
 
     describe('the level it reports at', () => {
@@ -144,15 +158,16 @@ describe('Screen', () => {
 
             expect(process.exitCode).toBe(0);
             expect(outputsMock).toHaveBeenCalled();
-            expect(logMock.mock.calls.at(-1)[0]).toContain('esm');
-            expect(logMock.mock.calls.at(-1)[0]).toContain('in 134 ms');
+            expect(verdict()).toContain('esm');
+            expect(verdict()).toContain('in 134 ms');
         });
 
-        test('should mark a build that wrote nothing as failed', () => {
+        test('should mark a build that wrote nothing as failed and name the variant it was', () => {
             screen.buildEvent(ended({ metafile: undefined }));
 
             expect(process.exitCode).toBe(1);
             expect(outputsMock).not.toHaveBeenCalled();
+            expect(verdict()).toContain('esm');
         });
     });
 
