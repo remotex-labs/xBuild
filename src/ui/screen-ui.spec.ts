@@ -8,7 +8,7 @@ import type { LifecycleLogsType } from '@interfaces/lifecycle.interface';
  * Imports
  */
 
-import { exit } from 'process';
+import process from 'node:process';
 import { Screen } from './screen.ui';
 import { inject } from '@remotex-labs/xinject';
 import { FilesModel } from '@models/files.model';
@@ -26,7 +26,6 @@ describe('Screen', () => {
     let config: any;
     let screen: any;
     let logMock: any;
-    let exitMock: any;
     let buildMock: any;
     let groupMock: any;
     let clearMock: any;
@@ -65,6 +64,7 @@ describe('Screen', () => {
 
     beforeEach(() => {
         xJet.restoreAllMocks();
+        process.exitCode = undefined;
 
         config = { logLevel: 'info' };
         logMock = xJet.spyOn(console, 'log').mockReturnValue(undefined);
@@ -83,7 +83,6 @@ describe('Screen', () => {
             return {};
         }));
 
-        exitMock = xJet.mock(exit).mockReturnValue(<any> undefined);
         clearMock = xJet.mock(clearScreen).mockReturnValue(undefined);
         groupMock = xJet.mock(printGroup).mockReturnValue(undefined);
         outputsMock = xJet.mock(printOutputs).mockReturnValue(undefined);
@@ -140,14 +139,20 @@ describe('Screen', () => {
             expect(outputsMock).not.toHaveBeenCalled();
         });
 
-        /*
-         * The end of a build writes `process.exitCode`, and the worker holds its own process frozen,
-         * so the branch throws before it reports anything and cannot be run from here.
-         * What it routes to either side of that write is covered by the groups below.
-         */
-
-        test.skip('should mark a build as done or failed and report what it wrote', () => {
+        test('should mark a build that wrote its outputs as done and leave the run clean', () => {
             screen.buildEvent(ended());
+
+            expect(process.exitCode).toBe(0);
+            expect(outputsMock).toHaveBeenCalled();
+            expect(logMock.mock.calls.at(-1)[0]).toContain('esm');
+            expect(logMock.mock.calls.at(-1)[0]).toContain('in 134 ms');
+        });
+
+        test('should mark a build that wrote nothing as failed', () => {
+            screen.buildEvent(ended({ metafile: undefined }));
+
+            expect(process.exitCode).toBe(1);
+            expect(outputsMock).not.toHaveBeenCalled();
         });
     });
 
@@ -306,19 +311,19 @@ describe('Screen', () => {
         test('should leave the run failed where a variant reported an error', () => {
             screen.diagnostics({ esm: logs(), cjs: logs({ error: <any> [{ text: 'broken' }] }) });
 
-            expect(exitMock).toHaveBeenCalledWith(1);
+            expect(process.exitCode).toBe(1);
         });
 
         test('should leave the run clean where nothing but quieter levels were reported', () => {
             screen.diagnostics({ esm: logs({ warning: <any> [{ text: 'careful' }] }) });
 
-            expect(exitMock).toHaveBeenCalledWith(0);
+            expect(process.exitCode).toBe(0);
         });
 
         test('should leave a run that checked nothing at all clean', () => {
             screen.diagnostics({});
 
-            expect(exitMock).toHaveBeenCalledWith(0);
+            expect(process.exitCode).toBe(0);
             expect(groupMock).not.toHaveBeenCalled();
         });
     });

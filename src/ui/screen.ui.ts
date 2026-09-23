@@ -10,7 +10,7 @@ import type { LifecycleEventsType, LifecycleLogsType } from '@interfaces/lifecyc
  * Imports
  */
 
-import { exit } from 'process';
+import process from 'node:process';
 import { FilesModel } from '@models/files.model';
 import { setActivity } from '@ui/interactive.ui';
 import { Injectable, inject } from '@remotex-labs/xinject';
@@ -290,7 +290,7 @@ export class Screen {
     }
 
     /**
-     * Reports a type check and ends the process on what it found.
+     * Reports a type check and sets the exit code on what it found.
      *
      * @param diagnostics - Messages each variant's check reported, keyed by the variant's name
      *
@@ -299,8 +299,9 @@ export class Screen {
      * so a clean variant is still reported rather than left out of a run that named it.
      * The count is of everything the check reported rather than of what the level prints,
      * which is what keeps a quiet run from reading as a clean one.
-     * The process leaves from here, and an error anywhere leaves with `1`,
-     * since a check is the whole of what a run asking for one wanted.
+     * An error anywhere sets the exit code to `1`, since a check is the whole of what a run asking for one wanted.
+     * The code is written onto the process rather than taken out of it here, so the run leaves through its own end,
+     * and the streams it opened are flushed rather than cut off mid-write.
      *
      * @example
      * ```ts
@@ -324,7 +325,7 @@ export class Screen {
             console.log('');
         }
 
-        exit(failed ? 1 : 0);
+        process.exitCode = failed ? 1 : 0;
     }
 
     /**

@@ -226,13 +226,13 @@ export async function startWatchMode(
 /**
  * Runs the command line from the banner to the last build.
  *
- * @returns A promise settling once the build has run, or never returning where a check ended the process
+ * @returns A promise settling once the build has run, or once a check has been reported where a run asked for one
  *
  * @remarks
  * The configuration file is found before anything else is parsed, since it is what declares the rest of the flags,
  * and the full parse is written back onto the arguments the provider was handed.
  * The screen is built around the build itself, so a key pressed later starts the same run the command line asked for.
- * A run asking for a type check reports it and leaves from there, since nothing is built for one.
+ * A run asking for a type check reports it and returns from there with the exit code set, since nothing is built for one.
  * The server and the watch are started before the first build,
  * so a rebuild reaches a screen, and the output is served as soon as it is written.
  *
@@ -259,6 +259,8 @@ async function main(): Promise<void> {
 
     if (args.typeCheck) {
         screen.diagnostics(await buildService.typeChack(args.build));
+
+        return;
     }
 
     // Execute build pipeline
