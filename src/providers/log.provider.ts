@@ -7,6 +7,19 @@ import type { LifecycleLogsType } from '@interfaces/lifecycle.interface';
 import type { LogLevelType, LogOverridesType } from '@providers/interfaces/log-provider.interface';
 
 /**
+ * The compiled form of every override pattern seen so far, or `null` for a key whose syntax does not parse.
+ *
+ * @remarks
+ * A level is resolved for every message a build reports, while the override keys rarely change,
+ * so each key is compiled once rather than once per message.
+ *
+ * @see resolveLevel
+ * @since 3.2.0
+ */
+
+const patterns = new Map<string, RegExp | null>();
+
+/**
  * Resolves the level a message is reported under.
  *
  * @param overrides - The configured levels, keyed by message id or by a pattern matching one
@@ -20,6 +33,7 @@ import type { LogLevelType, LogOverridesType } from '@providers/interfaces/log-p
  * A pattern is anchored with `^(?:...)$` to make it match a whole id rather than a part of one,
  * which is what lets a set of ids be written as a single alternation, and the first the table declared wins.
  * A key whose syntax does not parse is passed over rather than thrown on.
+ * Each pattern is compiled once and kept, so a long run of messages costs a match per key rather than a compile.
  *
  * @example
  * ```ts
@@ -41,11 +55,18 @@ export function resolveLevel(overrides: LogOverridesType, id: string | undefined
     if (Object.hasOwn(overrides, id)) return overrides[id];
 
     for (const key in overrides) {
-        try {
-            if (new RegExp(`^(?:${ key })$`).test(id)) return overrides[key];
-        } catch {
-            if(id === key) return overrides[key];
+        let pattern = patterns.get(key);
+        if (pattern === undefined) {
+            try {
+                pattern = new RegExp(`^(?:${ key })$`);
+            } catch {
+                pattern = null;
+            }
+
+            patterns.set(key, pattern);
         }
+
+        if (pattern?.test(id)) return overrides[key];
     }
 
     return level;

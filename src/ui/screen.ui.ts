@@ -46,6 +46,24 @@ import { WarningSymbol, ErrorSymbol, DotSymbol, ArrowSymbol, ReloadSymbol, Succe
 })
 export class Screen {
     /**
+     * The address the running server answers on, empty while no server is running.
+     *
+     * @remarks
+     * Written as the server reports its start and cleared as it stops,
+     * so the status line offers a URL only while there is one to open.
+     * Empty rather than absent, so a caller writing it into a line needs no guard of its own.
+     *
+     * @example
+     * ```ts
+     * screen.url; // 'http://localhost:3000'
+     * ```
+     *
+     * @since 3.0.0
+     */
+
+    url = '';
+
+    /**
      * The configuration service the reporting level is read and written through.
      *
      * @remarks
@@ -75,18 +93,6 @@ export class Screen {
      */
 
     private readonly filesModel = inject(FilesModel);
-
-    /**
-     * The address a running server answers on, absent while none is running.
-     *
-     * @remarks
-     * Written as the server reports its start and cleared as it stops,
-     * so the status line offers a URL only while there is one to open.
-     *
-     * @since 3.0.0
-     */
-
-    private serverUrl?: string;
 
     /**
      * The level to go back to once reporting is turned down again.
@@ -163,43 +169,6 @@ export class Screen {
     }
 
     /**
-     * The address the running server answers on.
-     *
-     * @returns The URL, empty while no server is running
-     *
-     * @remarks
-     * Empty rather than absent, so a caller writing it into a line needs no guard of its own.
-     *
-     * @example
-     * ```ts
-     * screen.url; // 'http://localhost:3000'
-     * ```
-     *
-     * @since 3.0.0
-     */
-
-    get url(): string {
-        return this.serverUrl ?? '';
-    }
-
-    /**
-     * Records the address a server has begun answering on.
-     *
-     * @param value - URL the server bound to
-     *
-     * @example
-     * ```ts
-     * screen.url = 'http://localhost:3000';
-     * ```
-     *
-     * @since 3.0.0
-     */
-
-    set url(value: string) {
-        this.serverUrl = value;
-    }
-
-    /**
      * Reports either end of a build: its start or its finish.
      *
      * @param event - What the variant reported, carrying its context and, at the end, its result
@@ -230,8 +199,7 @@ export class Screen {
 
         const { errors, warnings, info, verbose: notes, metafile } = event.buildResult;
         const failed = !metafile;
-        if (failed) process.exitCode = 1;
-        else process.exitCode = 0;
+        process.exitCode = failed ? 1 : 0;
 
         this.groups({ error: errors, warning: warnings, info, verbose: notes });
         if (metafile) printOutputs(metafile, this.logLevel === 'verbose' ? Infinity : undefined);
@@ -272,7 +240,7 @@ export class Screen {
 
                 return console.log(`${ createActionPrefix('serve') } ${ pathColor(event.url) }`);
             case 'stop':
-                this.serverUrl = undefined;
+                this.url = '';
                 if (event.running) console.log(`${ createActionPrefix('serve') } ${ mutedColor('stopped') }`);
 
                 return;

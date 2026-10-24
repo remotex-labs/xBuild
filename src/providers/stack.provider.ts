@@ -55,10 +55,8 @@ export function getSource(fileName: string = ''): SourceService | null {
     const mapped = framework.getSourceMap(fileName);
     if (mapped) return mapped;
 
-    const snapshot = inject(FilesModel).touch(fileName);
-    const code = snapshot.snapshot?.text;
-
-    if (!snapshot || !code) return null;
+    const code = inject(FilesModel).touch(fileName).text;
+    if (!code) return null;
     const lines = code.split('\n');
 
     return {
@@ -120,26 +118,22 @@ export function getErrorStack(raw: Partial<PartialMessage> | Error): ParsedStack
     if (raw instanceof Error) return parseErrorStack(raw);
     if (raw.detail instanceof Error) return parseErrorStack(raw.detail);
 
-    if (!raw.location) {
-        return { stack: [], name: 'esBuildMessage', message: raw.text ?? '', rawStack: '' };
-    }
+    const { location } = raw;
 
     return {
         name: 'esBuildMessage',
         message: raw.text ?? '',
         rawStack: '',
-        stack: [
-            {
-                source: `@${ raw.location.file }`,
-                line: raw.location.line,
-                column: raw.location.column || 1,
-                fileName: raw.location.file,
-                eval: false,
-                async: false,
-                native: false,
-                constructor: false
-            }
-        ]
+        stack: location ? [{
+            source: `@${ location.file }`,
+            line: location.line,
+            column: location.column || 1,
+            fileName: location.file,
+            eval: false,
+            async: false,
+            native: false,
+            constructor: false
+        }] : []
     };
 }
 
@@ -180,25 +174,23 @@ export function getErrorMetadata(raw: PartialMessage | Error, options?: StackTra
     const resolved: ResolveMetadataInterface = resolveError(parsed, {
         ...options,
         withNativeFrames: verbose || (options?.withFrameworkFrames ?? false),
-        getSource(path: string): SourceService | null {
-            return getSource(path);
-        }
+        getSource
     });
 
-    resolved.stack.filter(frame => {
-        if (!(options?.withFrameworkFrames ?? false) && framework.isFrameworkFile(frame)) return false;
-        if(!resolved.formatCode && frame.code) {
-            resolved.formatCode = formatErrorCode(
-                {
-                    code: highlightCode(frame.code),
-                    line: frame.line ?? 1,
-                    column: frame.column ?? 1,
-                    startLine: frame.stratLine ?? 1
-                },
-                { color: xterm.brightPink }
-            );
-        }
-    });
+    for (const frame of resolved.stack) {
+        if (!frame.code || (!options?.withFrameworkFrames && framework.isFrameworkFile(frame))) continue;
+
+        resolved.formatCode = formatErrorCode(
+            {
+                code: highlightCode(frame.code),
+                line: frame.line ?? 1,
+                column: frame.column ?? 1,
+                startLine: frame.stratLine ?? 1
+            },
+            { color: xterm.brightPink }
+        );
+        break;
+    }
 
     return resolved;
 }

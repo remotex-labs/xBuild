@@ -115,8 +115,7 @@ export async function execConfigFile<T>(code: string, path: string, $argv = {}, 
  */
 
 export async function configFileProvider<T extends xBuildConfigInterface>(path: string, argv: Record<string, unknown> = {}): Promise<T> {
-    const fileObject = inject(FilesModel).touch(path);
-    const text = fileObject.snapshot?.text;
+    const text = inject(FilesModel).touch(path).text;
     if (!text) return <T> {};
 
     const [ map, code ] = (await buildFromString(text, path, {

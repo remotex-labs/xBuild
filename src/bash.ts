@@ -209,8 +209,9 @@ export async function startWatchMode(
 
     const watchService = new WatchService(process.cwd(), config.watch);
     watchService.subscribe(async (changedFiles) => {
-        if(configVersion !== files.refresh(args.config!).version) {
-            configVersion = files.touch(args.config!).version;
+        const { version } = files.refresh(args.config!);
+        if (configVersion !== version) {
+            configVersion = version;
             const config = await configFileProvider(args.config!);
             applyCommandLineOverrides(config, args);
             buildService.configuration = config;

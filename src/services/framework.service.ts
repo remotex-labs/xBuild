@@ -8,7 +8,6 @@ import type { PositionInterface, FormatStackFrameInterface } from '@remotex-labs
  * Imports
  */
 
-import { cwd } from 'process';
 import { readFileSync } from 'fs';
 import { FilesModel } from '@models/files.model';
 import { inject, Injectable } from '@remotex-labs/xinject';
@@ -57,7 +56,6 @@ const EMPTY_MAPPINGS_REGEX = /"mappings"\s*:\s*""/;
  * ```ts
  * const framework = inject(FrameworkService);
  *
- * framework.projectRoot;                                        // 'D:/app' - where the build was started
  * framework.getSourceMap(framework.frameworkFile);              // the framework's own SourceService
  * framework.isFrameworkFile({ source: 'D:/app/src/index.ts' }); // false - a project file
  * ```
@@ -74,8 +72,8 @@ export class FrameworkService {
      * Absolute path of the framework file this service was loaded from.
      *
      * @remarks
-     * Normalized like {@link frameworkRoot} and {@link projectRoot},
-     * so all three compare and join the same way whatever the platform.
+     * Normalized like {@link frameworkRoot},
+     * so the two compare and join the same way whatever the platform.
      *
      * @example
      * ```ts
@@ -102,23 +100,6 @@ export class FrameworkService {
      */
 
     readonly frameworkRoot: string;
-
-    /**
-     * Absolute path of the directory the build was started from.
-     *
-     * @remarks
-     * The user's project root rather than the framework's,
-     * so it is what a path is made relative to when a frame is printed.
-     *
-     * @example
-     * ```ts
-     * framework.projectRoot; // 'D:/app'
-     * ```
-     *
-     * @since 3.0.0
-     */
-
-    readonly projectRoot: string;
 
     /**
      * Shared file cache, held on the class so {@link resolve} needs no instance.
@@ -163,7 +144,6 @@ export class FrameworkService {
      */
 
     constructor() {
-        this.projectRoot = normalize(cwd());
         this.frameworkFile = normalize(import.meta.filename);
         this.frameworkRoot = normalize(import.meta.dirname);
 

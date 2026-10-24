@@ -56,12 +56,8 @@ describe('ConfigurationService', () => {
     });
 
     describe('getValue', () => {
-        test('should read the whole configuration when it is given no selector', () => {
+        test('should read the whole configuration', () => {
             expect(service.getValue()).toEqual(initial);
-        });
-
-        test('should answer once with what the selector picked', () => {
-            expect(service.getValue(config => Object.keys(config.variants))).toEqual([ 'esm' ]);
         });
     });
 

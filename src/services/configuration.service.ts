@@ -99,43 +99,8 @@ export class ConfigurationService<T extends ConfigurationInterface = Required<xB
      * @since 2.0.0
      */
 
-    getValue(): T;
-
-    /**
-     * Reads one value out of the configuration as it stands.
-     *
-     * @typeParam R - What the selector returns
-     * @param selector - Picks the value to read
-     * @returns Whatever the selector returned
-     *
-     * @remarks
-     * The one-off counterpart of {@link select}: it answers once and never again, which suits a decision taken at a
-     * point in time rather than something that has to follow the configuration.
-     *
-     * @example
-     * ```ts
-     * configuration.getValue(config => Object.keys(config.variants)); // [ 'esm', 'cjs' ]
-     * ```
-     *
-     * @since 2.0.0
-     */
-
-    getValue<R>(selector: (config: T) => R): R;
-
-    /**
-     * Serves both reading forms.
-     *
-     * @param selector - Picks a value, or reads the whole configuration when absent
-     * @returns The configuration, or what the selector returned
-     *
-     * @since 2.0.0
-     */
-
-    getValue<R>(selector?: (config: T) => R): T | R {
-        if (!selector)
-            return this.config$.value;
-
-        return selector(this.config$.value);
+    getValue(): T {
+        return this.config$.value;
     }
 
     /**

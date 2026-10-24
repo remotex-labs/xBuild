@@ -27,7 +27,7 @@ describe('stack.provider', () => {
         xJet.restoreAllMocks();
 
         framework = { getSourceMap: xJet.fn(() => undefined), isFrameworkFile: xJet.fn(() => false) };
-        filesModel = { touch: xJet.fn(() => ({ snapshot: undefined })) };
+        filesModel = { touch: xJet.fn(() => ({ text: undefined })) };
         resolved = { stack: [] };
 
         xJet.mock(inject).mockImplementation(
@@ -54,7 +54,7 @@ describe('stack.provider', () => {
         });
 
         test('should stand the cached text in for a file with no map', () => {
-            filesModel.touch.mockReturnValue({ snapshot: { text: 'a\nb\nc\nd\ne\nf\ng\nh\ni\nj' } });
+            filesModel.touch.mockReturnValue({ text: 'a\nb\nc\nd\ne\nf\ng\nh\ni\nj' });
 
             expect(getSource('src/index.ts')?.getPositionWithCode(5, 2, <any> undefined)).toEqual({
                 line: 5,
@@ -72,7 +72,7 @@ describe('stack.provider', () => {
         });
 
         test('should take the window size the caller asks for', () => {
-            filesModel.touch.mockReturnValue({ snapshot: { text: 'a\nb\nc\nd\ne\nf\ng' } });
+            filesModel.touch.mockReturnValue({ text: 'a\nb\nc\nd\ne\nf\ng' });
 
             const position = getSource('src/index.ts')?.getPositionWithCode(3, 0, <any> undefined, {
                 linesBefore: 1, linesAfter: 1
@@ -82,7 +82,7 @@ describe('stack.provider', () => {
         });
 
         test('should clamp the window to the bounds of the file', () => {
-            filesModel.touch.mockReturnValue({ snapshot: { text: 'a\nb\nc' } });
+            filesModel.touch.mockReturnValue({ text: 'a\nb\nc' });
             const source = getSource('src/index.ts');
 
             expect(source?.getPositionWithCode(1, 0, <any> undefined)).toEqual(
@@ -94,13 +94,13 @@ describe('stack.provider', () => {
         });
 
         test('should return null for a file whose cached text is empty', () => {
-            filesModel.touch.mockReturnValue({ snapshot: { text: '' } });
+            filesModel.touch.mockReturnValue({ text: '' });
 
             expect(getSource('src/empty.ts')).toBeNull();
         });
 
         test('should default the side of the window the caller leaves out', () => {
-            filesModel.touch.mockReturnValue({ snapshot: { text: 'a\nb\nc\nd\ne\nf\ng\nh\ni\nj' } });
+            filesModel.touch.mockReturnValue({ text: 'a\nb\nc\nd\ne\nf\ng\nh\ni\nj' });
             const source = getSource('src/index.ts');
 
             expect(source?.getPositionWithCode(5, 0, <any> undefined, <any> { linesBefore: 0 })).toEqual(
@@ -112,7 +112,7 @@ describe('stack.provider', () => {
         });
 
         test('should give back no code for a line past the end of the file', () => {
-            filesModel.touch.mockReturnValue({ snapshot: { text: 'a\nb\nc' } });
+            filesModel.touch.mockReturnValue({ text: 'a\nb\nc' });
 
             expect(getSource('src/index.ts')?.getPositionWithCode(99, 0, <any> undefined)).toEqual(
                 expect.objectContaining({ line: 99, startLine: 96, endLine: 3, code: '' })

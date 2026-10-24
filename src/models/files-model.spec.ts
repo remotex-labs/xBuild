@@ -60,7 +60,7 @@ describe('FilesModel', () => {
             const entry = model.touch('a.ts');
 
             expect(entry).toEqual(expect.objectContaining({ mtimeMs: 100, version: 1 }));
-            expect(entry.snapshot?.text).toBe('export const answer = 42;');
+            expect(entry.text).toBe('export const answer = 42;');
             expect(readMock).toHaveBeenCalledWith('/abs/a.ts', 'utf-8');
         });
 
@@ -95,7 +95,7 @@ describe('FilesModel', () => {
             const entry = model.refresh('a.ts');
 
             expect(entry).toEqual(expect.objectContaining({ mtimeMs: 200, version: 2 }));
-            expect(entry.snapshot?.text).toBe('export const answer = 43;');
+            expect(entry.text).toBe('export const answer = 43;');
         });
 
         test('should use the given stats instead of calling stat', () => {
@@ -105,10 +105,10 @@ describe('FilesModel', () => {
             expect(statMock).not.toHaveBeenCalled();
         });
 
-        test('should track a missing path with an empty snapshot', () => {
+        test('should track a missing path without text', () => {
             statMock.mockReturnValue(undefined);
 
-            expect(model.refresh('missing.ts')).toEqual({ mtimeMs: 0, version: 1, snapshot: undefined });
+            expect(model.refresh('missing.ts')).toEqual({ mtimeMs: 0, version: 1, text: undefined });
             expect(readMock).not.toHaveBeenCalled();
         });
 
@@ -118,7 +118,7 @@ describe('FilesModel', () => {
 
             const entry = model.refresh('a.ts');
 
-            expect(entry).toEqual({ mtimeMs: 0, version: 2, snapshot: undefined });
+            expect(entry).toEqual({ mtimeMs: 0, version: 2, text: undefined });
             expect(model.refresh('a.ts')).toBe(entry);
         });
     });
@@ -166,9 +166,38 @@ describe('FilesModel', () => {
         });
     });
 
-    describe('snapshot', () => {
+    describe('revision', () => {
+        test('should move when an entry is rebuilt and stand while it is served from the cache', () => {
+            model.touch('a.ts');
+            const { revision } = model;
+            model.touch('a.ts');
+
+            expect(model.revision).toBe(revision);
+
+            statMock.mockReturnValue({ mtimeMs: 200, isFile: (): boolean => true });
+            model.refresh('a.ts');
+
+            expect(model.revision).toBe(revision + 1);
+        });
+
+        test('should move when the cache is cleared', () => {
+            const { revision } = model;
+            model.clear();
+
+            expect(model.revision).toBe(revision + 1);
+        });
+    });
+
+    describe('text', () => {
         test('should hold the content as read from disk', () => {
-            expect(model.touch('a.ts').snapshot).toEqual({ text: 'export const answer = 42;' });
+            expect(model.touch('a.ts').text).toBe('export const answer = 42;');
+        });
+
+        test('should tell an empty file apart from a missing one', () => {
+            readMock.mockReturnValue('');
+
+            expect(model.touch('a.ts').text).toBe('');
+            expect(model.refresh('a.ts').version).toBe(1);
         });
 
         test('should replace the content once the file changes on disk', () => {
@@ -176,7 +205,7 @@ describe('FilesModel', () => {
             statMock.mockReturnValue({ mtimeMs: 200, isFile: (): boolean => true });
             readMock.mockReturnValue('abXcd');
 
-            expect(model.refresh('a.ts').snapshot?.text).toBe('abXcd');
+            expect(model.refresh('a.ts').text).toBe('abXcd');
         });
     });
 });

@@ -3,7 +3,6 @@
  */
 
 import type { ParsedCommandLine } from 'typescript/sync';
-import type { FileSnapshotInterface } from '@models/interfaces/files-model.interface';
 
 /**
  * Imports
@@ -15,7 +14,7 @@ import { FilesModel } from '@models/files.model';
 import { createMatcher } from '@components/glob.component';
 
 /**
- * The file set and file versions that one TypeScript project hands to the compiler.
+ * The file set, file versions, and exclusions that one TypeScript project hands to the compiler.
  *
  * @remarks
  * The compiler runs in its own process, reads every file through the shared {@link FilesModel},
@@ -28,14 +27,15 @@ import { createMatcher } from '@components/glob.component';
  *   which {@link collectChanges} compares against the file model to list what the compiler has to re-read
  *
  * Paths matched by the configuration's `exclude` globs are skipped by {@link refreshFiles}
- * and reported as excluded through {@link isExcluded}.
+ * and reported through {@link isExcluded},
+ * while the `excludeTypeChack` globs are reported through {@link isTypeCheckExcluded}.
  *
  * @example
  * ```ts
  * const host = new LanguageHostService(parsedConfig); // entry files tracked and read up front
  *
  * host.observe(program.getSourceFileNames());         // versions the compiler just read
- * host.refresh('src/index.ts');                       // the file changed on disk
+ * host.refreshFiles([ 'src/index.ts' ]);              // the file changed on disk
  * host.collectChanges();                              // [ 'D:/app/src/index.ts' ]
  * host.options = nextParsedConfig;                    // swap configuration and re-track from scratch
  * ```
@@ -46,7 +46,7 @@ import { createMatcher } from '@components/glob.component';
 
 export class LanguageHostService {
     /**
-     * Shared model that reads files, caches their snapshots, and tracks their versions.
+     * Shared model that reads files, caches their content, and tracks their versions.
      *
      * @remarks
      * Registered as a singleton, so every host and build step works against one cache keyed by resolved absolute path.
@@ -66,11 +66,10 @@ export class LanguageHostService {
      * Resolved absolute paths of every file this host has tracked as a program root.
      *
      * @remarks
-     * Copied out by {@link getScriptFileNames}, which is what the program takes as its roots.
      * A path is added the first time it is refreshed, then kept even after the file is deleted,
      * so the compiler observes the deletion as a missing file rather than as a root that vanished.
      *
-     * @see track
+     * @see tracked
      * @since 3.0.0
      */
 
@@ -80,8 +79,8 @@ export class LanguageHostService {
      * Memoized exclusion verdict per path, keyed by the resolved absolute path.
      *
      * @remarks
-     * Exclusion is asked for on every refresh and on every source file an incremental check walks,
-     * while the answer only changes with the configuration, so {@link reload} clears this rather than recomputing it.
+     * Exclusion is asked for on every refresh and on every file the type check walks,
+     * while the answer only changes with the configuration, so the {@link options} setter clears this.
      *
      * @see isExcluded
      * @since 3.0.0
@@ -90,7 +89,7 @@ export class LanguageHostService {
     private readonly exclusions = new Map<string, boolean>();
 
     /**
-     * The version each file had when the compiler last read it, keyed by the resolved absolute path.
+     * The version each file had when the compiler last read it, keyed by the name the compiler gave it.
      *
      * @remarks
      * The compiler process caches what it read and re-reads a file only once it is told the file changed.
@@ -106,27 +105,43 @@ export class LanguageHostService {
     private readonly observed = new Map<string, number>();
 
     /**
-     * A predicate compiled from the configuration's `exclude` globs, tested against working-directory-relative
-     * paths.
+     * The file model revision that {@link collectChanges} last compared against.
      *
      * @remarks
-     * Assigned by {@link reload} before any lookup can reach it, hence the definite assignment.
-     * It takes a relative path, so {@link isExcluded} is what callers use.
+     * While the model's revision still matches, no entry has moved, so the walk over {@link observed} is skipped.
      *
-     * @see compileExclude
+     * @since 3.2.0
+     */
+
+    private revision = -1;
+
+    /**
+     * A predicate compiled from the configuration's `exclude` globs, tested against working-directory-relative paths.
+     *
+     * @see isExcluded
      * @since 3.0.0
      */
 
-    private matches!: (path: string) => boolean;
+    private excludes!: (path: string) => boolean;
+
+    /**
+     * A predicate compiled from the configuration's `excludeTypeChack` globs,
+     * tested against working-directory-relative paths.
+     *
+     * @see isTypeCheckExcluded
+     * @since 3.2.0
+     */
+
+    private typeCheckExcludes!: (path: string) => boolean;
 
     /**
      * Initializes a new {@link LanguageHostService} from a parsed configuration.
      *
-     * @param config - Parsed TypeScript configuration carrying the compiler options, entry file names,
-     * and the raw `exclude` globs
+     * @param config - Parsed TypeScript configuration carrying the entry file names and the raw globs
      *
      * @remarks
-     * Runs {@link reload}, so the entry files are read into the cache and tracked before the host is handed out.
+     * Goes through the {@link options} setter, so the entry files are read into the cache and tracked
+     * before the host is handed out.
      *
      * @example
      * ```ts
@@ -134,34 +149,34 @@ export class LanguageHostService {
      * host.getScriptFileNames(); // the configuration's entry files
      * ```
      *
-     * @see reload
+     * @see options
      * @since 3.0.0
      */
 
-    constructor(private config: ParsedCommandLine) {
-        this.reload();
+    constructor(config: ParsedCommandLine) {
+        this.options = config;
     }
 
     /**
-     * The live set of resolved paths currently tracked by this host.
+     * The live set of resolved paths currently tracked as program roots.
      *
-     * @returns The tracked set itself, mutated as files are refreshed and cleared
+     * @returns The tracked set itself, growing as files are refreshed
      *
      * @remarks
      * Exposes the same paths as {@link getScriptFileNames} without copying,
-     * so a caller can iterate them or feed them straight back into {@link refreshFiles}.
+     * so asking how many roots there are costs nothing.
      *
      * @example
      * ```ts
-     * host.refresh('src/index.ts');
-     * host.tracked.has(host.realpath('src/index.ts')); // true
+     * host.refreshFiles([ 'src/index.ts' ]);
+     * host.tracked.size; // 1
      * ```
      *
      * @see getScriptFileNames
      * @since 3.0.0
      */
 
-    get tracked(): Set<string> {
+    get tracked(): ReadonlySet<string> {
         return this.trackedFiles;
     }
 
@@ -171,8 +186,10 @@ export class LanguageHostService {
      * @param config - The new parsed configuration
      *
      * @remarks
-     * Delegates to {@link reload}, so the exclude predicate is recompiled and the new `config.fileNames` replace the
-     * tracked set entirely.
+     * Both glob sets are compiled again, the memoized exclusions and the observed versions are dropped,
+     * and the tracked set is replaced by the new entry files, which are read into the cache on the way in.
+     * A configuration naming no glob in a set excludes nothing,
+     * since {@link createMatcher} reads an empty list as matching every path.
      *
      * @example
      * ```ts
@@ -180,141 +197,48 @@ export class LanguageHostService {
      * host.getScriptFileNames(); // the new entry files, nothing carried over
      * ```
      *
-     * @see reload
+     * @see createMatcher
      * @since 3.0.0
      */
 
     set options(config: ParsedCommandLine) {
-        this.config = config;
-        this.reload();
-    }
+        const raw = <{ exclude?: Array<string>, excludeTypeChack?: Array<string> } | undefined> config.raw;
+        const compile = (globs?: Array<string>): (path: string) => boolean =>
+            globs?.length ? createMatcher(globs) : (): boolean => false;
 
-    /**
-     * Drops the tracked set and repopulates it from the configured entry files.
-     *
-     * @remarks
-     * The {@link filesCache} snapshots survive, so only membership is reset,
-     * and the files are re-read on the way back in through {@link refreshFiles}.
-     *
-     * @example
-     * ```ts
-     * host.refresh('src/scratch.ts');
-     * host.clearTracked();
-     * host.getScriptFileNames(); // back to the configured entry files, scratch.ts dropped
-     * ```
-     *
-     * @see refreshFiles
-     * @since 3.0.0
-     */
-
-    clearTracked(): void {
-        this.trackedFiles.clear();
-        this.refreshFiles(this.config.fileNames);
-    }
-
-    /**
-     * Rebuilds the exclude predicate and the tracked set from the current configuration.
-     *
-     * @remarks
-     * The single initialization path shared by the constructor and the {@link options} setter:
-     * - compiles the `exclude` globs into {@link matches},
-     * - drops the memoized {@link exclusions}, whose verdicts belong to the previous globs,
-     * - forgets the {@link observed} versions, since the program that read them is about to be rebuilt,
-     * - refreshes every entry file through {@link clearTracked}, which reads them into the cache and tracks them.
-     *
-     * Call it directly when the configuration object was edited in place rather than replaced.
-     *
-     * @example
-     * ```ts
-     * host.reload();
-     * host.getScriptFileNames(); // what the configuration now selects
-     * ```
-     *
-     * @see clearTracked
-     * @since 3.0.0
-     */
-
-    reload(): void {
-        this.matches = this.compileExclude((<{ exclude?: Array<string> } | undefined> this.config.raw)?.exclude);
+        this.excludes = compile(raw?.exclude);
+        this.typeCheckExcludes = compile(raw?.excludeTypeChack);
         this.exclusions.clear();
         this.observed.clear();
-
-        this.clearTracked();
+        this.trackedFiles.clear();
+        this.refreshFiles(config.fileNames);
     }
 
     /**
-     * Re-reads a file from the disk, tracks it, and returns its entry.
+     * Re-reads and tracks a batch of files, skipping any path matched by the exclude globs.
      *
-     * @param path - File path, relative or absolute
-     * @returns The entry for the file, with `version` advanced when the content changed
-     *
-     * @remarks
-     * The path is tracked before the read, so it stays listed even when the file turns out to be gone.
-     * Exclusion is not consulted here - {@link refreshFiles} is the caller that filters.
-     *
-     * @example
-     * ```ts
-     * const state = host.refresh('src/index.ts');
-     * state.version;        // 1 at first sight, advanced on every later change
-     * state.snapshot?.text; // the content just read
-     * ```
-     *
-     * @see track
-     * @since 3.0.0
-     */
-
-    refresh(path: string): FileSnapshotInterface {
-        return this.filesCache.refresh(this.track(path));
-    }
-
-    /**
-     * Refreshes and tracks a batch of files, skipping any path matched by the exclude globs.
-     *
-     * @param paths - Paths to refresh, defaulting to the currently tracked set
+     * @param paths - Paths to refresh, relative or absolute
      *
      * @remarks
-     * Each retained path goes through {@link refresh} and so becomes tracked.
-     * Calling it with no argument brings the already tracked files current, which is what a watch cycle does.
+     * Each retained path is tracked before it is read, so it stays listed even when the file turns out to be gone.
      *
      * @example
      * ```ts
      * host.refreshFiles([ 'src/a.ts', 'src/a.spec.ts' ]); // a.spec.ts skipped when excluded
-     * host.refreshFiles();                                // re-read everything already tracked
      * ```
      *
-     * @see refresh
+     * @see FilesModel.refresh
      * @since 3.0.0
      */
 
-    refreshFiles(paths: Array<string> | Set<string> = this.trackedFiles): void {
+    refreshFiles(paths: Iterable<string>): void {
         for (const path of paths) {
             if (this.isExcluded(path)) continue;
-            this.refresh(path);
+
+            const target = this.filesCache.resolve(path);
+            this.trackedFiles.add(target);
+            this.filesCache.refresh(target);
         }
-    }
-
-    /**
-     * Reads file content through the snapshot cache.
-     *
-     * @param path - File path, relative or absolute
-     * @param encoding - Encoding used when the file is read, defaulting to `utf-8`
-     * @returns The file content, or `undefined` when the path holds no readable file
-     *
-     * @remarks
-     * Served from the cache once the file has been read, so the encoding only takes effect on the first read of a path.
-     *
-     * @example
-     * ```ts
-     * host.readFile('src/index.ts'); // export const x = 10;
-     * host.readFile('src/gone.ts');  // undefined
-     * ```
-     *
-     * @see FilesModel.touch
-     * @since 3.0.0
-     */
-
-    readFile(path: string, encoding?: BufferEncoding): string | undefined {
-        return this.filesCache.touch(path, encoding).snapshot?.text;
     }
 
     /**
@@ -347,7 +271,8 @@ export class LanguageHostService {
      * @remarks
      * The compiler read each of these through the file model while building,
      * so the version the model holds now is the one the compiler saw.
-     * A path the model has never read, such as a default library the compiler serves itself, is passed over.
+     * A path the model has never read is passed over.
+     * Each path is kept as the compiler names it, which is the name a change notification has to carry.
      *
      * @example
      * ```ts
@@ -362,25 +287,28 @@ export class LanguageHostService {
     observe(paths: Iterable<string>): void {
         for (const path of paths) {
             const version = this.filesCache.getSnapshot(path)?.version;
-            if (version !== undefined) this.observed.set(this.filesCache.resolve(path), version);
+            if (version !== undefined) this.observed.set(path, version);
         }
+
+        this.revision = this.filesCache.revision;
     }
 
     /**
      * Lists the observed files whose version has moved since the compiler read them.
      *
-     * @returns The resolved paths the compiler has to re-read, empty when nothing moved
+     * @returns The paths the compiler has to re-read, named as it named them, empty when nothing moved
      *
      * @remarks
+     * While the file model's revision stands, nothing moved, and the call returns without walking.
      * Each path reported is recorded at its new version,
      * so a change is reported once rather than on every later call.
      * A file the model no longer holds counts as a change, which is how a deletion reaches the compiler.
      *
      * @example
      * ```ts
-     * host.refresh('src/index.ts'); // the file changed on disk
-     * host.collectChanges();        // [ 'D:/app/src/index.ts' ]
-     * host.collectChanges();        // []
+     * host.refreshFiles([ 'src/index.ts' ]); // the file changed on disk
+     * host.collectChanges();                 // [ 'D:/app/src/index.ts' ]
+     * host.collectChanges();                 // []
      * ```
      *
      * @see observe
@@ -389,6 +317,9 @@ export class LanguageHostService {
 
     collectChanges(): Array<string> {
         const changed: Array<string> = [];
+        if (this.revision === this.filesCache.revision) return changed;
+
+        this.revision = this.filesCache.revision;
         for (const [ path, version ] of this.observed) {
             const current = this.filesCache.getSnapshot(path)?.version ?? -1;
             if (current === version) continue;
@@ -401,48 +332,7 @@ export class LanguageHostService {
     }
 
     /**
-     * Resolves a path to the absolute form used as the tracking and cache key.
-     *
-     * @param path - File path, relative or absolute
-     * @returns The resolved absolute path
-     *
-     * @remarks
-     * Applies the same normalization {@link FilesModel} applies to its cache keys,
-     * so the paths handed to the compiler match the ones tracked here.
-     *
-     * @example
-     * ```ts
-     * host.realpath('src/index.ts'); // '/project/src/index.ts'
-     * ```
-     *
-     * @see FilesModel.resolve
-     * @since 3.0.0
-     */
-
-    realpath(path: string): string {
-        return this.filesCache.resolve(path);
-    }
-
-    /**
-     * Compiles exclude globs into a matcher over working-directory-relative paths.
-     *
-     * @param globs - Patterns whose matching paths are excluded, or `undefined` when the configuration has none
-     * @returns A predicate reporting `true` for a matched relative path, or one that always reports `false`
-     *
-     * @remarks
-     * The empty case is handled explicitly, since {@link createMatcher} reads an empty pattern list as matching
-     * everything, which would exclude the whole project.
-     *
-     * @see createMatcher
-     * @since 3.0.0
-     */
-
-    private compileExclude(globs?: Array<string>): (path: string) => boolean {
-        return globs && globs.length > 0 ? createMatcher(globs) : (): boolean => false;
-    }
-
-    /**
-     * Reports whether a path is excluded by the configuration, memorizing the verdict.
+     * Reports whether a path is excluded by the configuration's `exclude` globs, memorizing the verdict.
      *
      * @param path - File path as the caller holds it, relative or absolute
      * @returns `true` when the path matches the exclude globs
@@ -450,7 +340,6 @@ export class LanguageHostService {
      * @remarks
      * The path is resolved before the verdict is stored, so the same file reached by two spellings is matched once,
      * and every later lookup of either costs a map read.
-     * The type check asks this for every file it walks, so it agrees with how {@link refreshFiles} filters paths.
      *
      * @example
      * ```ts
@@ -466,31 +355,30 @@ export class LanguageHostService {
         const target = this.filesCache.resolve(path);
         let excluded = this.exclusions.get(target);
         if (excluded === undefined) this.exclusions.set(
-            target, excluded = this.matches(relative(process.cwd(), target))
+            target, excluded = this.excludes(relative(process.cwd(), target))
         );
 
         return excluded;
     }
 
     /**
-     * Adds a path to the tracked set and returns its resolved key.
+     * Reports whether the configuration's `excludeTypeChack` globs leave a file out of the type check.
      *
-     * @param path - File path, relative or absolute
-     * @returns The resolved absolute path used as the tracking key
+     * @param path - Absolute path of the file, as the compiler names it
+     * @returns `true` when the path matches the `excludeTypeChack` globs
      *
      * @remarks
-     * Centralizes the tracking behind {@link refresh}.
-     * A path is added the first time it is seen and never removed,
-     * so a deletion leaves a still-listed entry that resolves to an empty snapshot.
+     * The globs are tested against the path relative to the working directory, which is how a project writes them.
      *
-     * @see trackedFiles
-     * @since 3.0.0
+     * @example
+     * ```ts
+     * host.isTypeCheckExcluded('D:/app/src/generated/api.ts'); // true - with [ 'src/generated/**' ]
+     * ```
+     *
+     * @since 3.2.0
      */
 
-    private track(path: string): string {
-        const target = this.filesCache.resolve(path);
-        this.trackedFiles.add(target);
-
-        return target;
+    isTypeCheckExcluded(path: string): boolean {
+        return this.typeCheckExcludes(relative(process.cwd(), path));
     }
 }

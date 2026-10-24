@@ -2,7 +2,6 @@
  * Imports
  */
 
-import { cwd } from 'process';
 import { readFileSync } from 'fs';
 import { FrameworkService } from './framework.service';
 import { normalize, resolve, SourceService } from '@remotex-labs/xmap';
@@ -28,8 +27,7 @@ describe('FrameworkService', () => {
     });
 
     describe('constructor', () => {
-        test('should capture the project root and register the framework own map', () => {
-            expect(framework.projectRoot).toBe(normalize(cwd()));
+        test('should capture the framework file and register its own map', () => {
             expect(framework.frameworkFile).toBe(normalize(framework.frameworkFile));
             expect(framework.getSourceMap(framework.frameworkFile)).toBeInstanceOf(SourceService);
         });

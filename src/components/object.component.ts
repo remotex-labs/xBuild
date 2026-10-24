@@ -154,8 +154,7 @@ export function deepMerge<T extends object>(target: T, ...sources: Array<object>
  */
 
 export function equals(a: unknown, b: unknown, strictCheck = true): boolean {
-    if (a === b) return true;
-    if (Object.is(a, b)) return true;
+    if (a === b || Object.is(a, b)) return true;
     if (a === null || b === null) return false;
 
     if (a instanceof Date && b instanceof Date)
@@ -202,7 +201,7 @@ export function hasKey(obj: unknown, key: string | symbol): boolean {
     if (obj == null || (typeof obj !== 'object' && typeof obj !== 'function'))
         return false;
 
-    return key in obj || Object.prototype.hasOwnProperty.call(obj, key);
+    return key in obj;
 }
 
 /**

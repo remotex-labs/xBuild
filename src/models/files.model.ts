@@ -44,6 +44,24 @@ import { Injectable } from '@remotex-labs/xinject';
 })
 export class FilesModel {
     /**
+     * A counter that moves every time any entry is rebuilt or the cache is cleared.
+     *
+     * @remarks
+     * Lets a consumer that compares many versions skip the walk entirely while nothing in the model has moved.
+     *
+     * @example
+     * ```ts
+     * const { revision } = model;
+     * model.refresh('src/index.ts'); // the file changed on disk
+     * model.revision > revision;     // true
+     * ```
+     *
+     * @since 3.2.0
+     */
+
+    revision = 0;
+
+    /**
      * Memoized mapping from an input path to its resolved absolute form.
      *
      * @remarks
@@ -85,6 +103,7 @@ export class FilesModel {
     clear(): void {
         this.cache.clear();
         this.resolved.clear();
+        this.revision++;
     }
 
     /**
@@ -247,9 +266,9 @@ export class FilesModel {
         const entry = this.cache.get(target);
 
         if (!info?.isFile()) {
-            if (entry && !entry.snapshot) return entry;
+            if (entry && entry.text === undefined) return entry;
 
-            return this.store(target, { mtimeMs: 0, snapshot: undefined, version: (entry?.version ?? 0) + 1 });
+            return this.store(target, { mtimeMs: 0, text: undefined, version: (entry?.version ?? 0) + 1 });
         }
 
         if (entry?.mtimeMs === info.mtimeMs) return entry;
@@ -257,7 +276,7 @@ export class FilesModel {
         return this.store(target, {
             mtimeMs: info.mtimeMs,
             version: (entry?.version ?? 0) + 1,
-            snapshot: { text: readFileSync(target, encoding) }
+            text: readFileSync(target, encoding)
         });
     }
 
@@ -269,13 +288,15 @@ export class FilesModel {
      * @returns The stored entry
      *
      * @remarks
-     * Exists so {@link sync} can store and return in a single expression.
+     * Exists so {@link sync} can store and return in a single expression,
+     * and moves {@link revision} with every entry it writes.
      *
      * @since 3.0.0
      */
 
     private store(target: string, entry: FileSnapshotInterface): FileSnapshotInterface {
         this.cache.set(target, entry);
+        this.revision++;
 
         return entry;
     }

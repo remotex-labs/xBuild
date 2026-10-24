@@ -8,7 +8,6 @@ import type { LifecycleContextInterface, LifecycleLogsType } from '@interfaces/l
  * Imports
  */
 
-import { parseSync } from 'oxc-parser';
 import { transformMacros } from './macros.directive';
 import { evaluate } from '@directives/inline.directive';
 
@@ -29,7 +28,7 @@ describe('transformMacros', () => {
      */
 
     async function transform(code: string, file = target): Promise<string> {
-        return await transformMacros(parseSync(file, code, { sourceType: 'module' }), file, code, context);
+        return await transformMacros(file, code, context);
     }
 
     beforeEach(() => {

@@ -699,16 +699,12 @@ export class VariantService {
         const path = VariantService.filesModel.resolve(args.path);
 
         let loader: Loader = 'default';
-        let contents = VariantService.filesModel.touch(path).snapshot?.text ?? '';
+        let contents = VariantService.filesModel.touch(path).text ?? '';
 
         try {
-            const parsed = parseSync(path, contents, { sourceType: 'module' });
-            contents = await transformMacros(parsed, path, contents, context);
-
-            if (!context.options.bundle) {
-                const parsed = parseSync(path, contents, { sourceType: 'module' });
-                contents = resolveSource(parsed, path, contents, this.typescriptModule);
-            }
+            contents = await transformMacros(path, contents, context);
+            if (!context.options.bundle)
+                contents = resolveSource(parseSync(path, contents, { sourceType: 'module' }), path, contents, this.typescriptModule);
         } catch (error) {
             this.fail(context.logs, error);
         }

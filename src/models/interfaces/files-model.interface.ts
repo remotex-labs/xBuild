@@ -1,24 +1,4 @@
 /**
- * The content of one cached file.
- *
- * @remarks
- * Held as an object rather than a bare string,
- * so a missing file is told apart from an empty one by the snapshot being absent rather than by its text.
- *
- * @example
- * ```ts
- * const snapshot = model.touch('src/index.ts').snapshot;
- *
- * snapshot?.text; // 'export const answer = 42;'
- * ```
- *
- * @see FileSnapshotInterface
- * @since 3.2.0
- */
-
-export type ScriptSnapshotType = { text: string };
-
-/**
  * Cached state of one tracked file.
  *
  * @remarks
@@ -29,11 +9,10 @@ export type ScriptSnapshotType = { text: string };
  * ```ts
  * const entry = model.touch('src/index.ts');
  *
- * entry.version;        // 1
- * entry.snapshot?.text; // 'export const answer = 42;'
+ * entry.version; // 1
+ * entry.text;    // 'export const answer = 42;'
  * ```
  *
- * @see ScriptSnapshotType
  * @since 2.0.0
  */
 
@@ -80,18 +59,18 @@ export interface FileSnapshotInterface {
      * Content of the file, or `undefined` when the path carries no readable file.
      *
      * @remarks
-     * A missing path is tracked with an empty snapshot rather than left out of the cache,
+     * A missing path is tracked without text rather than left out of the cache,
      * so the compiler can be told that a file it once parsed is gone.
+     * An empty file holds an empty string, which is what tells it apart from a missing one.
      *
      * @example
      * ```ts
-     * model.touch('src/index.ts').snapshot?.text; // 'export const answer = 42;'
-     * model.touch('missing.ts').snapshot;         // undefined
+     * model.touch('src/index.ts').text; // 'export const answer = 42;'
+     * model.touch('missing.ts').text;   // undefined
      * ```
      *
-     * @see ScriptSnapshotType
-     * @since 3.0.0
+     * @since 3.2.0
      */
 
-    snapshot: ScriptSnapshotType | undefined;
+    text: string | undefined;
 }

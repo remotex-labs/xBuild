@@ -22,7 +22,7 @@ describe('analyzeMacros', () => {
 
         touchMock = xJet.spyOn(cache, 'touch').mockImplementation((path: string) => <any> {
             version: 1,
-            snapshot: sources[path] === undefined ? undefined : { text: sources[path] }
+            text: sources[path]
         });
     });
 
@@ -31,7 +31,7 @@ describe('analyzeMacros', () => {
         expect(touchMock).not.toHaveBeenCalled();
     });
 
-    test('should skip a file that carries no snapshot', () => {
+    test('should skip a file that carries no text', () => {
         expect([ ...analyzeMacros([ 'missing.ts' ], {}) ]).toEqual([]);
         expect(touchMock).toHaveBeenCalledWith('missing.ts');
     });

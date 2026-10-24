@@ -19,6 +19,7 @@ import { inject } from '@remotex-labs/xinject';
 import { Subject } from '@remotex-labs/xobservable';
 import { readdir, stat, readFile } from 'fs/promises';
 import { FrameworkService } from '@services/framework.service';
+import { ContentTypes } from '@server/constants/server.constant';
 
 /**
  * Serves one directory over HTTP or HTTPS, files and listings alike.
@@ -173,9 +174,19 @@ export class ServerModule {
      *
      * @returns A promise settling once the server is listening
      *
+     * @throws Error - Raised when a key or certificate cannot be read
+     *
      * @remarks
+     * Every request goes through {@link handleRequest},
+     * which is handed the default handling as a callback,
+     * so a configuration hook can decide whether to run it.
      * The `onStart` hook runs from the listen callback,
      * so it has already been called - and the assigned port already written back - by the time this resolves.
+     * A configuration naming neither key nor certificate falls back to the pair shipped with the framework,
+     * so HTTPS can be switched on without producing one first.
+     * That pair is self-signed, so a browser will warn about it, which is what a development server can live with.
+     * Both files are read synchronously, before anything is listening,
+     * so a missing one fails the start rather than the first request.
      * Nothing guards against starting twice:
      * a second call replaces the reference and leaves the first server listening with no way left to close it,
      * so reach for {@link restart} rather than starting again.
@@ -193,10 +204,27 @@ export class ServerModule {
      */
 
     async start(): Promise<void> {
-        if (this.config.https)
-            return await this.startHttpsServer();
+        const { https: secure, host, key, cert } = this.config;
+        const certs = join(this.framework.frameworkRoot, '..', 'certs');
+        const handler = (req: IncomingMessage, res: ServerResponse): void =>
+            this.handleRequest(req, res, () => this.defaultResponse(req, res));
 
-        await this.startHttpServer();
+        this.server = secure ? https.createServer({
+            key: readFileSync(key ?? join(certs, 'server.key')),
+            cert: readFileSync(cert ?? join(certs, 'server.crt'))
+        }, handler) : http.createServer(handler);
+
+        await new Promise<void>(resolve => this.server!.listen(this.config.port, host, () => {
+            this.setActualPort();
+            const { port } = this.config;
+            const address: ServerAddressInterface = {
+                host: host!, port: port!, url: `${ secure ? 'https' : 'http' }://${ host }:${ port }`
+            };
+
+            this.config.onStart?.(address);
+            this.events$.next({ ...address, type: 'start' });
+            resolve();
+        }));
     }
 
     /**
@@ -282,83 +310,6 @@ export class ServerModule {
     }
 
     /**
-     * Creates and starts the plain HTTP server.
-     *
-     * @returns A promise settling once the server is listening
-     *
-     * @remarks
-     * Every request goes through {@link handleRequest},
-     * which is handed the default handling as a callback,
-     * so a configuration hook can decide whether to run it.
-     *
-     * @since 2.0.0
-     */
-
-    private startHttpServer(): Promise<void> {
-        return new Promise<void>((resolve) => {
-            this.server = http.createServer((req, res) => {
-                this.handleRequest(req, res, () => this.defaultResponse(req, res));
-            });
-
-            this.server.listen(this.config.port, this.config.host, () => {
-                this.setActualPort();
-                const address: ServerAddressInterface = {
-                    host: this.config.host!,
-                    port: this.config.port!,
-                    url: `http://${ this.config.host }:${ this.config.port }`
-                };
-
-                this.config.onStart?.(address);
-                this.events$.next({ ...address, type: 'start' });
-                resolve();
-            });
-        });
-    }
-
-    /**
-     * Creates and starts the HTTPS server.
-     *
-     * @returns A promise settling once the server is listening
-     *
-     * @throws Error - Raised when a key or certificate cannot be read
-     *
-     * @remarks
-     * A configuration naming neither key nor certificate falls back to the pair shipped with the framework,
-     * so HTTPS can be switched on without producing one first.
-     * That pair is self-signed, so a browser will warn about it, which is what a development server can live with.
-     * Both files are read synchronously, before anything is listening,
-     * so a missing one fails the start rather than the first request.
-     *
-     * @since 2.0.0
-     */
-
-    private startHttpsServer(): Promise<void> {
-        return new Promise((resolve) => {
-            const options = {
-                key: readFileSync(this.config.key ?? join(this.framework.frameworkRoot, '..', 'certs', 'server.key')),
-                cert: readFileSync(this.config.cert ?? join(this.framework.frameworkRoot, '..', 'certs', 'server.crt'))
-            };
-
-            this.server = https.createServer(options, (req, res) => {
-                this.handleRequest(req, res, () => this.defaultResponse(req, res));
-            });
-
-            this.server.listen(this.config.port, this.config.host, () => {
-                this.setActualPort();
-                const address: ServerAddressInterface = {
-                    host: this.config.host!,
-                    port: this.config.port!,
-                    url: `https://${ this.config.host }:${ this.config.port }`
-                };
-
-                this.config.onStart?.(address);
-                this.events$.next({ ...address, type: 'start' });
-                resolve();
-            });
-        });
-    }
-
-    /**
      * Passes a request to the configuration's hook or to the default handling when there is none.
      *
      * @param req - Request as it arrived
@@ -397,30 +348,15 @@ export class ServerModule {
      * @returns The matching content type, or the binary fallback for an extension not listed
      *
      * @remarks
-     * Covers what a build emits rather than the web at large.
-     * TypeScript is served as plain text, so a browser shows a source file instead of downloading it,
-     * and an unlisted extension downloads under the binary fallback rather than under a guess.
+     * An unlisted extension downloads under the binary fallback rather than under a guess.
+     *
+     * @see ContentTypes
      *
      * @since 2.0.0
      */
 
     private getContentType(ext: string): string {
-        const contentTypes: Record<string, string> = {
-            html: 'text/html',
-            css: 'text/css',
-            js: 'application/javascript',
-            cjs: 'application/javascript',
-            mjs: 'application/javascript',
-            ts: 'text/plain',
-            map: 'application/json',
-            json: 'application/json',
-            png: 'image/png',
-            jpg: 'image/jpeg',
-            gif: 'image/gif',
-            txt: 'text/plain'
-        };
-
-        return contentTypes[ext] || 'application/octet-stream';
+        return ContentTypes[ext] ?? 'application/octet-stream';
     }
 
     /**

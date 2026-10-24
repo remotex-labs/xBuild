@@ -3,7 +3,6 @@
  */
 
 import type { PartialMessage } from 'esbuild';
-import type { ParseResult } from 'oxc-parser';
 import type { LifecycleContextInterface } from '@interfaces/lifecycle.interface';
 import type { LogLevelType } from '@providers/interfaces/log-provider.interface';
 import type { NodeVisitorType } from '@directives/interfaces/macros-directive.interface';
@@ -16,7 +15,7 @@ import type { MacroStateInterface, MacroTargetInterface } from '@directives/inte
  * Imports
  */
 
-import { visitorKeys } from 'oxc-parser';
+import { parseSync, visitorKeys } from 'oxc-parser';
 import { collectLog } from '@providers/log.provider';
 import { evaluate } from '@directives/inline.directive';
 import { applyEdits } from '@components/transformer.component';
@@ -475,7 +474,6 @@ export function expandNode(state: MacroStateInterface, node: Node, parent: Node 
 /**
  * Expands every macro in a file and returns the rewritten source.
  *
- * @param parse - The file's parse result, walked rather than parsed again
  * @param target - Absolute path of the file, named in messages and used to resolve an inline value's packages
  * @param content - Source text of the file
  * @param context - Lifecycle context, read for the logs, the flags, and the names the build has dropped
@@ -487,12 +485,13 @@ export function expandNode(state: MacroStateInterface, node: Node, parent: Node 
  * A first walk over a file carrying {@link MacroScanHint} collects the conditional macros that are not active and
  * adds their names to the set the build shares, so dropping a name where it was declared.
  * also drops it where it is imported.
+ * The file is parsed only once it passes those checks, so a file without macros costs no parse at all.
  * The rewriting walk follows, and any deferred `inline` value is awaited before the edits are applied.
  *
  * @example
  * ```ts
  * // source: export const $$dev = $$ifdef('DEV', () => log());
- * await transformMacros(parse, '/src/a.ts', content, context);
+ * await transformMacros('/src/a.ts', content, context);
  * // result: export function $$dev() { return log(); } - while DEV is set
  * ```
  *
@@ -502,9 +501,7 @@ export function expandNode(state: MacroStateInterface, node: Node, parent: Node 
  * @since 3.0.0
  */
 
-export async function transformMacros(
-    parse: ParseResult, target: string, content: string, context: LifecycleContextInterface
-): Promise<string> {
+export async function transformMacros(target: string, content: string, context: LifecycleContextInterface): Promise<string> {
     if (content.length < 1 || target.includes('node_modules')) return content;
 
     const { dropped } = context.stage;
@@ -521,7 +518,8 @@ export async function transformMacros(
         overrides: context.overrides
     };
 
-    if (content.includes(MacroScanHint)) walk(parse.program, node => {
+    const { program } = parseSync(target, content, { sourceType: 'module' });
+    if (content.includes(MacroScanHint)) walk(program, node => {
         const declared = declaredMacro(state, node);
         if (!declared) return false;
 
@@ -531,7 +529,7 @@ export async function transformMacros(
         return false;
     });
 
-    walk(parse.program, expandNode.bind(null, state));
+    walk(program, expandNode.bind(null, state));
     if (state.pending.length > 0) await Promise.all(state.pending);
 
     return applyEdits(content, state.edits);

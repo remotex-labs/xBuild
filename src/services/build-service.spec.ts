@@ -74,7 +74,7 @@ describe('BuildService', () => {
 
         order = [];
         config = { variants: {} };
-        files = { touch: xJet.fn(() => ({ snapshot: undefined })), resolve: xJet.fn((path: string) => path) };
+        files = { touch: xJet.fn(() => ({ text: undefined })), resolve: xJet.fn((path: string) => path) };
         framework = { getSourceMap: xJet.fn(() => undefined), isFrameworkFile: xJet.fn(() => false) };
 
         configuration = {

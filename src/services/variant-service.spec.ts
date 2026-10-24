@@ -138,12 +138,12 @@ describe('VariantService', () => {
         );
 
         touchMock = xJet.spyOn(cache, 'touch').mockReturnValue(<any> {
-            version: 1, snapshot: { text: 'export const answer = 42;' }
+            version: 1, text: 'export const answer = 42;'
         });
 
         macrosMock = xJet.mock(analyzeMacros).mockReturnValue(new Set<string>());
         resolveSourceMock = xJet.mock(resolveSource).mockImplementation(((_: unknown, __: unknown, code: string) => code) as any);
-        transformMock = xJet.mock(transformMacros).mockImplementation(((_: unknown, __: unknown, code: string) => code) as any);
+        transformMock = xJet.mock(transformMacros).mockImplementation(((_: unknown, code: string) => code) as any);
         xJet.mock(extractEntryPoints).mockImplementation(((points: unknown) => points) as any);
         dependenciesMock = xJet.mock(analyzeDependencies).mockResolvedValue(<any> {
             metafile: { inputs: { 'src/index.ts': {} } }
@@ -911,9 +911,7 @@ describe('VariantService', () => {
 
             expect(resolveMock).toHaveBeenCalledWith('src/index.ts');
             expect(touchMock).toHaveBeenCalledWith('/project/src/index.ts');
-            expect(transformMock).toHaveBeenCalledWith(
-                expect.anything(), '/project/src/index.ts', 'export const answer = 42;', context
-            );
+            expect(transformMock).toHaveBeenCalledWith('/project/src/index.ts', 'export const answer = 42;', context);
         });
 
         test('should rewrite the sources of a build that does not bundle', async () => {
@@ -935,7 +933,7 @@ describe('VariantService', () => {
         });
 
         test('should load a file the cache knows nothing about as empty', async () => {
-            touchMock.mockReturnValue(<any> { version: 1, snapshot: undefined });
+            touchMock.mockReturnValue(<any> { version: 1, text: undefined });
             configure();
             const { load } = await lifecycle();
 

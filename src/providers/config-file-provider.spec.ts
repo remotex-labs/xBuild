@@ -35,7 +35,7 @@ describe('config-file.provider', () => {
         xJet.restoreAllMocks();
         xJet.mock(readFileSync).mockReturnValue(<any> sourceMap);
 
-        touchMock = xJet.spyOn(cache, 'touch').mockReturnValue(<any> { version: 1, snapshot: { text: source } });
+        touchMock = xJet.spyOn(cache, 'touch').mockReturnValue(<any> { version: 1, text: source });
         sourceMapMock = xJet.spyOn(inject(FrameworkService), 'addSourceMap').mockReturnValue(undefined);
         requireMock = xJet.mock(createRequire).mockReturnValue(<any> 'require-of-config');
         parseMock = xJet.spyOn(ArgvModule.prototype, 'enhancedParse')
@@ -131,14 +131,14 @@ describe('config-file.provider', () => {
             });
 
             test('should give back nothing for a file that is not there', async () => {
-                touchMock.mockReturnValue(<any> { version: 1, snapshot: undefined });
+                touchMock.mockReturnValue(<any> { version: 1, text: undefined });
 
                 expect(await configFileProvider(path)).toEqual({});
                 expect(buildMock).not.toHaveBeenCalled();
             });
 
             test('should give back nothing for a file carrying no text', async () => {
-                touchMock.mockReturnValue(<any> { version: 1, snapshot: { text: '' } });
+                touchMock.mockReturnValue(<any> { version: 1, text: '' });
 
                 expect(await configFileProvider(path)).toEqual({});
                 expect(buildMock).not.toHaveBeenCalled();

@@ -109,6 +109,21 @@ export class WatchService extends Subject<WatchEventType> {
     private timer?: ReturnType<typeof setTimeout>;
 
     /**
+     * Whether a path should be skipped by the watcher.
+     *
+     * @param target - Path to test
+     * @returns `true` for an empty path, a `~` backup file, or - unless `dot` is set - any dot-prefixed segment
+     *
+     * @remarks
+     * Held as a bound arrow function, so it can be handed to every watcher as it is.
+     *
+     * @since 3.0.0
+     */
+
+    private readonly ignored = (target: string): boolean =>
+        !target || target.endsWith('~') || (!this.options?.dot && target.split(/[/\\]/).some(seg => seg.startsWith('.')));
+
+    /**
      * Creates a watcher rooted at a base path.
      *
      * @param base - Directory to watch, resolved to an absolute path
@@ -192,7 +207,7 @@ export class WatchService extends Subject<WatchEventType> {
      */
 
     private start(): void {
-        this.watch(this.base, this.ignored.bind(this), this.options?.recursive);
+        this.watch(this.base, this.ignored, this.options?.recursive);
         if (this.options?.followSymlinks) this.watchSymlinks(this.base);
     }
 
@@ -286,7 +301,7 @@ export class WatchService extends Subject<WatchEventType> {
 
             if (stats.isFile() && this.matcher(path)) this.watch(path);
             else if (stats.isDirectory() && this.options?.recursive)
-                this.watch(path, this.ignored.bind(this), true);
+                this.watch(path, this.ignored, true);
         }
 
         if (!this.matcher(relativePath)) return;
@@ -335,26 +350,6 @@ export class WatchService extends Subject<WatchEventType> {
     }
 
     /**
-     * Whether a path should be skipped by the watcher.
-     *
-     * @param target - Path to test
-     * @returns `true` for an empty path, a `~` backup file, or - unless `dot` is set - any dot-prefixed segment
-     *
-     * @since 3.0.0
-     */
-
-    private ignored(target: string): boolean {
-        if (!target || target.endsWith('~')) return true;
-        if (!this.options?.dot) {
-            if (target && target.split(/[/\\]/).some(
-                seg => seg.startsWith('.'))
-            ) return true;
-        }
-
-        return false;
-    }
-
-    /**
      * Walks the tree under a root and watches every symbolic link found.
      *
      * @param root - Directory to scan for links
@@ -385,7 +380,7 @@ export class WatchService extends Subject<WatchEventType> {
                 if (this.ignored(full)) continue;
 
                 if (entry.isSymbolicLink()) {
-                    this.watch(full, this.ignored.bind(this), this.options?.recursive);
+                    this.watch(full, this.ignored, this.options?.recursive);
                 } else if (this.options?.recursive && entry.isDirectory()) {
                     stack.push(full);
                 }

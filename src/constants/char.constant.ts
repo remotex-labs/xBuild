@@ -25,11 +25,9 @@ export const enum Char {
     Plus = 43,      // +
     Pipe = 124,     // |
     Comma = 44,     // ,
-    Colon = 58,     // :
     Caret = 94,     // ^
     Slash = 47,     // /
     Space = 32,     // space
-    Dollar = 36,    // $
     LParen = 40,    // (
     RParen = 41,    // )
     LBrace = 123,   // {

@@ -31,15 +31,17 @@ describe('TypescriptService', () => {
     let declaration: any;
 
     /**
-     * Builds a snapshot holding the shared program, recording it so a test can tell the snapshots apart.
+     * Builds a snapshot holding a program of its own that shares the stubs of `program`,
+     * which is how the compiler hands back a new program for every snapshot.
      */
 
     function makeSnapshot(): any {
+        const current = Object.create(program);
         const snapshot = {
-            operation: { createdPrograms: [ program ] },
+            operation: { createdPrograms: [ current ] },
             update: xJet.fn(() => makeSnapshot()),
             dispose: xJet.fn(),
-            getProgram: xJet.fn(() => program)
+            getProgram: xJet.fn(() => current)
         };
 
         snapshots.push(snapshot);
@@ -82,9 +84,11 @@ describe('TypescriptService', () => {
             realpath: (path: string): string => path,
             readFile: xJet.fn(),
             isExcluded: xJet.fn(() => false),
+            isTypeCheckExcluded: xJet.fn(() => false),
             refreshFiles: xJet.fn(),
             collectChanges: xJet.fn(() => []),
-            getScriptFileNames: xJet.fn(() => [ index ]),
+            tracked: new Set([ index ]),
+            getScriptFileNames: xJet.fn(() => [ ...host.tracked ]),
             filesCache: {
                 touch: xJet.fn(() => ({ version: 1 })),
                 resolve: (path: string): string => path.startsWith('/') ? path : `${ root }/${ path }`
@@ -168,7 +172,7 @@ describe('TypescriptService', () => {
 
     describe('program', () => {
         test('should build the program from the host roots under the parsed options', () => {
-            expect(service.program).toBe(program);
+            expect(Object.getPrototypeOf(service.program)).toBe(program);
             expect(api.createSnapshot).toHaveBeenCalledWith({
                 fileNotifications: undefined,
                 createPrograms: [{ rootFiles: [ index ], compilerOptions: service.config.options }]
@@ -205,7 +209,7 @@ describe('TypescriptService', () => {
 
         test('should rebuild once a root joins the project', () => {
             void service.program;
-            host.getScriptFileNames.mockReturnValue([ index, `${ root }/src/other.ts` ]);
+            host.tracked.add(`${ root }/src/other.ts`);
             void service.program;
 
             expect(snapshots[0].update).toHaveBeenCalledTimes(1);
@@ -267,6 +271,14 @@ describe('TypescriptService', () => {
             expect(host.isExcluded).toHaveBeenCalledTimes(1);
         });
 
+        test('should skip the files the host leaves out of the type check', () => {
+            host.isTypeCheckExcluded.mockReturnValue(true);
+            service.check();
+
+            expect(host.isTypeCheckExcluded).toHaveBeenCalledWith(index);
+            expect(program.getSemanticDiagnostics).not.toHaveBeenCalled();
+        });
+
         test('should skip the files the host reports as excluded', () => {
             host.isExcluded.mockReturnValue(true);
             service.check();
@@ -311,65 +323,6 @@ describe('TypescriptService', () => {
             program.getSemanticDiagnostics.mockReturnValue([ diagnostic ]);
 
             expect(service.check([ 'src/index.ts' ])).toHaveLength(1);
-        });
-    });
-
-    describe('excludeTypeChack', () => {
-        /**
-         * The files the check handed the compiler, taken from the last semantic request.
-         */
-
-        function checkedBy(instance: TypescriptService, files: Array<string>): Array<string> {
-            program.getSourceFileNames.mockReturnValue(files.map(file => `${ root }/${ file }`));
-            program.getSemanticDiagnostics.mockClear();
-            host.collectChanges.mockReturnValueOnce([ 'moved' ]);
-            instance.check();
-
-            const calls = program.getSemanticDiagnostics.mock.calls;
-
-            return calls.length ? calls[0][0].map((file: string) => file.slice(root.length + 1)) : [];
-        }
-
-        test('should turn away a file the configuration excludes', () => {
-            config.raw = { excludeTypeChack: [ 'src/generated/**' ] };
-            const instance = new TypescriptService('tsconfig.json');
-
-            expect(checkedBy(instance, [ 'src/generated/api.ts', 'src/index.ts' ])).toEqual([ 'src/index.ts' ]);
-        });
-
-        test('should test the path relative to the working directory', () => {
-            config.raw = { excludeTypeChack: [ '**/*.generated.ts' ] };
-            const instance = new TypescriptService('tsconfig.json');
-
-            expect(checkedBy(instance, [ 'src/models/user.generated.ts', 'src/models/user.ts' ]))
-                .toEqual([ 'src/models/user.ts' ]);
-        });
-
-        test('should turn nothing away where the configuration names an empty list', () => {
-            config.raw = { excludeTypeChack: [] };
-            const instance = new TypescriptService('tsconfig.json');
-
-            expect(checkedBy(instance, [ 'src/index.ts' ])).toEqual([ 'src/index.ts' ]);
-        });
-
-        test('should turn nothing away where the configuration names no exclusion at all', () => {
-            config.raw = undefined;
-            const instance = new TypescriptService('tsconfig.json');
-
-            expect(checkedBy(instance, [ 'src/index.ts' ])).toEqual([ 'src/index.ts' ]);
-        });
-
-        test('should take up an edit to the list on a reload', () => {
-            const shared = inject(TypescriptService, 'tsconfig.json');
-            expect(checkedBy(shared, [ 'src/generated/api.ts' ])).toEqual([ 'src/generated/api.ts' ]);
-
-            api.parseConfigFile.mockReturnValue({
-                ...config, raw: { excludeTypeChack: [ 'src/generated/**' ] }
-            });
-            host.filesCache.touch.mockReturnValue({ version: 2 });
-            TypescriptService.reload();
-
-            expect(checkedBy(shared, [ 'src/generated/api.ts' ])).toEqual([]);
         });
     });
 

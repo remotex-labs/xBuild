@@ -76,7 +76,7 @@ describe('DeclarationModel', () => {
 
         xJet.spyOn(cache, 'touch').mockImplementation((path: string) => <any> {
             version: versions[path] ?? 1,
-            snapshot: sources[path] === undefined ? undefined : { text: sources[path] }
+            text: sources[path]
         });
 
         xJet.mock(existsSync).mockReturnValue(true);

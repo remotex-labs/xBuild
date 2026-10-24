@@ -20,14 +20,13 @@ import { createMatcher } from '@components/glob.component';
  */
 
 describe('LanguageHostService', () => {
-    const entry: any = { mtimeMs: 1, version: 2, snapshot: { text: 'export const x = 10;' } };
+    const entry: any = { mtimeMs: 1, version: 2, text: 'export const x = 10;' };
     const cache = inject(FilesModel);
     const root = normalize(cwd());
     const abs = (path: string): string => `${ root }/${ path }`;
 
     let host: LanguageHostService;
     let config: ParsedCommandLine;
-    let touchMock: any;
     let snapshotMock: any;
     let refreshMock: any;
     let resolveMock: any;
@@ -47,7 +46,6 @@ describe('LanguageHostService', () => {
             (path: string) => path.startsWith(root) ? path : abs(path)
         );
 
-        touchMock = xJet.spyOn(cache, 'touch').mockReturnValue(entry);
         snapshotMock = xJet.spyOn(cache, 'getSnapshot').mockReturnValue(entry);
         refreshMock = xJet.spyOn(cache, 'refresh').mockReturnValue(entry);
         matcherMock = xJet.fn((path: string) => path.endsWith('.spec.ts'));
@@ -68,94 +66,54 @@ describe('LanguageHostService', () => {
         });
 
         test('should exclude nothing when the configuration carries no exclude globs', () => {
-            config.raw.exclude = [];
+            createMatcherMock.mockClear();
+            config.raw = { exclude: [] };
             host = new LanguageHostService(config);
 
             expect(host.getScriptFileNames()).toEqual([ abs('src/index.ts'), abs('src/index.spec.ts') ]);
-            expect(createMatcherMock).toHaveBeenCalledTimes(1);
+            expect(createMatcherMock).not.toHaveBeenCalled();
         });
     });
 
     describe('options', () => {
         test('should replace the tracked set with the entry files of the new configuration', () => {
-            host.refresh('src/scratch.ts');
-            host.options = <ParsedCommandLine> <unknown> {
-                options: {}, fileNames: [ 'src/other.ts' ], raw: {}
-            };
+            host.refreshFiles([ 'src/scratch.ts' ]);
+            host.options = <ParsedCommandLine> <unknown> { options: {}, fileNames: [ 'src/other.ts' ], raw: {} };
 
             expect(host.getScriptFileNames()).toEqual([ abs('src/other.ts') ]);
         });
-    });
 
-    describe('reload', () => {
-        test('should recompile the exclude globs the configuration now carries', () => {
-            config.raw.exclude = undefined;
-            host.reload();
+        test('should compile the exclude globs the new configuration carries', () => {
+            host.options = <ParsedCommandLine> <unknown> { ...config, raw: undefined };
 
             expect(host.getScriptFileNames()).toEqual([ abs('src/index.ts'), abs('src/index.spec.ts') ]);
         });
-    });
 
-    describe('clearTracked', () => {
-        test('should drop everything and track the entry files again', () => {
-            host.refresh('src/scratch.ts');
-            host.clearTracked();
+        test('should forget the observed versions', () => {
+            host.observe([ abs('src/index.ts') ]);
+            host.options = config;
+            snapshotMock.mockReturnValue({ ...entry, version: 3 });
+            cache.revision++;
 
-            expect(host.getScriptFileNames()).toEqual([ abs('src/index.ts') ]);
-        });
-    });
-
-    describe('refresh', () => {
-        test('should track the path and return the entry the cache rebuilt', () => {
-            expect(host.refresh('src/new.ts')).toBe(entry);
-            expect(host.tracked.has(abs('src/new.ts'))).toBe(true);
-        });
-
-        test('should track a path the exclude globs match', () => {
-            host.refresh('src/other.spec.ts');
-
-            expect(host.tracked.has(abs('src/other.spec.ts'))).toBe(true);
+            expect(host.collectChanges()).toEqual([]);
         });
     });
 
     describe('refreshFiles', () => {
-        test('should refresh the given paths and skip the excluded ones', () => {
+        test('should track and refresh the given paths and skip the excluded ones', () => {
             refreshMock.mockClear();
             host.refreshFiles([ 'src/a.ts', 'src/a.spec.ts' ]);
 
             expect(refreshMock).toHaveBeenCalledTimes(1);
             expect(refreshMock).toHaveBeenCalledWith(abs('src/a.ts'));
+            expect(host.tracked.has(abs('src/a.ts'))).toBe(true);
         });
 
-        test('should refresh the tracked set when it is given no paths', () => {
-            host.refresh('src/new.ts');
-            refreshMock.mockClear();
+        test('should keep a path tracked even when the file turns out to be gone', () => {
+            refreshMock.mockReturnValue({ mtimeMs: 0, version: 1, text: undefined });
+            host.refreshFiles([ 'src/gone.ts' ]);
 
-            host.refreshFiles();
-
-            expect(refreshMock).toHaveBeenCalledTimes(2);
-            expect(refreshMock).toHaveBeenCalledWith(abs('src/index.ts'));
-            expect(refreshMock).toHaveBeenCalledWith(abs('src/new.ts'));
-        });
-    });
-
-    describe('isExcluded', () => {
-        test('should test the path relative to the working directory', () => {
-            host.refreshFiles([ 'src/a.ts' ]);
-
-            expect(matcherMock).toHaveBeenCalledWith('src/a.ts');
-        });
-
-        test('should report whether the exclude globs match a path', () => {
-            expect(host.isExcluded(abs('src/a.spec.ts'))).toBe(true);
-            expect(host.isExcluded(abs('src/a.ts'))).toBe(false);
-        });
-
-        test('should ask the matcher once per path', () => {
-            matcherMock.mockClear();
-            host.refreshFiles([ 'src/a.ts', 'src/a.ts' ]);
-
-            expect(matcherMock).toHaveBeenCalledTimes(1);
+            expect(host.tracked.has(abs('src/gone.ts'))).toBe(true);
         });
     });
 
@@ -164,59 +122,83 @@ describe('LanguageHostService', () => {
             snapshotMock.mockReturnValue(undefined);
             host.observe([ abs('lib.d.ts') ]);
             snapshotMock.mockReturnValue({ ...entry, version: 3 });
+            cache.revision++;
 
             expect(host.collectChanges()).toEqual([]);
         });
     });
 
     describe('collectChanges', () => {
+        test('should skip the walk while the file model has not moved', () => {
+            host.observe([ abs('src/index.ts') ]);
+            snapshotMock.mockClear();
+
+            expect(host.collectChanges()).toEqual([]);
+            expect(snapshotMock).not.toHaveBeenCalled();
+        });
+
         test('should report nothing while the observed versions stand', () => {
             host.observe([ abs('src/index.ts') ]);
+            cache.revision++;
 
             expect(host.collectChanges()).toEqual([]);
         });
 
         test('should report a file whose version moved, and only once', () => {
-            host.observe([ 'src/index.ts' ]);
+            host.observe([ abs('src/index.ts') ]);
             snapshotMock.mockReturnValue({ ...entry, version: 3 });
+            cache.revision++;
 
             expect(host.collectChanges()).toEqual([ abs('src/index.ts') ]);
+            cache.revision++;
             expect(host.collectChanges()).toEqual([]);
         });
 
         test('should report a file the cache no longer holds', () => {
             host.observe([ abs('src/index.ts') ]);
             snapshotMock.mockReturnValue(undefined);
+            cache.revision++;
 
             expect(host.collectChanges()).toEqual([ abs('src/index.ts') ]);
         });
+    });
 
-        test('should forget the observed versions when the configuration is replaced', () => {
-            host.observe([ abs('src/index.ts') ]);
-            host.options = config;
-            snapshotMock.mockReturnValue({ ...entry, version: 3 });
+    describe('isExcluded', () => {
+        test('should report whether the exclude globs match a path', () => {
+            expect(host.isExcluded(abs('src/a.spec.ts'))).toBe(true);
+            expect(host.isExcluded(abs('src/a.ts'))).toBe(false);
+        });
 
-            expect(host.collectChanges()).toEqual([]);
+        test('should test the path relative to the working directory', () => {
+            host.isExcluded(abs('src/a.ts'));
+
+            expect(matcherMock).toHaveBeenCalledWith('src/a.ts');
+        });
+
+        test('should ask the matcher once per path', () => {
+            matcherMock.mockClear();
+            host.isExcluded('src/a.ts');
+            host.isExcluded(abs('src/a.ts'));
+
+            expect(matcherMock).toHaveBeenCalledTimes(1);
+            expect(resolveMock).toHaveBeenCalledWith('src/a.ts');
         });
     });
 
-    describe('readFile', () => {
-        test('should return the cached text and pass the encoding on', () => {
-            expect(host.readFile('src/index.ts', 'latin1')).toBe('export const x = 10;');
-            expect(touchMock).toHaveBeenCalledWith('src/index.ts', 'latin1');
+    describe('isTypeCheckExcluded', () => {
+        test('should test the path against the excludeTypeChack globs, relative to the working directory', () => {
+            const typeCheckMatcher = xJet.fn((path: string) => path.startsWith('src/generated/'));
+            createMatcherMock.mockReturnValueOnce(matcherMock).mockReturnValueOnce(typeCheckMatcher);
+            config.raw = { exclude: [ '**/*.spec.ts' ], excludeTypeChack: [ 'src/generated/**' ] };
+            host = new LanguageHostService(config);
+
+            expect(host.isTypeCheckExcluded(abs('src/generated/api.ts'))).toBe(true);
+            expect(host.isTypeCheckExcluded(abs('src/index.ts'))).toBe(false);
+            expect(typeCheckMatcher).toHaveBeenCalledWith('src/index.ts');
         });
 
-        test('should return undefined when the path holds no readable file', () => {
-            touchMock.mockReturnValue(<any> { mtimeMs: 0, version: 1, snapshot: undefined });
-
-            expect(host.readFile('src/gone.ts')).toBeUndefined();
-        });
-    });
-
-    describe('realpath', () => {
-        test('should resolve a path the way the cache keys it', () => {
-            expect(host.realpath('src/index.ts')).toBe(abs('src/index.ts'));
-            expect(resolveMock).toHaveBeenCalledWith('src/index.ts');
+        test('should exclude nothing when the configuration names no excludeTypeChack globs', () => {
+            expect(host.isTypeCheckExcluded(abs('src/generated/api.ts'))).toBe(false);
         });
     });
 });

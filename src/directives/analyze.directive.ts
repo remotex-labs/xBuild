@@ -51,7 +51,7 @@ export function analyzeMacros(files: Iterable<string>, defines: Record<string, s
     const filesModel = inject(FilesModel);
 
     for (const file of files) {
-        const content = filesModel.touch(file).snapshot?.text;
+        const content = filesModel.touch(file).text;
 
         if (!content?.includes(MacroScanHint)) continue;
         const { program } = parseSync(file, content, { sourceType: 'module' });

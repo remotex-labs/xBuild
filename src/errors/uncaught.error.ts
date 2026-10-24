@@ -34,25 +34,16 @@ import { formatStack, getErrorMetadata } from '@providers/stack.provider';
  */
 
 export function formatErrors(reason: unknown): void {
-    if (reason instanceof AggregateError) {
-        console.error('AggregateError:', reason.message);
-        for (const err of reason.errors) {
-            if (err instanceof Error && !(err instanceof xBuildBaseError)) {
-                const metadata = getErrorMetadata(err, { withFrameworkFrames: true, withNativeFrames: true });
-                console.error(formatStack(metadata, err.name, err.message));
-            } else {
-                console.error(err);
-            }
+    if (reason instanceof AggregateError) console.error('AggregateError:', reason.message);
+
+    for (const error of reason instanceof AggregateError ? reason.errors : [ reason ]) {
+        if (!(error instanceof Error) || error instanceof xBuildBaseError) {
+            console.error(error);
+            continue;
         }
 
-        return;
-    }
-
-    if (reason instanceof Error && !(reason instanceof xBuildBaseError)) {
-        const metadata = getErrorMetadata(reason, { withFrameworkFrames: true, withNativeFrames: true });
-        console.error(formatStack(metadata, reason.name, reason.message));
-    } else {
-        console.error(reason);
+        const metadata = getErrorMetadata(error, { withFrameworkFrames: true, withNativeFrames: true });
+        console.error(formatStack(metadata, error.name, error.message));
     }
 }
 
