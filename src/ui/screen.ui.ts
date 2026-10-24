@@ -68,7 +68,7 @@ export class Screen {
      *
      * @remarks
      * The injected instance rather than one of its own,
-     * so the sweep reaches the very entries the language service and the transpiler read their text from.
+     * so the sweep reaches the very entries the compiler and the transpiler read their text from.
      *
      * @see FilesModel
      * @since 3.0.3

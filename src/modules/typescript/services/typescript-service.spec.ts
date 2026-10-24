@@ -2,9 +2,9 @@
  * Imports
  */
 
-import ts from 'typescript';
 import { cwd } from 'process';
 import { inject } from '@remotex-labs/xinject';
+import { normalize } from '@remotex-labs/xmap';
 import { TypescriptService } from './typescript.service';
 import { DeclarationModel } from '@typescript/models/declaration.model';
 import { LanguageHostService } from '@typescript/services/host.service';
@@ -14,61 +14,81 @@ import { LanguageHostService } from '@typescript/services/host.service';
  */
 
 describe('TypescriptService', () => {
-    const sourceFile: any = {
-        fileName: '/project/src/index.ts',
-        getLineAndCharacterOfPosition: (): unknown => ({ line: 2, character: 6 })
-    };
+    const root = normalize(cwd());
+    const index = `${ root }/src/index.ts`;
 
     const diagnostic: any = {
-        code: 2322, start: 10, category: 1, file: sourceFile, messageText: 'Type error'
+        code: 2322, category: 1, text: 'Type error', fileName: index, startPosition: { line: 2, character: 6 }
     };
 
+    let api: any;
     let host: any;
     let config: any;
-    let builder: any;
     let program: any;
-    let dirCache: any;
     let service: TypescriptService;
+    let resolver: any;
+    let snapshots: Array<any>;
     let declaration: any;
-    let languageService: any;
-    let resolutionCache: any;
-    let parseConfigMock: any;
-    let resolveModuleMock: any;
-    let builderProgramMock: any;
-    let resolutionCacheMock: any;
+
+    /**
+     * Builds a snapshot holding the shared program, recording it so a test can tell the snapshots apart.
+     */
+
+    function makeSnapshot(): any {
+        const snapshot = {
+            operation: { createdPrograms: [ program ] },
+            update: xJet.fn(() => makeSnapshot()),
+            dispose: xJet.fn(),
+            getProgram: xJet.fn(() => program)
+        };
+
+        snapshots.push(snapshot);
+
+        return snapshot;
+    }
 
     beforeEach(() => {
         xJet.restoreAllMocks();
         (<any> TypescriptService).cache.clear();
 
+        snapshots = [];
         config = { options: { outDir: 'out' }, fileNames: [ 'src/index.ts' ], errors: [], raw: {} };
         program = {
-            getSourceFiles: xJet.fn(() => [ sourceFile ]),
-            getSourceFile: xJet.fn((name: string) => name === sourceFile.fileName ? sourceFile : undefined)
-        };
-        dirCache = { get: xJet.fn(() => undefined) };
-        resolutionCache = { getOrCreateCacheForDirectory: xJet.fn(() => dirCache) };
-        builder = {
+            id: '/dev/null/synthetic/1',
+            getSourceFileNames: xJet.fn(() => [ index ]),
             getSyntacticDiagnostics: xJet.fn(() => []),
-            getSemanticDiagnosticsOfNextAffectedFile: xJet.fn(() => undefined)
+            getSemanticDiagnostics: xJet.fn(() => []),
+            getSuggestionDiagnostics: xJet.fn(() => [])
         };
 
-        languageService = {
+        resolver = {
             dispose: xJet.fn(),
-            getProgram: xJet.fn(() => program),
-            getSuggestionDiagnostics: xJet.fn(() => [])
+            resolveModuleName: xJet.fn(() => ({ resolvedModule: undefined }))
+        };
+
+        api = {
+            close: xJet.fn(),
+            createSnapshot: xJet.fn(() => makeSnapshot()),
+            parseConfigFile: xJet.fn(() => config),
+            createModuleResolver: xJet.fn(() => resolver),
+            parseJsonConfigFileContent: xJet.fn((json: any) => ({
+                options: { ...json.compilerOptions }, fileNames: [], errors: [], raw: json
+            }))
         };
 
         host = {
             options: undefined,
+            observe: xJet.fn(),
             realpath: (path: string): string => path,
             readFile: xJet.fn(),
+            isExcluded: xJet.fn(() => false),
             refreshFiles: xJet.fn(),
+            collectChanges: xJet.fn(() => []),
+            getScriptFileNames: xJet.fn(() => [ index ]),
             filesCache: {
                 touch: xJet.fn(() => ({ version: 1 })),
-                resolve: (path: string): string => path.startsWith('/') ? path : `/project/${ path }`
-            },
-            ignoreSourceFile: xJet.fn(() => false)
+                resolve: (path: string): string => path.startsWith('/') ? path : `${ root }/${ path }`
+            }
         };
 
         declaration = {
@@ -77,27 +97,30 @@ describe('TypescriptService', () => {
             emitBundle: xJet.fn(() => Promise.resolve([ 'dist/index.d.ts' ]))
         };
 
+        (<any> TypescriptService).client = api;
         xJet.mock(LanguageHostService, () => host);
         xJet.mock(DeclarationModel, () => declaration);
-        xJet.spyOn(ts, 'createDocumentRegistry').mockReturnValue(<any> {});
-        xJet.spyOn(ts, 'createLanguageService').mockReturnValue(languageService);
-        parseConfigMock = xJet.spyOn(ts, 'getParsedCommandLineOfConfigFile').mockReturnValue(config);
-        resolutionCacheMock = xJet.spyOn(ts, 'createModuleResolutionCache').mockReturnValue(resolutionCache);
-        builderProgramMock = xJet.spyOn(ts, 'createEmitAndSemanticDiagnosticsBuilderProgram').mockReturnValue(builder);
-        resolveModuleMock = xJet.spyOn(ts, 'resolveModuleName').mockReturnValue(<any> { resolvedModule: undefined });
 
         service = new TypescriptService('tsconfig.json');
     });
 
+    afterEach(() => {
+        (<any> TypescriptService).client = undefined;
+    });
+
     describe('constructor', () => {
+        test('should parse the configuration it was given', () => {
+            expect(api.parseConfigFile).toHaveBeenCalledWith('tsconfig.json');
+        });
+
         test('should ask the compiler for types alone', () => {
-            expect(parseConfigMock).toHaveBeenCalledWith('tsconfig.json', {
+            expect(service.config.options).toEqual(expect.objectContaining({
                 sourceMap: false,
                 skipLibCheck: true,
                 stripInternal: true,
                 declarationMap: false,
                 emitDeclarationOnly: true
-            }, expect.objectContaining({ onUnRecoverableConfigFileDiagnostic: expect.any(Function) }));
+            }));
         });
 
         test('should default the configuration path to tsconfig.json', () => {
@@ -106,7 +129,6 @@ describe('TypescriptService', () => {
 
         test('should default the root directory to the working directory', () => {
             expect(service.config.options.rootDir).toBe(cwd());
-            expect(service.config.options.useCaseSensitiveFileNames).toBe(true);
         });
 
         test('should leave the emit to the bundler', () => {
@@ -120,32 +142,86 @@ describe('TypescriptService', () => {
         });
 
         test('should fall back to a built-in configuration when the file cannot be read', () => {
-            parseConfigMock.mockReturnValue(undefined);
+            api.parseConfigFile.mockImplementation(() => {
+                throw new Error('could not read file');
+            });
 
             const options = new TypescriptService('missing.json').config.options;
 
             expect(options).toEqual(expect.objectContaining({
                 strict: true,
+                target: 'esnext',
+                module: 'nodenext',
                 sourceMap: false,
                 skipLibCheck: true,
-                target: ts.ScriptTarget.ESNext,
-                module: ts.ModuleKind.NodeNext,
                 emitDeclarationOnly: true
             }));
+            expect(api.parseJsonConfigFileContent).toHaveBeenCalledWith(
+                expect.objectContaining({ files: [] }), { configDirectory: cwd() }
+            );
+        });
+
+        test('should leave the compiler alone until the program is first asked for', () => {
+            expect(api.createSnapshot).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('program', () => {
+        test('should build the program from the host roots under the parsed options', () => {
+            expect(service.program).toBe(program);
+            expect(api.createSnapshot).toHaveBeenCalledWith({
+                fileNotifications: undefined,
+                createPrograms: [{ rootFiles: [ index ], compilerOptions: service.config.options }]
+            });
+        });
+
+        test('should record the versions of the files the program read', () => {
+            void service.program;
+
+            expect(host.observe).toHaveBeenCalledWith(new Set([ index ]));
+        });
+
+        test('should keep the program while nothing changed', () => {
+            void service.program;
+            void service.program;
+
+            expect(api.createSnapshot).toHaveBeenCalledTimes(1);
+            expect(snapshots[0].update).not.toHaveBeenCalled();
+        });
+
+        test('should tell the compiler which files changed and drop the snapshot it replaces', () => {
+            void service.program;
+            host.collectChanges.mockReturnValueOnce([ index ]);
+            void service.program;
+
+            expect(snapshots[0].update).toHaveBeenCalledWith({
+                fileNotifications: { changed: [ index ] },
+                reconfigurePrograms: [{
+                    id: program.id, rootFiles: [ index ], compilerOptions: service.config.options
+                }]
+            });
+            expect(snapshots[0].dispose).toHaveBeenCalled();
+        });
+
+        test('should rebuild once a root joins the project', () => {
+            void service.program;
+            host.getScriptFileNames.mockReturnValue([ index, `${ root }/src/other.ts` ]);
+            void service.program;
+
+            expect(snapshots[0].update).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    describe('hasSourceFile', () => {
+        test('should report whether the program holds a file', () => {
+            expect(service.hasSourceFile(index)).toBe(true);
+            expect(service.hasSourceFile(`${ root }/src/other.ts`)).toBe(false);
         });
     });
 
     describe('check', () => {
-        test('should report nothing when the language service has no program', () => {
-            languageService.getProgram.mockReturnValue(undefined);
-
-            expect(service.check()).toEqual([]);
-            expect(builderProgramMock).not.toHaveBeenCalled();
-        });
-
-        test('should format the diagnostics of an affected file with positions counted from one', () => {
-            builder.getSemanticDiagnosticsOfNextAffectedFile
-                .mockReturnValueOnce({ affected: sourceFile, result: [ diagnostic ] });
+        test('should format the diagnostics with positions counted from one and the path made relative', () => {
+            program.getSemanticDiagnostics.mockReturnValue([ diagnostic ]);
 
             expect(service.check()).toEqual([
                 {
@@ -154,177 +230,146 @@ describe('TypescriptService', () => {
                     column: 7,
                     category: 1,
                     message: 'Type error',
-                    file: '/project/src/index.ts'
+                    file: 'src/index.ts'
                 }
             ]);
         });
 
-        test('should carry a diagnostic with no file as its message and category alone', () => {
-            builder.getSemanticDiagnosticsOfNextAffectedFile.mockReturnValueOnce({
-                affected: sourceFile, result: [{ messageText: 'Bad option', category: 0 }]
-            });
+        test('should flatten a chained message the way the compiler prints it', () => {
+            program.getSemanticDiagnostics.mockReturnValue([{
+                ...diagnostic,
+                text: 'Outer',
+                messageChain: [{ text: 'Inner', messageChain: [{ text: 'Deepest' }] }]
+            }]);
 
-            expect(service.check()).toEqual([{ message: 'Bad option', category: 0 }]);
+            expect(service.check()[0].message).toBe('Outer\n  Inner\n    Deepest');
+        });
+
+        test('should pass over a diagnostic with no file', () => {
+            program.getSemanticDiagnostics.mockReturnValue([{ text: 'Bad option', category: 0 }]);
+
+            expect(service.check()).toEqual([]);
         });
 
         test('should gather the syntactic and suggestion diagnostics along with the semantic ones', () => {
-            builder.getSemanticDiagnosticsOfNextAffectedFile.mockReturnValueOnce({ affected: sourceFile, result: [] });
-            builder.getSyntacticDiagnostics.mockReturnValue([{ messageText: 'Syntax', category: 1 }]);
-            languageService.getSuggestionDiagnostics.mockReturnValue([{ messageText: 'Suggestion', category: 2 }]);
+            program.getSyntacticDiagnostics.mockReturnValue([{ ...diagnostic, text: 'Syntax' }]);
+            program.getSuggestionDiagnostics.mockReturnValue([{ ...diagnostic, text: 'Suggestion', category: 2 }]);
 
-            expect(service.check()).toEqual([
-                { message: 'Syntax', category: 1 },
-                { message: 'Suggestion', category: 2 }
-            ]);
-            expect(languageService.getSuggestionDiagnostics).toHaveBeenCalledWith('/project/src/index.ts');
+            expect(service.check().map(({ message }) => message)).toEqual([ 'Syntax', 'Suggestion' ]);
+            expect(program.getSuggestionDiagnostics).toHaveBeenCalledWith([ index ]);
         });
 
         test('should skip a dependency without asking the host about it', () => {
+            program.getSourceFileNames.mockReturnValue([ index, `${ root }/node_modules/pkg/index.d.ts` ]);
             service.check();
-            const [ , skip ] = builder.getSemanticDiagnosticsOfNextAffectedFile.mock.calls[0];
 
-            expect(builder.getSemanticDiagnosticsOfNextAffectedFile)
-                .toHaveBeenCalledWith(undefined, expect.any(Function));
-            expect(skip({ fileName: '/project/node_modules/pkg/index.d.ts' })).toBe(true);
-            expect(host.ignoreSourceFile).not.toHaveBeenCalled();
+            expect(program.getSemanticDiagnostics).toHaveBeenCalledWith([ index ]);
+            expect(host.isExcluded).toHaveBeenCalledTimes(1);
         });
 
-        test('should ask the host about every other file', () => {
+        test('should skip the files the host reports as excluded', () => {
+            host.isExcluded.mockReturnValue(true);
             service.check();
-            const [ , skip ] = builder.getSemanticDiagnosticsOfNextAffectedFile.mock.calls[0];
 
-            expect(skip(sourceFile)).toBe(false);
-            expect(host.ignoreSourceFile).toHaveBeenCalledWith(sourceFile);
+            expect(program.getSemanticDiagnostics).not.toHaveBeenCalled();
         });
 
-        test('should skip the files the host reports as ignored', () => {
-            host.ignoreSourceFile.mockReturnValue(true);
-            service.check();
-            const [ , skip ] = builder.getSemanticDiagnosticsOfNextAffectedFile.mock.calls[0];
-
-            expect(skip(sourceFile)).toBe(true);
-        });
-
-        test('should keep the diagnostics of a file the builder did not revisit', () => {
-            builder.getSemanticDiagnosticsOfNextAffectedFile
-                .mockReturnValueOnce({ affected: sourceFile, result: [ diagnostic ] });
+        test('should check once per snapshot', () => {
+            program.getSemanticDiagnostics.mockReturnValue([ diagnostic ]);
             service.check();
 
             expect(service.check()).toHaveLength(1);
+            expect(program.getSemanticDiagnostics).toHaveBeenCalledTimes(1);
+        });
+
+        test('should check again once a file changed', () => {
+            service.check();
+            host.collectChanges.mockReturnValueOnce([ index ]);
+            service.check();
+
+            expect(program.getSemanticDiagnostics).toHaveBeenCalledTimes(2);
         });
 
         test('should drop the cached diagnostics of a file that left the program', () => {
-            builder.getSemanticDiagnosticsOfNextAffectedFile
-                .mockReturnValueOnce({ affected: sourceFile, result: [ diagnostic ] });
+            program.getSemanticDiagnostics.mockReturnValue([ diagnostic ]);
             service.check();
-            program.getSourceFile.mockReturnValue(undefined);
+            program.getSourceFileNames.mockReturnValue([]);
+            host.collectChanges.mockReturnValueOnce([ index ]);
 
-            expect(service.check()).toEqual([]);
-            expect(service.check()).toEqual([]);
+            expect(service.check([ index ])).toEqual([]);
         });
 
         test('should report the files it was given rather than everything checked', () => {
-            builder.getSemanticDiagnosticsOfNextAffectedFile
-                .mockReturnValueOnce({ affected: sourceFile, result: [ diagnostic ] });
+            program.getSemanticDiagnostics.mockReturnValue([ diagnostic ]);
             service.check();
 
-            expect(service.check(new Set([ '/project/src/index.ts' ]))).toHaveLength(1);
-            expect(service.check(new Set([ '/project/src/other.ts' ]))).toEqual([]);
+            expect(service.check(new Set([ index ]))).toHaveLength(1);
+            expect(service.check(new Set([ `${ root }/src/other.ts` ]))).toEqual([]);
         });
 
         test('should resolve the names it was given against the paths the compiler reported', () => {
-            builder.getSemanticDiagnosticsOfNextAffectedFile
-                .mockReturnValueOnce({ affected: sourceFile, result: [ diagnostic ] });
-            service.check();
+            program.getSemanticDiagnostics.mockReturnValue([ diagnostic ]);
 
             expect(service.check([ 'src/index.ts' ])).toHaveLength(1);
-        });
-
-        test('should read the cache rather than walk it', () => {
-            builder.getSemanticDiagnosticsOfNextAffectedFile
-                .mockReturnValueOnce({ affected: sourceFile, result: [ diagnostic ] });
-            service.check();
-            service.check([ 'src/index.ts' ]);
-
-            expect(program.getSourceFiles).not.toHaveBeenCalled();
-            expect(program.getSourceFile).toHaveBeenCalledWith('/project/src/index.ts');
-        });
-
-        test('should carry the builder of the previous check into the next one', () => {
-            service.check();
-            service.check();
-
-            expect(builderProgramMock).toHaveBeenLastCalledWith(program, expect.any(Object), builder);
         });
     });
 
     describe('excludeTypeChack', () => {
         /**
-         * The test the check hands each affected file, taken from the last builder call.
+         * The files the check handed the compiler, taken from the last semantic request.
          */
 
-        function skipOf(instance: TypescriptService): (file: unknown) => boolean {
+        function checkedBy(instance: TypescriptService, files: Array<string>): Array<string> {
+            program.getSourceFileNames.mockReturnValue(files.map(file => `${ root }/${ file }`));
+            program.getSemanticDiagnostics.mockClear();
+            host.collectChanges.mockReturnValueOnce([ 'moved' ]);
             instance.check();
 
-            return builder.getSemanticDiagnosticsOfNextAffectedFile.mock.calls.at(-1)[1];
-        }
+            const calls = program.getSemanticDiagnostics.mock.calls;
 
-        /**
-         * A source file under the working directory, which is what the exclusions are tested against.
-         */
-
-        function fileAt(path: string): unknown {
-            return { fileName: `${ cwd() }/${ path }` };
+            return calls.length ? calls[0][0].map((file: string) => file.slice(root.length + 1)) : [];
         }
 
         test('should turn away a file the configuration excludes', () => {
             config.raw = { excludeTypeChack: [ 'src/generated/**' ] };
-            const skip = skipOf(new TypescriptService('tsconfig.json'));
+            const instance = new TypescriptService('tsconfig.json');
 
-            expect(skip(fileAt('src/generated/api.ts'))).toBe(true);
-            expect(host.ignoreSourceFile).not.toHaveBeenCalled();
-        });
-
-        test('should keep a file the exclusions do not name', () => {
-            config.raw = { excludeTypeChack: [ 'src/generated/**' ] };
-            const skip = skipOf(new TypescriptService('tsconfig.json'));
-
-            expect(skip(fileAt('src/index.ts'))).toBe(false);
+            expect(checkedBy(instance, [ 'src/generated/api.ts', 'src/index.ts' ])).toEqual([ 'src/index.ts' ]);
         });
 
         test('should test the path relative to the working directory', () => {
             config.raw = { excludeTypeChack: [ '**/*.generated.ts' ] };
-            const skip = skipOf(new TypescriptService('tsconfig.json'));
+            const instance = new TypescriptService('tsconfig.json');
 
-            expect(skip(fileAt('src/models/user.generated.ts'))).toBe(true);
-            expect(skip(fileAt('src/models/user.ts'))).toBe(false);
+            expect(checkedBy(instance, [ 'src/models/user.generated.ts', 'src/models/user.ts' ]))
+                .toEqual([ 'src/models/user.ts' ]);
         });
 
         test('should turn nothing away where the configuration names an empty list', () => {
             config.raw = { excludeTypeChack: [] };
-            const skip = skipOf(new TypescriptService('tsconfig.json'));
+            const instance = new TypescriptService('tsconfig.json');
 
-            expect(skip(fileAt('src/index.ts'))).toBe(false);
+            expect(checkedBy(instance, [ 'src/index.ts' ])).toEqual([ 'src/index.ts' ]);
         });
 
         test('should turn nothing away where the configuration names no exclusion at all', () => {
-            config.raw = {};
-            const skip = skipOf(new TypescriptService('tsconfig.json'));
+            config.raw = undefined;
+            const instance = new TypescriptService('tsconfig.json');
 
-            expect(skip(fileAt('src/index.ts'))).toBe(false);
+            expect(checkedBy(instance, [ 'src/index.ts' ])).toEqual([ 'src/index.ts' ]);
         });
 
         test('should take up an edit to the list on a reload', () => {
             const shared = inject(TypescriptService, 'tsconfig.json');
-            expect(skipOf(shared)(fileAt('src/generated/api.ts'))).toBe(false);
+            expect(checkedBy(shared, [ 'src/generated/api.ts' ])).toEqual([ 'src/generated/api.ts' ]);
 
-            parseConfigMock.mockReturnValue({
+            api.parseConfigFile.mockReturnValue({
                 ...config, raw: { excludeTypeChack: [ 'src/generated/**' ] }
             });
             host.filesCache.touch.mockReturnValue({ version: 2 });
             TypescriptService.reload();
 
-            expect(skipOf(shared)(fileAt('src/generated/api.ts'))).toBe(true);
+            expect(checkedBy(shared, [ 'src/generated/api.ts' ])).toEqual([]);
         });
     });
 
@@ -371,46 +416,58 @@ describe('TypescriptService', () => {
     });
 
     describe('resolve', () => {
+        test('should resolve against the directory of the containing file', () => {
+            service.resolve('@components/builder', `${ root }/src/index.ts`);
+
+            expect(api.createModuleResolver).toHaveBeenCalledWith(service.config.options);
+            expect(resolver.resolveModuleName).toHaveBeenCalledWith('@components/builder', `${ root }/src`);
+        });
+
         test('should attach the container and the relative path to a fresh resolution', () => {
-            resolveModuleMock.mockReturnValue(<any> {
-                resolvedModule: { resolvedFileName: '/project/src/components/builder.ts' }
+            resolver.resolveModuleName.mockReturnValue({
+                resolvedModule: { resolvedFileName: `${ root }/src/components/builder.ts` }
             });
 
-            expect(service.resolve('@components/builder', '/project/src/index.ts')).toEqual({
-                container: '/project/src',
-                resolvedFileName: '/project/src/components/builder.ts',
+            expect(service.resolve('@components/builder', `${ root }/src/index.ts`)).toEqual({
+                container: `${ root }/src`,
+                resolvedFileName: `${ root }/src/components/builder.ts`,
                 relativeFileName: './components/builder.ts'
             });
         });
 
         test('should keep a relative path that already names its own directory', () => {
-            resolveModuleMock.mockReturnValue(<any> {
-                resolvedModule: { resolvedFileName: '/project/lib/builder.ts' }
+            resolver.resolveModuleName.mockReturnValue({
+                resolvedModule: { resolvedFileName: `${ root }/lib/builder.ts` }
             });
 
-            expect(service.resolve('../lib/builder', '/project/src/index.ts')?.relativeFileName)
+            expect(service.resolve('../lib/builder', `${ root }/src/index.ts`)?.relativeFileName)
                 .toBe('../lib/builder.ts');
         });
 
         test('should serve a cached resolution without asking the compiler again', () => {
-            const cached = { resolvedFileName: '/project/src/a.ts' };
-            dirCache.get.mockReturnValue({ resolvedModule: cached });
+            resolver.resolveModuleName.mockReturnValue({ resolvedModule: { resolvedFileName: `${ root }/src/a.ts` } });
+            const first = service.resolve('./a', `${ root }/src/index.ts`);
 
-            expect(service.resolve('./a', '/project/src/index.ts')).toBe(cached);
-            expect(resolveModuleMock).not.toHaveBeenCalled();
+            expect(service.resolve('./a', `${ root }/src/index.ts`)).toBe(first);
+            expect(resolver.resolveModuleName).toHaveBeenCalledTimes(1);
+            expect(api.createModuleResolver).toHaveBeenCalledTimes(1);
+        });
+
+        test('should ask again for a specifier that resolved to nothing', () => {
+            service.resolve('./a', `${ root }/src/index.ts`);
+            service.resolve('./a', `${ root }/src/index.ts`);
+
+            expect(resolver.resolveModuleName).toHaveBeenCalledTimes(2);
         });
 
         test('should stand the working directory in for a missing containing file', () => {
             service.resolve('typescript');
 
-            expect(resolutionCache.getOrCreateCacheForDirectory).toHaveBeenCalledWith(cwd());
-            expect(resolveModuleMock).toHaveBeenCalledWith(
-                'typescript', '', service.config.options, host, resolutionCache
-            );
+            expect(resolver.resolveModuleName).toHaveBeenCalledWith('typescript', cwd());
         });
 
         test('should return undefined when the specifier resolves to nothing', () => {
-            expect(service.resolve('nowhere', '/project/src/index.ts')).toBeUndefined();
+            expect(service.resolve('nowhere', `${ root }/src/index.ts`)).toBeUndefined();
         });
     });
 
@@ -418,17 +475,15 @@ describe('TypescriptService', () => {
         test('should reparse the configuration and drop everything derived from it', () => {
             const shared = inject(TypescriptService, 'tsconfig.json');
             const parsed = { options: {}, fileNames: [ 'src/other.ts' ], errors: [], raw: {} };
-            shared.check();
-            parseConfigMock.mockReturnValue(parsed);
+            shared.resolve('typescript');
+            api.parseConfigFile.mockReturnValue(parsed);
             host.filesCache.touch.mockReturnValue({ version: 2 });
 
             expect(TypescriptService.reload()).toEqual([ 'tsconfig.json' ]);
             expect(shared.config).toBe(parsed);
             expect(host.options).toBe(parsed);
             expect(declaration.clear).toHaveBeenCalled();
-            expect(resolutionCacheMock).toHaveBeenLastCalledWith(
-                expect.any(String), expect.any(Function), parsed.options
-            );
+            expect(resolver.dispose).toHaveBeenCalled();
         });
 
         test('should leave the instance alone while the configuration file is unchanged', () => {
@@ -437,6 +492,12 @@ describe('TypescriptService', () => {
             expect(TypescriptService.reload()).toEqual([]);
             expect(host.filesCache.touch).toHaveBeenCalledWith('tsconfig.json');
             expect(declaration.clear).not.toHaveBeenCalled();
+        });
+
+        test('should reparse every shared instance when forced', () => {
+            inject(TypescriptService, 'tsconfig.json');
+
+            expect(TypescriptService.reload(true)).toEqual([ 'tsconfig.json' ]);
         });
 
         test('should reparse only the shared instances whose configuration changed', () => {
@@ -457,20 +518,20 @@ describe('TypescriptService', () => {
             expect(declaration.clear).not.toHaveBeenCalled();
         });
 
-        test('should make the next check a full pass', () => {
+        test('should rebuild the program under the new options', () => {
             const shared = inject(TypescriptService, 'tsconfig.json');
-            host.filesCache.touch.mockReturnValue({ version: 2 });
             shared.check();
+            host.filesCache.touch.mockReturnValue({ version: 2 });
             TypescriptService.reload();
             shared.check();
 
-            expect(builderProgramMock).toHaveBeenLastCalledWith(program, expect.any(Object), undefined);
+            expect(snapshots[0].update).toHaveBeenCalledTimes(1);
+            expect(program.getSemanticDiagnostics).toHaveBeenCalledTimes(2);
         });
 
         test('should drop the diagnostics cached before it', () => {
             const shared = inject(TypescriptService, 'tsconfig.json');
-            builder.getSemanticDiagnosticsOfNextAffectedFile
-                .mockReturnValueOnce({ affected: sourceFile, result: [ diagnostic ] });
+            program.getSemanticDiagnostics.mockReturnValueOnce([ diagnostic ]);
             host.filesCache.touch.mockReturnValue({ version: 2 });
             shared.check();
             TypescriptService.reload();
@@ -484,21 +545,35 @@ describe('TypescriptService', () => {
             expect(inject(TypescriptService, './tsconfig.json')).toBe(inject(TypescriptService, 'tsconfig.json'));
         });
 
-        test('should tear the language service down only once the last holder releases it', () => {
+        test('should tear the program down only once the last holder releases it', () => {
             const shared = inject(TypescriptService, 'tsconfig.json');
             inject(TypescriptService, 'tsconfig.json');
+            void shared.program;
 
             shared.dispose();
-            expect(languageService.dispose).not.toHaveBeenCalled();
+            expect(snapshots[0].dispose).not.toHaveBeenCalled();
 
             shared.dispose();
-            expect(languageService.dispose).toHaveBeenCalled();
+            expect(snapshots[0].dispose).toHaveBeenCalled();
+        });
+
+        test('should close the compiler once the last instance in the process is released', () => {
+            const shared = inject(TypescriptService, 'tsconfig.json');
+            const other = inject(TypescriptService, 'tsconfig.build.json');
+
+            shared.dispose();
+            expect(api.close).not.toHaveBeenCalled();
+
+            other.dispose();
+            expect(api.close).toHaveBeenCalled();
         });
 
         test('should do nothing for an instance the shared cache never held', () => {
+            void service.program;
             service.dispose();
 
-            expect(languageService.dispose).not.toHaveBeenCalled();
+            expect(snapshots[0].dispose).not.toHaveBeenCalled();
+            expect(api.close).not.toHaveBeenCalled();
         });
 
         test('should release the instance when it leaves a using scope', () => {
@@ -507,7 +582,7 @@ describe('TypescriptService', () => {
                 expect(scoped.configPath).toBe('tsconfig.json');
             }
 
-            expect(languageService.dispose).toHaveBeenCalled();
+            expect(api.close).toHaveBeenCalled();
         });
     });
 });

@@ -2,7 +2,8 @@
  * Imports
  */
 
-import ts from 'typescript';
+import { createFileSystem } from 'typescript/fs';
+import { API, ModuleKind, ModuleResolutionKind } from 'typescript/sync';
 import { existsSync } from 'fs';
 import { inject } from '@remotex-labs/xinject';
 import { mkdir, writeFile } from 'fs/promises';
@@ -24,6 +25,12 @@ describe('DeclarationModel', () => {
     let writeFileMock: any;
 
     /**
+     * The compiler process the virtual program runs in, shared by every test.
+     */
+
+    const api = new API();
+
+    /**
      * Options the virtual program emits its declarations under.
      */
 
@@ -33,42 +40,30 @@ describe('DeclarationModel', () => {
         declaration: true,
         stripInternal: true,
         emitDeclarationOnly: true,
-        module: ts.ModuleKind.ESNext,
-        target: ts.ScriptTarget.ESNext,
-        moduleResolution: ts.ModuleResolutionKind.Bundler
+        module: ModuleKind.ESNext,
+        moduleResolution: ModuleResolutionKind.Bundler
     };
 
     /**
-     * Stands in for the project's program, reading every file it holds out of `sources`.
+     * Stands in for the project's program, emitting the declarations of one file out of `sources`.
      */
 
-    function program(): any {
-        return ts.createProgram(Object.keys(sources), options, {
-            readFile: (name: string) => sources[name],
-            writeFile: () => {},
-            fileExists: (name: string) => sources[name] !== undefined,
-            getNewLine: () => '\n',
-            getSourceFile: (name: string) => sources[name] === undefined
-                ? undefined
-                : ts.createSourceFile(name, sources[name], ts.ScriptTarget.ESNext, true),
-            getCurrentDirectory: () => '/project',
-            getCanonicalFileName: (name: string) => name,
-            getDefaultLibFileName: () => 'lib.d.ts',
-            useCaseSensitiveFileNames: () => true
+    function emitDeclaration(path: string): any {
+        const snapshot = api.createSnapshot({
+            fileSystem: createFileSystem(Object.entries(sources)),
+            createPrograms: [{ rootFiles: Object.keys(sources), compilerOptions: options }]
         });
+
+        try {
+            return snapshot.operation.createdPrograms[0].getDeclarationEmit([ path ]);
+        } finally {
+            snapshot.dispose();
+        }
     }
 
-    /**
-     * Stands in for the language service emit, returning the declarations of one file.
-     */
-
-    function emitOutput(path: string): any {
-        const outputFiles: Array<unknown> = [];
-        const current = program();
-        current.emit(current.getSourceFile(path), (name: string, text: string) => outputFiles.push({ name, text }), undefined, true);
-
-        return { outputFiles, emitSkipped: false };
-    }
+    afterAll(() => {
+        api.close();
+    });
 
     beforeEach(() => {
         xJet.restoreAllMocks();
@@ -91,10 +86,8 @@ describe('DeclarationModel', () => {
         service = {
             config: { options: { rootDir: '/project/src', outDir: 'dist' } },
             touchFiles: () => {},
-            languageService: {
-                getProgram: program,
-                getEmitOutput: (path: string) => emitOutput(path)
-            },
+            hasSourceFile: (path: string) => sources[path] !== undefined,
+            program: { getDeclarationEmit: ([ path ]: Array<string>) => emitDeclaration(path) },
             resolve: (specifier: string) => {
                 if (!specifier.startsWith('.'))
                     return { isExternalLibraryImport: true, extension: '.d.ts', relativeFileName: '', resolvedFileName: '' };

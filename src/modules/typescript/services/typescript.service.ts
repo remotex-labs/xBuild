@@ -2,26 +2,26 @@
  * Type-only imports erased during TypeScript compilation.
  */
 
-import type { ModuleResolutionCache, SourceFile } from 'typescript';
-import type { LanguageService, Diagnostic, Program } from 'typescript';
-import type { EmitAndSemanticDiagnosticsBuilderProgram } from 'typescript';
 import type { CacheEntryInterface } from './interfaces/typescript-service.interface';
-import type { ParsedCommandLine, BuilderProgramHost, ReadBuildProgramHost } from 'typescript';
 import type { DiagnosticInterface, ResolvedModuleInterface } from './interfaces/typescript-service.interface';
+import type { CompilerOptions, Diagnostic, ModuleResolver, ParsedCommandLine } from 'typescript/sync';
+import type { Program, Snapshot, SyntheticProjectId } from 'typescript/sync';
 
 /**
  * Imports
  */
 
-import ts from 'typescript';
-import { Injectable } from '@remotex-labs/xinject';
+import { API } from 'typescript/sync';
+import { serverFS } from 'typescript/fs';
+import { FilesModel } from '@models/files.model';
 import { createMatcher } from '@components/glob.component';
+import { inject, Injectable } from '@remotex-labs/xinject';
 import { normalize, relative, dirname } from '@remotex-labs/xmap';
 import { DeclarationModel } from '@typescript/models/declaration.model';
 import { LanguageHostService } from '@typescript/services/host.service';
 
 /**
- * One TypeScript project, wrapping its language service, module resolution, and declaration emit.
+ * One TypeScript project, wrapping its program, module resolution, and declaration emit.
  *
  * @remarks
  * Everything a build needs from TypeScript comes through here:
@@ -30,8 +30,11 @@ import { LanguageHostService } from '@typescript/services/host.service';
  * - **Declaration files** - {@link emit} and {@link emitBundle}
  * - **Specifier resolution** - {@link resolve}
  *
+ * The compiler runs as a TypeScript 7 process that every instance shares,
+ * and reads every file through the shared {@link FilesModel},
+ * so the program sees the same content the bundler does.
  * Each configuration file gets one shared instance, reference counted,
- * so several consumers naming the same `tsconfig.json` share one language service,
+ * so several consumers naming the same `tsconfig.json` share one program,
  * and the last {@link dispose} tears it down.
  * The parse forces `emitDeclarationOnly` on,
  * since this asks the compiler for types alone while the bundler produces the JavaScript.
@@ -58,31 +61,14 @@ import { LanguageHostService } from '@typescript/services/host.service';
 })
 export class TypescriptService {
     /**
-     * The language service this project's queries run against.
+     * The host that owns the program's root files and the versions the compiler last read.
      *
      * @remarks
-     * Backed by {@link languageHostService} and a document registry,
-     * so the syntax trees of shared files survive between requests.
+     * Exposed because it owns the tracked file set, which is what decides the program's roots.
      *
      * @example
      * ```ts
-     * service.languageService.getProgram()?.getSourceFiles().length; // 214
-     * ```
-     *
-     * @since 2.0.0
-     */
-
-    readonly languageService: LanguageService;
-
-    /**
-     * The host the language service reads files and versions through.
-     *
-     * @remarks
-     * Exposed because it owns the tracked file set, which is what decides the program's file list.
-     *
-     * @example
-     * ```ts
-     * service.languageHostService.tracked.size; // grows as the language service resolves imports
+     * service.languageHostService.tracked.size; // grows as files outside the configuration are touched
      * ```
      *
      * @see LanguageHostService
@@ -96,7 +82,7 @@ export class TypescriptService {
      *
      * @remarks
      * Static, so sharing spans the whole process rather than one injector,
-     * and each entry carries the reference count that decides when its language service is torn down.
+     * and each entry carries the reference count that decides when its program is torn down.
      *
      * @see acquire
      * @since 3.0.0
@@ -105,11 +91,24 @@ export class TypescriptService {
     private static readonly cache = new Map<string, CacheEntryInterface>();
 
     /**
+     * The compiler process that every instance talks to, started on first use.
+     *
+     * @remarks
+     * One process serves every project, so a second configuration costs a program rather than a process.
+     * The last {@link dispose} closes it, and the next instance starts a fresh one.
+     *
+     * @see connect
+     * @since 3.2.0
+     */
+
+    private static client?: API;
+
+    /**
      * The diagnostics of every file checked so far, keyed by the file name the compiler reported.
      *
      * @remarks
-     * Only the affected files are recomputed on a {@link check},
-     * so the untouched entries here are what makes the result whole-project rather than only-what-changed.
+     * Rebuilt once per snapshot on a {@link check},
+     * so several variants reporting against the same snapshot share one type check.
      * The key is the absolute path the compiler reported,
      * so a caller's own names are resolved before they are read back.
      *
@@ -118,25 +117,6 @@ export class TypescriptService {
      */
 
     private readonly diagnosticsCache = new Map<string, Array<DiagnosticInterface>>();
-
-    /**
-     * The host the builder program reads through.
-     *
-     * @remarks
-     * Routes every read to {@link languageHostService},
-     * so the builder sees the same cached content the language service does
-     * rather than reaching the disk a second time and disagreeing with it.
-     *
-     * @since 3.0.0
-     */
-
-    private readonly builderHost: ReadBuildProgramHost & BuilderProgramHost = {
-        createHash: ts.sys.createHash,
-        readFile: (file: string, encoding?: BufferEncoding): string | undefined =>
-            this.languageHostService.readFile(file, encoding),
-        getCurrentDirectory: (): string => ts.sys.getCurrentDirectory(),
-        useCaseSensitiveFileNames: (): boolean => ts.sys.useCaseSensitiveFileNames
-    };
 
     /**
      * The declaration cache and emitter bound to this project.
@@ -173,24 +153,83 @@ export class TypescriptService {
     private configVersion: number;
 
     /**
-     * The cache backing {@link resolve}, rebuilt whenever the compiler options change.
-     *
-     * @see createResolutionCache
-     * @since 3.0.0
-     */
-
-    private resolutionCache: ModuleResolutionCache;
-
-    /**
-     * The builder program of the last {@link check}, carried forward, so the next check only revisits what changed.
+     * The modules {@link resolve} has already found, keyed by the directory and the specifier.
      *
      * @remarks
-     * Absent before the first check and after a {@link reload}, either of which makes the next check a full pass.
+     * Only a specifier that resolved is held, so one that names a file not written yet resolves once it appears.
+     * {@link refresh} clears it with the options the resolutions were made under.
      *
-     * @since 3.0.0
+     * @see resolve
+     * @since 3.2.0
      */
 
-    private builder?: EmitAndSemanticDiagnosticsBuilderProgram;
+    private readonly resolutions = new Map<string, ResolvedModuleInterface>();
+
+    /**
+     * The resolver behind {@link resolve}, created on first use and dropped whenever the compiler options change.
+     *
+     * @since 3.2.0
+     */
+
+    private resolver?: ModuleResolver;
+
+    /**
+     * The compiler snapshot holding this project's current program.
+     *
+     * @remarks
+     * Absent until the program is first asked for.
+     * Each change produces a new snapshot from this one,
+     * so the compiler reuses whatever the change left untouched,
+     * and the snapshot it replaces is disposed.
+     *
+     * @see program
+     * @since 3.2.0
+     */
+
+    private snapshot?: Snapshot;
+
+    /**
+     * The identifier of this project's program inside {@link snapshot}.
+     *
+     * @since 3.2.0
+     */
+
+    private programId?: SyntheticProjectId;
+
+    /**
+     * The snapshot whose diagnostics {@link diagnosticsCache} currently holds.
+     *
+     * @remarks
+     * A {@link check} against the same snapshot reads the cache back rather than asking the compiler again.
+     *
+     * @since 3.2.0
+     */
+
+    private checked?: Snapshot;
+
+    /**
+     * The files the current program holds, as the compiler names them.
+     *
+     * @remarks
+     * Read once per snapshot, so asking whether the program holds a file costs a set lookup rather than a request.
+     *
+     * @see hasSourceFile
+     * @since 3.2.0
+     */
+
+    private sourceFiles = new Set<string>();
+
+    /**
+     * The number of root files the current program was built from, or `-1` when it has to be rebuilt.
+     *
+     * @remarks
+     * Roots are only ever added between reloads,
+     * so a count that moved is what tells {@link program} a file joined the project.
+     *
+     * @since 3.2.0
+     */
+
+    private rootCount = -1;
 
     /**
      * The test that decides whether a file is left out of the type check.
@@ -234,10 +273,6 @@ export class TypescriptService {
         this.excludeTypeChack = this.createTypeCheckFilter();
         this.languageHostService = new LanguageHostService(this.parsedConfig);
         this.configVersion = this.languageHostService.filesCache.touch(this.configPath).version;
-        this.resolutionCache = this.createResolutionCache();
-        this.languageService = ts.createLanguageService(
-            this.languageHostService, ts.createDocumentRegistry(true)
-        );
 
         this.declaration = new DeclarationModel(this);
     }
@@ -262,8 +297,8 @@ export class TypescriptService {
      * The cost is the state of every project in the process rather than the state of what moved.
      *
      * A change discards everything the old options fed:
-     * the file set, the resolution cache, the type-check exclusions, the cached declarations, the cached
-     * diagnostics, and the builder program,
+     * the file set, the resolutions, the type-check exclusions, the cached declarations, the cached
+     * diagnostics, and the program,
      * so the next {@link check} runs as a full pass.
      * An instance the constructor built rather than the cache is never reached here.
      *
@@ -314,28 +349,101 @@ export class TypescriptService {
     }
 
     /**
+     * The program built from the current roots and file contents.
+     *
+     * @returns The program of a snapshot that reflects every change the file model has observed
+     *
+     * @remarks
+     * Each access first asks the host which files moved since the compiler read them.
+     * When nothing moved and no root was added, the current program is returned as it stands.
+     * Otherwise the compiler is told which files changed and a new snapshot is built from the current one,
+     * so only what the change reaches is parsed and checked again.
+     *
+     * @example
+     * ```ts
+     * service.program.getSourceFileNames().length; // 214
+     * service.program === service.program;         // true - nothing changed in between
+     * ```
+     *
+     * @see LanguageHostService.collectChanges
+     * @since 3.2.0
+     */
+
+    get program(): Program {
+        const changed = this.languageHostService.collectChanges();
+        const rootFiles = this.languageHostService.getScriptFileNames();
+        if (this.snapshot && this.programId && changed.length < 1 && rootFiles.length === this.rootCount) {
+            return this.snapshot.getProgram(this.programId)!;
+        }
+
+        const previous = this.snapshot;
+        const options = { rootFiles, compilerOptions: this.parsedConfig.options };
+        const fileNotifications = changed.length > 0 ? { changed } : undefined;
+
+        let program: Program;
+        if (previous && this.programId) {
+            this.snapshot = previous.update({ fileNotifications, reconfigurePrograms: [{ id: this.programId, ...options }] });
+            program = this.snapshot.getProgram(this.programId)!;
+        } else {
+            const snapshot = TypescriptService.connect().createSnapshot({ fileNotifications, createPrograms: [ options ] });
+            program = snapshot.operation.createdPrograms[0];
+            this.snapshot = snapshot;
+            this.programId = <SyntheticProjectId> program.id;
+        }
+
+        previous?.dispose();
+        this.rootCount = rootFiles.length;
+        this.sourceFiles = new Set(program.getSourceFileNames());
+        this.languageHostService.observe(this.sourceFiles);
+
+        return program;
+    }
+
+    /**
+     * Reports whether the current program holds a file.
+     *
+     * @param path - Resolved absolute path of the file
+     * @returns `true` when the program reached the file through its roots or their imports
+     *
+     * @remarks
+     * Brings the {@link program} current first, so a file added since the last request is seen.
+     *
+     * @example
+     * ```ts
+     * service.hasSourceFile('D:/app/src/index.ts');   // true
+     * service.hasSourceFile('D:/app/scratch/note.ts'); // false - nothing reaches it
+     * ```
+     *
+     * @see program
+     * @since 3.2.0
+     */
+
+    hasSourceFile(path: string): boolean {
+        void this.program;
+
+        return this.sourceFiles.has(path);
+    }
+
+    /**
      * Type-checks the project and returns the diagnostics of the files named.
      *
      * @param reachable - Files to report on, as the build reaches them, reporting everything checked when omitted
      * @returns Diagnostics of those files, formatted for reporting
      *
      * @remarks
-     * Only the files the builder reports as affected are rechecked,
-     * their semantic, syntactic, and suggestion diagnostics replacing what was cached for them,
-     * while untouched files keep the diagnostics they already had.
-     * That is what makes the result whole-project without rechecking it whole.
+     * The project is checked once per snapshot,
+     * its syntactic, semantic, and suggestion diagnostics replacing what was cached,
+     * while a check against an unchanged snapshot reads the cache back.
+     * The compiler reuses the parts of the previous program that a change left untouched,
+     * so a check after an edit costs what the edit reaches.
      * A file under `node_modules` never reaches the check,
      * a file with the configuration's `excludeTypeChack` globs name is turned away next,
      * and a file matched by the configuration's `exclude` globs is skipped after that.
-     * A file that has left the program loses its cached diagnostics
-     * rather than reporting them against a file that is no longer there.
      *
      * The check covers the program while the report covers `reachable`,
      * which is what lets several variants share one service:
      * the diagnostics are computed once for whatever changed,
      * and each variant reads back the files its own build reaches at the cost of a lookup per file.
-     * Narrowing the check instead would consume a file for the variant that saw it first
-     * and leave the next one with nothing to report.
      * Each name is resolved as it is read, so a build's own paths serve as they are, relative or absolute.
      *
      * @example
@@ -354,32 +462,28 @@ export class TypescriptService {
      */
 
     check(reachable?: Iterable<string>): Array<DiagnosticInterface> {
-        const program = this.languageService.getProgram();
-        if (!program) return [];
+        const program = this.program;
+        if (this.checked !== this.snapshot) {
+            this.checked = this.snapshot;
+            this.diagnosticsCache.clear();
 
-        const skipIndex = process.cwd().length + 1;
-        const ignore = this.languageHostService.ignoreSourceFile;
-        const skip = (file: SourceFile): boolean => {
-            if(file.fileName.includes('node_modules')) return true;
-            if(this.excludeTypeChack(file.fileName.slice(skipIndex))) return true;
+            const files = this.checkedFiles();
+            if (files.length > 0) {
+                for (const diagnostic of [
+                    ...program.getSyntacticDiagnostics(files),
+                    ...program.getSemanticDiagnostics(files),
+                    ...program.getSuggestionDiagnostics(files)
+                ]) {
+                    if (!diagnostic.fileName) continue;
 
-            return ignore(file);
-        };
-
-        let affected;
-        this.builder = ts.createEmitAndSemanticDiagnosticsBuilderProgram(program, this.builderHost, this.builder);
-        while (affected = this.builder.getSemanticDiagnosticsOfNextAffectedFile(undefined, skip)) {
-            if ('fileName' in affected.affected) {
-                const file = affected.affected;
-                this.diagnosticsCache.set(file.fileName, [
-                    ...affected.result,
-                    ...this.builder!.getSyntacticDiagnostics(file),
-                    ...this.languageService.getSuggestionDiagnostics(file.fileName)
-                ].map(diagnostic => this.formatDiagnostic(diagnostic)));
+                    const cached = this.diagnosticsCache.get(diagnostic.fileName);
+                    if (cached) cached.push(this.formatDiagnostic(diagnostic));
+                    else this.diagnosticsCache.set(diagnostic.fileName, [ this.formatDiagnostic(diagnostic) ]);
+                }
             }
         }
 
-        return this.reconcileDiagnostics(program, reachable ?? this.diagnosticsCache.keys());
+        return this.reconcileDiagnostics(reachable ?? this.diagnosticsCache.keys());
     }
 
     /**
@@ -443,7 +547,7 @@ export class TypescriptService {
     }
 
     /**
-     * Re-reads a batch of files so the language service sees their current content.
+     * Re-reads a batch of files so the program sees their current content.
      *
      * @param files - Paths to refresh, relative or absolute
      *
@@ -495,19 +599,18 @@ export class TypescriptService {
 
     resolve(specifier: string, containingFile?: string): ResolvedModuleInterface | undefined {
         const container = containingFile ? this.languageHostService.filesCache.resolve(dirname(containingFile)) : process.cwd();
-        const dirCache = this.resolutionCache.getOrCreateCacheForDirectory(container);
-        const cached = dirCache.get(specifier, undefined)?.resolvedModule;
-        if(cached) return cached as ResolvedModuleInterface;
+        const key = `${ container }\0${ specifier }`;
+        const cached = this.resolutions.get(key);
+        if (cached) return cached;
 
-        const result = <ResolvedModuleInterface> ts.resolveModuleName(
-            specifier, containingFile ?? '', this.parsedConfig.options, this.languageHostService, this.resolutionCache
-        ).resolvedModule;
-
+        this.resolver ??= TypescriptService.connect().createModuleResolver(this.parsedConfig.options);
+        const result = <ResolvedModuleInterface | undefined> this.resolver.resolveModuleName(specifier, container).resolvedModule;
         if (result) {
             const path = relative(container, result.resolvedFileName);
 
             result.container = container;
             result.relativeFileName = path.startsWith('.') ? path : `./${ path }`;
+            this.resolutions.set(key, result);
         }
 
         return result;
@@ -517,9 +620,10 @@ export class TypescriptService {
      * Releases this consumer's hold on the shared instance.
      *
      * @remarks
-     * The language service is torn down and the instance dropped from the shared cache
+     * The program is torn down and the instance dropped from the shared cache
      * only once the last holder has released it,
      * so a service several consumers share outlives any one of them.
+     * Releasing the last instance in the process also closes the compiler process.
      * The hold released is the one the shared cache keeps under this service's configuration path,
      * so a release takes effect only on an instance the shared cache holds.
      *
@@ -541,8 +645,14 @@ export class TypescriptService {
         entry.refCount--;
         if (entry.refCount > 0) return;
 
-        this.languageService.dispose();
+        this.snapshot?.dispose();
+        this.resolver?.dispose();
+        this.snapshot = this.checked = this.resolver = undefined;
         TypescriptService.cache.delete(this.configPath);
+
+        if (TypescriptService.cache.size > 0) return;
+        TypescriptService.client?.close();
+        TypescriptService.client = undefined;
     }
 
     /**
@@ -601,6 +711,41 @@ export class TypescriptService {
     }
 
     /**
+     * Returns the shared compiler process, starting it on the first request.
+     *
+     * @returns The API client every instance talks to
+     *
+     * @remarks
+     * The compiler reads file content through the shared {@link FilesModel},
+     * so the program, the bundler, and the declarations all work from one copy of each file.
+     * Everything else - existence checks, directory listings, real paths - goes to the operating system,
+     * and writes are dropped, since the bundler owns every output.
+     *
+     * @see client
+     * @since 3.2.0
+     */
+
+    private static connect(): API {
+        if (TypescriptService.client) return TypescriptService.client;
+
+        const files = inject(FilesModel);
+
+        return TypescriptService.client = new API({
+            cwd: process.cwd(),
+            fs: {
+                stat: serverFS.useOS,
+                realpath: serverFS.useOS,
+                fileExists: serverFS.useOS,
+                directoryExists: serverFS.useOS,
+                getAccessibleEntries: serverFS.useOS,
+                readFile: (path: string): string | undefined => files.touch(path).snapshot?.text,
+                writeFile: serverFS.noop,
+                removeFile: serverFS.noop
+            }
+        });
+    }
+
+    /**
      * Rebuilds everything this instance derives from its compiler options once its configuration file has moved.
      *
      * @param force - Whether the rebuild runs even though the configuration file's version has not moved
@@ -629,33 +774,44 @@ export class TypescriptService {
         this.parsedConfig = this.parseConfig();
         this.excludeTypeChack = this.createTypeCheckFilter();
         this.languageHostService.options = this.parsedConfig;
-        this.resolutionCache = this.createResolutionCache();
+        this.resolver?.dispose();
+        this.resolver = undefined;
+        this.resolutions.clear();
         this.declaration.clear();
         this.diagnosticsCache.clear();
-        this.builder = undefined;
+        this.checked = undefined;
+        this.rootCount = -1;
 
         return true;
     }
 
     /**
-     * Builds the module resolution cache for the current options.
+     * Lists the program files that the type check covers.
      *
-     * @returns A cache keyed the way the language host normalizes paths
+     * @returns The files outside `node_modules` that neither `excludeTypeChack` nor `exclude` turns away
      *
      * @remarks
-     * Real paths go through the host,
-     * so a symlinked file is keyed the same here as in the file cache,
-     * and the two cannot disagree about which file a specifier reached.
+     * The default libraries sit under `node_modules` with the compiler itself, so the first test drops them too.
+     * The `excludeTypeChack` globs are tested against the path relative to the working directory,
+     * which is how a project writes them.
      *
-     * @since 3.0.0
+     * @see check
+     * @since 3.2.0
      */
 
-    private createResolutionCache(): ModuleResolutionCache {
-        return ts.createModuleResolutionCache(
-            ts.sys.getCurrentDirectory(),
-            path => this.languageHostService.realpath(path),
-            this.parsedConfig.options
-        );
+    private checkedFiles(): Array<string> {
+        const skipIndex = process.cwd().length + 1;
+        const files: Array<string> = [];
+
+        for (const file of this.sourceFiles) {
+            if (file.includes('node_modules')) continue;
+            if (this.excludeTypeChack(file.slice(skipIndex))) continue;
+            if (this.languageHostService.isExcluded(file)) continue;
+
+            files.push(file);
+        }
+
+        return files;
     }
 
     /**
@@ -676,7 +832,8 @@ export class TypescriptService {
      */
 
     private createTypeCheckFilter(): (path: string) => boolean {
-        const globs: Array<string> = this.config.raw?.excludeTypeChack ?? [];
+        const raw = <{ excludeTypeChack?: Array<string> } | undefined> this.config.raw;
+        const globs = raw?.excludeTypeChack ?? [];
 
         return globs.length > 0 ? createMatcher(globs) : (): boolean => false;
     }
@@ -684,7 +841,6 @@ export class TypescriptService {
     /**
      * Reads the diagnostics of a set of files out of the cache, dropping whatever no longer belongs to the program.
      *
-     * @param program - Program the files are looked up in
      * @param reachable - Files to read, named as the caller has them, relative or absolute
      * @returns The cached diagnostics of those files, in the order they were named
      *
@@ -702,7 +858,7 @@ export class TypescriptService {
      * @since 3.0.0
      */
 
-    private reconcileDiagnostics(program: Program, reachable: Iterable<string>): Array<DiagnosticInterface> {
+    private reconcileDiagnostics(reachable: Iterable<string>): Array<DiagnosticInterface> {
         const files = this.languageHostService.filesCache;
         const result: Array<DiagnosticInterface> = [];
 
@@ -711,7 +867,7 @@ export class TypescriptService {
             const diagnostics = this.diagnosticsCache.get(path);
 
             if (!diagnostics) continue;
-            if (program.getSourceFile(path)) result.push(...diagnostics);
+            if (this.sourceFiles.has(path)) result.push(...diagnostics);
             else this.diagnosticsCache.delete(path);
         }
 
@@ -728,6 +884,7 @@ export class TypescriptService {
      * Chained messages are flattened into one string, and line and column are counted from one rather than from zero,
      * since the compiler counts from zero while every editor and terminal reports from one.
      * A diagnostic with no file - a configuration error, say - carries the message and category alone.
+     * The file is reported relative to the working directory, which is how a build names its own files.
      *
      * @see DiagnosticInterface
      * @since 2.0.0
@@ -735,19 +892,38 @@ export class TypescriptService {
 
     private formatDiagnostic(diagnostic: Diagnostic): DiagnosticInterface {
         const result: DiagnosticInterface = {
-            message: ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n'),
+            message: this.flattenMessage(diagnostic),
             category: diagnostic.category
         };
 
-        if (diagnostic.file && diagnostic.start !== undefined) {
-            const { line, character } = diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start);
-            result.file = diagnostic.file.fileName;
-            result.line = line + 1;
-            result.column = character + 1;
+        if (diagnostic.fileName && diagnostic.startPosition) {
+            result.file = relative(process.cwd(), diagnostic.fileName);
+            result.line = diagnostic.startPosition.line + 1;
+            result.column = diagnostic.startPosition.character + 1;
             result.code = diagnostic.code;
         }
 
         return result;
+    }
+
+    /**
+     * Flattens a diagnostic and its chained messages into one string.
+     *
+     * @param diagnostic - Diagnostic whose text heads the result
+     * @param indent - Depth of this message in the chain, which decides its indentation
+     * @returns The message, followed by each chained message on its own line, two spaces deeper per level
+     *
+     * @remarks
+     * Matches the layout the compiler prints, so a chained message reads the same here as in an editor.
+     *
+     * @since 3.2.0
+     */
+
+    private flattenMessage(diagnostic: Diagnostic, indent: number = 0): string {
+        let message = `${ '  '.repeat(indent) }${ diagnostic.text }`;
+        for (const next of diagnostic.messageChain ?? []) message += `\n${ this.flattenMessage(next, indent + 1) }`;
+
+        return message;
     }
 
     /**
@@ -768,46 +944,28 @@ export class TypescriptService {
      */
 
     private parseConfig(): ParsedCommandLine {
-        let config = ts.getParsedCommandLineOfConfigFile(
-            this.configPath,
-            {
-                sourceMap: false,
-                skipLibCheck: true,
-                stripInternal: true,
-                declarationMap: false,
-                emitDeclarationOnly: true
-            },
-            {
-                ...ts.sys,
-                onUnRecoverableConfigFileDiagnostic: () => {}
-            }
-        );
+        const api = TypescriptService.connect();
+        let config: ParsedCommandLine;
 
-        if (!config) {
-            config = {
-                options: {
-                    strict: true,
-                    target: ts.ScriptTarget.ESNext,
-                    module: ts.ModuleKind.NodeNext,
-                    sourceMap: false,
-                    skipLibCheck: true,
-                    stripInternal: true,
-                    declarationMap: false,
-                    emitDeclarationOnly: true,
-                    moduleResolution: ts.ModuleResolutionKind.NodeNext
-                },
-                errors: [],
-                fileNames: [],
-                projectReferences: undefined
-            };
+        try {
+            config = api.parseConfigFile(this.configPath);
+        } catch {
+            config = api.parseJsonConfigFileContent({
+                files: [],
+                compilerOptions: { strict: true, target: 'esnext', module: 'nodenext', moduleResolution: 'nodenext' }
+            }, { configDirectory: process.cwd() });
         }
 
         config.options = {
             ...config.options,
             noEmit: true,
-            rootDir: config.options?.rootDir ?? process.cwd(),
+            rootDir: config.options.rootDir ?? <CompilerOptions['rootDir']> process.cwd(),
+            sourceMap: false,
+            skipLibCheck: true,
+            stripInternal: true,
             isolatedModules: false,
-            useCaseSensitiveFileNames: true
+            declarationMap: false,
+            emitDeclarationOnly: true
         };
 
         return config;

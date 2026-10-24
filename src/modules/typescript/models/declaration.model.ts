@@ -558,8 +558,8 @@ export class DeclarationModel {
      * @remarks
      * The emit runs against the shared program, so the checker supplies whatever an annotation leaves out
      * rather than every exported symbol having to spell its own type.
-     * `forceDtsEmit` is what returns the text at all, since the parsed configuration forces `noEmit` on
-     * to keep the compiler off the disk the bundler writes to.
+     * The declaration emit returns the text regardless of `noEmit`,
+     * which the parsed configuration forces on to keep the compiler off the disk the bundler writes to.
      * A path the program has not reached is tracked and the program asked once more,
      * which covers a file the build reaches while `tsconfig.json` neither lists nor includes it.
      * A path its `exclude` globs match stays out even then, and yields no declarations rather than an error.
@@ -568,15 +568,16 @@ export class DeclarationModel {
      */
 
     private emitDeclaration(target: string): string {
-        const service = this.ts.languageService;
-
-        if (!service.getProgram()?.getSourceFile(target)) {
+        if (!this.ts.hasSourceFile(target)) {
             this.ts.touchFiles([ target ]);
-            if (!service.getProgram()?.getSourceFile(target)) return '';
+            if (!this.ts.hasSourceFile(target)) return '';
         }
 
-        return service.getEmitOutput(target, true, true)
-            .outputFiles.find(file => file.name.endsWith('.d.ts'))?.text ?? '';
+        for (const [ name, file ] of this.ts.program.getDeclarationEmit([ target ]).outputFiles) {
+            if (name.endsWith('.d.ts')) return file.text;
+        }
+
+        return '';
     }
 
     /**

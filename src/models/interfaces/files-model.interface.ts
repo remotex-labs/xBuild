@@ -1,30 +1,22 @@
 /**
- * Type-only imports erased during TypeScript compilation.
- */
-
-import type { IScriptSnapshot } from 'typescript';
-
-/**
- * A TypeScript script snapshot that also carries its source text.
+ * The content of one cached file.
  *
  * @remarks
- * `IScriptSnapshot` only hands out content through `getText`, which slices a new string on every call.
- * The added `text` property keeps the content the snapshot was built from, so a cache can read it back as it is.
+ * Held as an object rather than a bare string,
+ * so a missing file is told apart from an empty one by the snapshot being absent rather than by its text.
  *
  * @example
  * ```ts
  * const snapshot = model.touch('src/index.ts').snapshot;
  *
- * snapshot?.text;          // 'export const answer = 42;'
- * snapshot?.getLength();   // 25
- * snapshot?.getText(0, 6); // 'export'
+ * snapshot?.text; // 'export const answer = 42;'
  * ```
  *
  * @see FileSnapshotInterface
- * @since 2.0.0
+ * @since 3.2.0
  */
 
-export type ScriptSnapshotType = IScriptSnapshot & { text: string };
+export type ScriptSnapshotType = { text: string };
 
 /**
  * Cached state of one tracked file.
@@ -68,7 +60,7 @@ export interface FileSnapshotInterface {
      * Counter that moves up every time the entry is rebuilt.
      *
      * @remarks
-     * The language service asks for this on every request and reparses the file only when the number changed,
+     * The compiler is told a file changed only when this number moves,
      * so it stands still for as long as the modification time does.
      * A file that disappears counts as a change and moves the counter too.
      *
@@ -89,7 +81,7 @@ export interface FileSnapshotInterface {
      *
      * @remarks
      * A missing path is tracked with an empty snapshot rather than left out of the cache,
-     * so the language service can be told that a file it once parsed is gone.
+     * so the compiler can be told that a file it once parsed is gone.
      *
      * @example
      * ```ts

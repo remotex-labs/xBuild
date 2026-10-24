@@ -2,38 +2,41 @@
  * Type-only imports erased during TypeScript compilation.
  */
 
+import type { ParsedCommandLine } from 'typescript/sync';
 import type { FileSnapshotInterface } from '@models/interfaces/files-model.interface';
-import type { IScriptSnapshot, SourceFile, ParsedCommandLine, CompilerOptions } from 'typescript';
 
 /**
  * Imports
  */
 
-import ts from 'typescript';
 import { relative } from '@remotex-labs/xmap';
 import { inject } from '@remotex-labs/xinject';
 import { FilesModel } from '@models/files.model';
 import { createMatcher } from '@components/glob.component';
 
 /**
- * A TypeScript language service host backed by cached file snapshots and the set of files it has tracked.
+ * The file set and file versions that one TypeScript project hands to the compiler.
  *
  * @remarks
- * Satisfies `ts.LanguageServiceHost`, giving the language service its filesystem access, script snapshots, and
- * compiler configuration.
- * Reads and versions are delegated to the shared {@link FilesModel}, while the file set handed over through
- * {@link getScriptFileNames} is maintained here.
- * A path enters the tracked set the first time it is refreshed or its version is queried,
- * so the set grows from the configured entry files to every dependency the language service resolves into them.
- * Paths matched by the configuration's `exclude` globs are skipped by {@link refreshFiles} and reported as ignored
- * to incremental checks through {@link ignoreSourceFile}.
+ * The compiler runs in its own process, reads every file through the shared {@link FilesModel},
+ * and is never told on its own that a file moved.
+ * This host keeps the two halves of that bargain:
+ *
+ * - **Root files** - the configured entry files plus every path refreshed since, which {@link getScriptFileNames}
+ *   hands over as the program's roots
+ * - **Change tracking** - the version each program file had when the compiler last saw it,
+ *   which {@link collectChanges} compares against the file model to list what the compiler has to re-read
+ *
+ * Paths matched by the configuration's `exclude` globs are skipped by {@link refreshFiles}
+ * and reported as excluded through {@link isExcluded}.
  *
  * @example
  * ```ts
  * const host = new LanguageHostService(parsedConfig); // entry files tracked and read up front
  *
- * host.refresh('src/index.ts');                       // re-read and track one file
- * host.getScriptSnapshot('src/index.ts');             // what the language service parses
+ * host.observe(program.getSourceFileNames());         // versions the compiler just read
+ * host.refresh('src/index.ts');                       // the file changed on disk
+ * host.collectChanges();                              // [ 'D:/app/src/index.ts' ]
  * host.options = nextParsedConfig;                    // swap configuration and re-track from scratch
  * ```
  *
@@ -41,7 +44,7 @@ import { createMatcher } from '@components/glob.component';
  * @since 2.0.0
  */
 
-export class LanguageHostService implements ts.LanguageServiceHost {
+export class LanguageHostService {
     /**
      * Shared model that reads files, caches their snapshots, and tracks their versions.
      *
@@ -60,12 +63,12 @@ export class LanguageHostService implements ts.LanguageServiceHost {
     readonly filesCache = inject(FilesModel);
 
     /**
-     * Resolved absolute paths of every file this host has tracked for the language service.
+     * Resolved absolute paths of every file this host has tracked as a program root.
      *
      * @remarks
-     * Returned verbatim from {@link getScriptFileNames}.
-     * A path is added the first time it is refreshed or its version is queried, then kept even after the file is
-     * deleted, so the language service observes the deletion through an empty snapshot rather than a vanishing file.
+     * Copied out by {@link getScriptFileNames}, which is what the program takes as its roots.
+     * A path is added the first time it is refreshed, then kept even after the file is deleted,
+     * so the compiler observes the deletion as a missing file rather than as a root that vanished.
      *
      * @see track
      * @since 3.0.0
@@ -85,6 +88,22 @@ export class LanguageHostService implements ts.LanguageServiceHost {
      */
 
     private readonly exclusions = new Map<string, boolean>();
+
+    /**
+     * The version each file had when the compiler last read it, keyed by the resolved absolute path.
+     *
+     * @remarks
+     * The compiler process caches what it read and re-reads a file only once it is told the file changed.
+     * {@link observe} records the versions behind a freshly built program,
+     * and {@link collectChanges} compares them against the file model to decide what to tell it.
+     *
+     * @see observe
+     * @see collectChanges
+     *
+     * @since 3.2.0
+     */
+
+    private readonly observed = new Map<string, number>();
 
     /**
      * A predicate compiled from the configuration's `exclude` globs, tested against working-directory-relative
@@ -111,8 +130,7 @@ export class LanguageHostService implements ts.LanguageServiceHost {
      *
      * @example
      * ```ts
-     * const config = ts.getParsedCommandLineOfConfigFile('tsconfig.json', {}, ts.sys as never)!;
-     * const host = new LanguageHostService(config);
+     * const host = new LanguageHostService(api.parseConfigFile('tsconfig.json'));
      * host.getScriptFileNames(); // the configuration's entry files
      * ```
      *
@@ -148,28 +166,6 @@ export class LanguageHostService implements ts.LanguageServiceHost {
     }
 
     /**
-     * A source-file predicate that incremental checks can use to skip excluded files.
-     *
-     * @returns A predicate reporting `true` for a source file whose path matches the exclude globs
-     *
-     * @remarks
-     * Bridges the path-based {@link isExcluded} to TypeScript's `ignoreSourceFile` hook by reading the absolute
-     * `fileName`, so it agrees with how {@link refreshFiles} filters paths.
-     *
-     * @example
-     * ```ts
-     * builder.getSemanticDiagnosticsOfNextAffectedFile(undefined, host.ignoreSourceFile);
-     * ```
-     *
-     * @see refreshFiles
-     * @since 3.0.0
-     */
-
-    get ignoreSourceFile(): (file: SourceFile) => boolean {
-        return (file: SourceFile): boolean => this.isExcluded(file.fileName);
-    }
-
-    /**
      * Replaces the configuration and re-tracks the project from scratch.
      *
      * @param config - The new parsed configuration
@@ -180,7 +176,7 @@ export class LanguageHostService implements ts.LanguageServiceHost {
      *
      * @example
      * ```ts
-     * host.options = ts.getParsedCommandLineOfConfigFile('tsconfig.json', {}, ts.sys as never)!;
+     * host.options = api.parseConfigFile('tsconfig.json');
      * host.getScriptFileNames(); // the new entry files, nothing carried over
      * ```
      *
@@ -223,6 +219,7 @@ export class LanguageHostService implements ts.LanguageServiceHost {
      * The single initialization path shared by the constructor and the {@link options} setter:
      * - compiles the `exclude` globs into {@link matches},
      * - drops the memoized {@link exclusions}, whose verdicts belong to the previous globs,
+     * - forgets the {@link observed} versions, since the program that read them is about to be rebuilt,
      * - refreshes every entry file through {@link clearTracked}, which reads them into the cache and tracks them.
      *
      * Call it directly when the configuration object was edited in place rather than replaced.
@@ -238,8 +235,9 @@ export class LanguageHostService implements ts.LanguageServiceHost {
      */
 
     reload(): void {
-        this.matches = this.compileExclude(this.config.raw?.exclude);
+        this.matches = this.compileExclude((<{ exclude?: Array<string> } | undefined> this.config.raw)?.exclude);
         this.exclusions.clear();
+        this.observed.clear();
 
         this.clearTracked();
     }
@@ -296,44 +294,6 @@ export class LanguageHostService implements ts.LanguageServiceHost {
     }
 
     /**
-     * Returns the compiler options currently in force.
-     *
-     * @returns The active TypeScript compiler options
-     *
-     * @example
-     * ```ts
-     * host.getCompilationSettings().target; // ts.ScriptTarget.ES2020
-     * ```
-     *
-     * @since 2.0.0
-     */
-
-    getCompilationSettings(): CompilerOptions {
-        return this.config.options;
-    }
-
-    /**
-     * Reports whether a file exists on disk.
-     *
-     * @param path - Absolute path
-     * @returns `true` when the file exists
-     *
-     * @remarks
-     * Goes straight to `ts.sys`, bypassing the snapshot cache, so it reflects the filesystem as it stands now.
-     *
-     * @example
-     * ```ts
-     * host.fileExists('/project/src/index.ts'); // true
-     * ```
-     *
-     * @since 2.0.0
-     */
-
-    fileExists(path: string): boolean {
-        return ts.sys.fileExists(path);
-    }
-
-    /**
      * Reads file content through the snapshot cache.
      *
      * @param path - File path, relative or absolute
@@ -358,87 +318,12 @@ export class LanguageHostService implements ts.LanguageServiceHost {
     }
 
     /**
-     * Lists the files under a directory that match the given criteria.
-     *
-     * @param path - Directory to start from
-     * @param extensions - File extensions to accept
-     * @param exclude - Glob patterns to skip
-     * @param include - Glob patterns to keep
-     * @param depth - Maximum recursion depth
-     * @returns The matching file paths
-     *
-     * @example
-     * ```ts
-     * host.readDirectory('src', [ '.ts' ], [ 'node_modules' ], undefined, 2); // [ 'src/index.ts', ... ]
-     * ```
-     *
-     * @since 2.0.0
-     */
-
-    readDirectory(path: string, extensions?: Array<string>, exclude?: Array<string>, include?: Array<string>, depth?: number): Array<string> {
-        return ts.sys.readDirectory(path, extensions, exclude, include, depth);
-    }
-
-    /**
-     * Returns the immediate subdirectories of a path.
-     *
-     * @param path - Directory to list
-     * @returns The subdirectory names
-     *
-     * @example
-     * ```ts
-     * host.getDirectories('src'); // [ 'services', 'models' ]
-     * ```
-     *
-     * @since 2.0.0
-     */
-
-    getDirectories(path: string): Array<string> {
-        return ts.sys.getDirectories(path);
-    }
-
-    /**
-     * Reports whether a directory exists.
-     *
-     * @param path - Absolute path
-     * @returns `true` when the directory exists
-     *
-     * @example
-     * ```ts
-     * host.directoryExists('src/services'); // true
-     * ```
-     *
-     * @since 2.0.0
-     */
-
-    directoryExists(path: string): boolean {
-        return ts.sys.directoryExists(path);
-    }
-
-    /**
-     * Returns the working directory that relative paths resolve against.
-     *
-     * @returns The absolute path of the current working directory
-     *
-     * @example
-     * ```ts
-     * host.getCurrentDirectory(); // '/project'
-     * ```
-     *
-     * @since 2.0.0
-     */
-
-    getCurrentDirectory(): string {
-        return ts.sys.getCurrentDirectory();
-    }
-
-    /**
      * Returns the resolved paths of every file tracked by this host.
      *
      * @returns A snapshot array of the tracked absolute paths
      *
      * @remarks
-     * This is the program's file set as far as the language service is concerned.
+     * These are the roots the program is built from, and the compiler follows their imports to the rest.
      * A deleted file stays listed, so its removal surfaces as a diagnostic rather than as a silently shrinking program.
      *
      * @example
@@ -455,71 +340,64 @@ export class LanguageHostService implements ts.LanguageServiceHost {
     }
 
     /**
-     * Returns the path of the default lib file matching the given options.
+     * Records the current version of every file a freshly built program read.
      *
-     * @param options - Compiler options, of which `target` decides the lib
-     * @returns Absolute path to the matching `lib.*.d.ts`
+     * @param paths - Files the program holds, as the compiler names them
+     *
+     * @remarks
+     * The compiler read each of these through the file model while building,
+     * so the version the model holds now is the one the compiler saw.
+     * A path the model has never read, such as a default library the compiler serves itself, is passed over.
      *
      * @example
      * ```ts
-     * host.getDefaultLibFileName({ target: ts.ScriptTarget.ES2020 }); // '.../lib.es2020.full.d.ts'
+     * host.observe(program.getSourceFileNames());
+     * host.collectChanges(); // [] - nothing moved since the program was built
      * ```
      *
-     * @since 2.0.0
+     * @see collectChanges
+     * @since 3.2.0
      */
 
-    getDefaultLibFileName(options: CompilerOptions): string {
-        return ts.getDefaultLibFilePath(options);
+    observe(paths: Iterable<string>): void {
+        for (const path of paths) {
+            const version = this.filesCache.getSnapshot(path)?.version;
+            if (version !== undefined) this.observed.set(this.filesCache.resolve(path), version);
+        }
     }
 
     /**
-     * Returns the version identifier of a file and tracks it.
+     * Lists the observed files whose version has moved since the compiler read them.
      *
-     * @param path - File path, relative or absolute
-     * @returns The version as a string, such as `'1'` or `'2'`
+     * @returns The resolved paths the compiler has to re-read, empty when nothing moved
      *
      * @remarks
-     * The language service reparses a file only when this string changes, so the value must stay stable while the file
-     * does.
-     * The read is served from the cache, and {@link refresh} is what moves the version forward.
+     * Each path reported is recorded at its new version,
+     * so a change is reported once rather than on every later call.
+     * A file the model no longer holds counts as a change, which is how a deletion reaches the compiler.
      *
      * @example
      * ```ts
-     * host.getScriptVersion('src/index.ts'); // '1'
-     * host.refresh('src/index.ts');          // the file changed on disk
-     * host.getScriptVersion('src/index.ts'); // '2' - the language service reparses it
+     * host.refresh('src/index.ts'); // the file changed on disk
+     * host.collectChanges();        // [ 'D:/app/src/index.ts' ]
+     * host.collectChanges();        // []
      * ```
      *
-     * @see track
-     * @since 2.0.0
+     * @see observe
+     * @since 3.2.0
      */
 
-    getScriptVersion(path: string): string {
-        return this.filesCache.touch(this.track(path)).version.toString();
-    }
+    collectChanges(): Array<string> {
+        const changed: Array<string> = [];
+        for (const [ path, version ] of this.observed) {
+            const current = this.filesCache.getSnapshot(path)?.version ?? -1;
+            if (current === version) continue;
 
-    /**
-     * Returns the script snapshot of a file.
-     *
-     * @param path - File path, relative or absolute
-     * @returns The snapshot, or `undefined` when the path holds no readable file
-     *
-     * @remarks
-     * Reads through the cache, loading from the disk at first sight only.
-     * Unlike {@link getScriptVersion}, it leaves the tracked set alone - tracking is driven by version queries.
-     *
-     * @example
-     * ```ts
-     * const snapshot = host.getScriptSnapshot('src/index.ts');
-     * snapshot?.getText(0, snapshot.getLength()); // export const x = 10;
-     * ```
-     *
-     * @see getScriptVersion
-     * @since 2.0.0
-     */
+            changed.push(path);
+            this.observed.set(path, current);
+        }
 
-    getScriptSnapshot(path: string): IScriptSnapshot | undefined {
-        return this.filesCache.touch(path).snapshot;
+        return changed;
     }
 
     /**
@@ -529,8 +407,8 @@ export class LanguageHostService implements ts.LanguageServiceHost {
      * @returns The resolved absolute path
      *
      * @remarks
-     * Implements the optional `realpath` host hook with the same normalization {@link FilesModel} applies to its cache
-     * keys, so the paths reported to TypeScript match the ones tracked here.
+     * Applies the same normalization {@link FilesModel} applies to its cache keys,
+     * so the paths handed to the compiler match the ones tracked here.
      *
      * @example
      * ```ts
@@ -572,12 +450,19 @@ export class LanguageHostService implements ts.LanguageServiceHost {
      * @remarks
      * The path is resolved before the verdict is stored, so the same file reached by two spellings is matched once,
      * and every later lookup of either costs a map read.
+     * The type check asks this for every file it walks, so it agrees with how {@link refreshFiles} filters paths.
+     *
+     * @example
+     * ```ts
+     * host.isExcluded('src/index.spec.ts'); // true - matched by the exclude globs
+     * host.isExcluded('src/index.ts');      // false
+     * ```
      *
      * @see exclusions
-     * @since 3.0.0
+     * @since 3.2.0
      */
 
-    private isExcluded(path: string): boolean {
+    isExcluded(path: string): boolean {
         const target = this.filesCache.resolve(path);
         let excluded = this.exclusions.get(target);
         if (excluded === undefined) this.exclusions.set(
@@ -594,7 +479,7 @@ export class LanguageHostService implements ts.LanguageServiceHost {
      * @returns The resolved absolute path used as the tracking key
      *
      * @remarks
-     * Centralizes the tracking shared by {@link refresh} and {@link getScriptVersion}.
+     * Centralizes the tracking behind {@link refresh}.
      * A path is added the first time it is seen and never removed,
      * so a deletion leaves a still-listed entry that resolves to an empty snapshot.
      *

@@ -3,8 +3,7 @@
  */
 
 import type { Stats } from 'fs';
-import type { TextChangeRange } from 'typescript';
-import type { FileSnapshotInterface, ScriptSnapshotType } from './interfaces/files-model.interface';
+import type { FileSnapshotInterface } from './interfaces/files-model.interface';
 
 /**
  * Imports
@@ -18,8 +17,8 @@ import { Injectable } from '@remotex-labs/xinject';
  * In-memory cache of file contents keyed by resolved absolute path.
  *
  * @remarks
- * Backs the TypeScript language service, which asks for a script version on every request and only reparses when
- * that version changes.
+ * Backs the TypeScript compiler, which reads every source file through it,
+ * and is told a file changed only when its version moves.
  * Content is read once and re-read only when the modification time moves,
  * so repeated lookups of an unchanged file cost a map read.
  * Reach for {@link touch} when any cached content will do,
@@ -178,7 +177,7 @@ export class FilesModel {
      * @remarks
      * The safety net under file watching: a change that goes unreported leaves an entry stale with nothing to
      * announce it - the version never moves,
-     * so the language service is never told to reparse, and the build keeps compiling text that is no longer on disk.
+     * so the compiler is never told the file changed, and the build keeps compiling text that is no longer on disk.
      * Sweeping asks the filesystem rather than the watcher,
      * so a missed event costs a needless rebuild at worst rather than a wrong one.
      * Every path gets a `stat`, and only the ones whose time moved are read again.
@@ -258,63 +257,8 @@ export class FilesModel {
         return this.store(target, {
             mtimeMs: info.mtimeMs,
             version: (entry?.version ?? 0) + 1,
-            snapshot: this.snapshot(readFileSync(target, encoding))
+            snapshot: { text: readFileSync(target, encoding) }
         });
-    }
-
-    /**
-     * Computes the span that differs between two versions of a text.
-     *
-     * @param oldText - Text the language service last parsed
-     * @param newText - Text that replaces it
-     * @returns The replaced span in `oldText` together with the length of its replacement
-     *
-     * @remarks
-     * Narrows the change by trimming the shared prefix and the shared suffix,
-     * which lets the language service reuse the untouched parts of the syntax tree.
-     * The suffix scan stops at the prefix boundary, so the two never overlap on a text that shrank.
-     *
-     * @since 3.0.0
-     */
-
-    private changeRange(oldText: string, newText: string): TextChangeRange {
-        const oldLength = oldText.length;
-        const newLength = newText.length;
-        const max = Math.min(oldLength, newLength);
-
-        let prefix = 0;
-        while (prefix < max && oldText.charCodeAt(prefix) === newText.charCodeAt(prefix)) prefix++;
-
-        let suffix = 0;
-        while (suffix < max - prefix && oldText.charCodeAt(oldLength - 1 - suffix) === newText.charCodeAt(newLength - 1 - suffix)) suffix++;
-
-        return {
-            span: { start: prefix, length: oldLength - prefix - suffix },
-            newLength: newLength - prefix - suffix
-        };
-    }
-
-    /**
-     * Wraps file content in a script snapshot.
-     *
-     * @param text - Content read from disk
-     * @returns A snapshot exposing the content both as `text` and through the `IScriptSnapshot` methods
-     *
-     * @remarks
-     * `getChangeRange` closes over this text as the new version and delegates to {@link changeRange},
-     * so the language service can diff against any earlier snapshot it still holds.
-     *
-     * @since 3.0.0
-     */
-
-    private snapshot(text: string): ScriptSnapshotType {
-        return {
-            text,
-            getText: (start, end): string => text.slice(start, end),
-            getLength: (): number => text.length,
-            getChangeRange: (previous):
-                TextChangeRange => this.changeRange(previous.getText(0, previous.getLength()), text)
-        };
     }
 
     /**

@@ -2,7 +2,7 @@
  * Type-only imports erased during TypeScript compilation.
  */
 
-import type { DiagnosticCategory, ResolvedModuleFull } from 'typescript';
+import type { DiagnosticCategory, ResolvedModule } from 'typescript/sync';
 import type { TypescriptService } from '@typescript/services/typescript.service';
 
 /**
@@ -10,7 +10,7 @@ import type { TypescriptService } from '@typescript/services/typescript.service'
  *
  * @remarks
  * One entry per configuration path, which is what lets several consumers naming the same `tsconfig.json` share a
- * language service instead of each building one.
+ * program instead of each building one.
  * The count decides the teardown: releasing drops it, and only the release that takes it to zero disposes the service.
  *
  * @example
@@ -180,7 +180,7 @@ export interface DiagnosticInterface {
  * A resolved module together with the directory that anchored the resolution.
  *
  * @remarks
- * `ResolvedModuleFull` names the file a specifier reached.
+ * `ResolvedModule` names the file a specifier reached.
  * A rewrite also needs the base directory of that resolution,
  * since the emitted specifier has to sit relative to the file that carries it.
  * {@link TypescriptService.resolve} attaches both fields on the first resolution
@@ -201,7 +201,7 @@ export interface DiagnosticInterface {
  * @since 3.0.0
  */
 
-export interface ResolvedModuleInterface extends ResolvedModuleFull {
+export interface ResolvedModuleInterface extends ResolvedModule {
     /**
      * The absolute directory that anchored the resolution.
      *

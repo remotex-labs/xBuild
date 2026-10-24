@@ -167,47 +167,16 @@ describe('FilesModel', () => {
     });
 
     describe('snapshot', () => {
-        test('should expose the content as text and through the snapshot methods', () => {
-            const snapshot = model.touch('a.ts').snapshot;
-
-            expect(snapshot?.text).toBe('export const answer = 42;');
-            expect(snapshot?.getLength()).toBe(25);
-            expect(snapshot?.getText(0, 6)).toBe('export');
+        test('should hold the content as read from disk', () => {
+            expect(model.touch('a.ts').snapshot).toEqual({ text: 'export const answer = 42;' });
         });
 
-        test('should narrow the change range to the span that differs', () => {
-            readMock.mockReturnValue('abcd');
-            const previous = model.touch('a.ts').snapshot;
-
+        test('should replace the content once the file changes on disk', () => {
+            model.touch('a.ts');
             statMock.mockReturnValue({ mtimeMs: 200, isFile: (): boolean => true });
             readMock.mockReturnValue('abXcd');
 
-            expect(model.refresh('a.ts').snapshot?.getChangeRange(<any> previous)).toEqual({
-                span: { start: 2, length: 0 },
-                newLength: 1
-            });
-        });
-
-        test('should report an empty span between two identical texts', () => {
-            const snapshot = model.touch('a.ts').snapshot;
-
-            expect(snapshot?.getChangeRange(<any> snapshot)).toEqual({
-                span: { start: 25, length: 0 },
-                newLength: 0
-            });
-        });
-
-        test('should keep the prefix and the suffix apart on a text that shrank', () => {
-            readMock.mockReturnValue('abcd');
-            const previous = model.touch('a.ts').snapshot;
-
-            statMock.mockReturnValue({ mtimeMs: 200, isFile: (): boolean => true });
-            readMock.mockReturnValue('ad');
-
-            expect(model.refresh('a.ts').snapshot?.getChangeRange(<any> previous)).toEqual({
-                span: { start: 1, length: 2 },
-                newLength: 0
-            });
+            expect(model.refresh('a.ts').snapshot?.text).toBe('abXcd');
         });
     });
 });

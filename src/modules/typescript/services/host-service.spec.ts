@@ -2,13 +2,12 @@
  * Type-only imports erased during TypeScript compilation.
  */
 
-import type { ParsedCommandLine } from 'typescript';
+import type { ParsedCommandLine } from 'typescript/sync';
 
 /**
  * Imports
  */
 
-import ts from 'typescript';
 import { cwd } from 'process';
 import { inject } from '@remotex-labs/xinject';
 import { normalize } from '@remotex-labs/xmap';
@@ -29,6 +28,7 @@ describe('LanguageHostService', () => {
     let host: LanguageHostService;
     let config: ParsedCommandLine;
     let touchMock: any;
+    let snapshotMock: any;
     let refreshMock: any;
     let resolveMock: any;
     let matcherMock: any;
@@ -38,7 +38,7 @@ describe('LanguageHostService', () => {
         xJet.restoreAllMocks();
 
         config = <ParsedCommandLine> <unknown> {
-            options: { target: ts.ScriptTarget.ES2020 },
+            options: {},
             fileNames: [ 'src/index.ts', 'src/index.spec.ts' ],
             raw: { exclude: [ '**/*.spec.ts' ] }
         };
@@ -48,6 +48,7 @@ describe('LanguageHostService', () => {
         );
 
         touchMock = xJet.spyOn(cache, 'touch').mockReturnValue(entry);
+        snapshotMock = xJet.spyOn(cache, 'getSnapshot').mockReturnValue(entry);
         refreshMock = xJet.spyOn(cache, 'refresh').mockReturnValue(entry);
         matcherMock = xJet.fn((path: string) => path.endsWith('.spec.ts'));
         createMatcherMock = xJet.mock(createMatcher).mockReturnValue(<any> matcherMock);
@@ -145,6 +146,11 @@ describe('LanguageHostService', () => {
             expect(matcherMock).toHaveBeenCalledWith('src/a.ts');
         });
 
+        test('should report whether the exclude globs match a path', () => {
+            expect(host.isExcluded(abs('src/a.spec.ts'))).toBe(true);
+            expect(host.isExcluded(abs('src/a.ts'))).toBe(false);
+        });
+
         test('should ask the matcher once per path', () => {
             matcherMock.mockClear();
             host.refreshFiles([ 'src/a.ts', 'src/a.ts' ]);
@@ -153,24 +159,44 @@ describe('LanguageHostService', () => {
         });
     });
 
-    describe('ignoreSourceFile', () => {
-        test('should ignore a source file the exclude globs match', () => {
-            expect(host.ignoreSourceFile(<any> { fileName: abs('src/a.spec.ts') })).toBe(true);
-            expect(host.ignoreSourceFile(<any> { fileName: abs('src/a.ts') })).toBe(false);
+    describe('observe', () => {
+        test('should pass over a file the cache has never read', () => {
+            snapshotMock.mockReturnValue(undefined);
+            host.observe([ abs('lib.d.ts') ]);
+            snapshotMock.mockReturnValue({ ...entry, version: 3 });
+
+            expect(host.collectChanges()).toEqual([]);
         });
     });
 
-    describe('getScriptVersion', () => {
-        test('should report the cached version as a string and track the path', () => {
-            expect(host.getScriptVersion('src/new.ts')).toBe('2');
-            expect(host.tracked.has(abs('src/new.ts'))).toBe(true);
-        });
-    });
+    describe('collectChanges', () => {
+        test('should report nothing while the observed versions stand', () => {
+            host.observe([ abs('src/index.ts') ]);
 
-    describe('getScriptSnapshot', () => {
-        test('should read through the cache without tracking the path', () => {
-            expect(host.getScriptSnapshot('src/new.ts')).toBe(entry.snapshot);
-            expect(host.tracked.has(abs('src/new.ts'))).toBe(false);
+            expect(host.collectChanges()).toEqual([]);
+        });
+
+        test('should report a file whose version moved, and only once', () => {
+            host.observe([ 'src/index.ts' ]);
+            snapshotMock.mockReturnValue({ ...entry, version: 3 });
+
+            expect(host.collectChanges()).toEqual([ abs('src/index.ts') ]);
+            expect(host.collectChanges()).toEqual([]);
+        });
+
+        test('should report a file the cache no longer holds', () => {
+            host.observe([ abs('src/index.ts') ]);
+            snapshotMock.mockReturnValue(undefined);
+
+            expect(host.collectChanges()).toEqual([ abs('src/index.ts') ]);
+        });
+
+        test('should forget the observed versions when the configuration is replaced', () => {
+            host.observe([ abs('src/index.ts') ]);
+            host.options = config;
+            snapshotMock.mockReturnValue({ ...entry, version: 3 });
+
+            expect(host.collectChanges()).toEqual([]);
         });
     });
 
@@ -191,55 +217,6 @@ describe('LanguageHostService', () => {
         test('should resolve a path the way the cache keys it', () => {
             expect(host.realpath('src/index.ts')).toBe(abs('src/index.ts'));
             expect(resolveMock).toHaveBeenCalledWith('src/index.ts');
-        });
-    });
-
-    describe('getCompilationSettings', () => {
-        test('should return the options the configuration carries', () => {
-            expect(host.getCompilationSettings()).toBe(config.options);
-        });
-    });
-
-    describe('getDefaultLibFileName', () => {
-        test('should name the lib matching the target', () => {
-            expect(host.getDefaultLibFileName({ target: ts.ScriptTarget.ES2020 }))
-                .toBe(ts.getDefaultLibFilePath({ target: ts.ScriptTarget.ES2020 }));
-        });
-    });
-
-    describe('filesystem hooks', () => {
-        test('should ask ts.sys whether a file exists', () => {
-            const fileExists = xJet.spyOn(ts.sys, 'fileExists').mockReturnValue(true);
-
-            expect(host.fileExists(abs('src/index.ts'))).toBe(true);
-            expect(fileExists).toHaveBeenCalledWith(abs('src/index.ts'));
-        });
-
-        test('should ask ts.sys whether a directory exists', () => {
-            const directoryExists = xJet.spyOn(ts.sys, 'directoryExists').mockReturnValue(false);
-
-            expect(host.directoryExists(abs('src'))).toBe(false);
-            expect(directoryExists).toHaveBeenCalledWith(abs('src'));
-        });
-
-        test('should hand the directory listing criteria to ts.sys', () => {
-            const readDirectory = xJet.spyOn(ts.sys, 'readDirectory').mockReturnValue([ 'src/index.ts' ]);
-
-            expect(host.readDirectory('src', [ '.ts' ], [ 'node_modules' ], undefined, 2)).toEqual([ 'src/index.ts' ]);
-            expect(readDirectory).toHaveBeenCalledWith('src', [ '.ts' ], [ 'node_modules' ], undefined, 2);
-        });
-
-        test('should ask ts.sys for the subdirectories of a path', () => {
-            const getDirectories = xJet.spyOn(ts.sys, 'getDirectories').mockReturnValue([ 'services' ]);
-
-            expect(host.getDirectories('src')).toEqual([ 'services' ]);
-            expect(getDirectories).toHaveBeenCalledWith('src');
-        });
-
-        test('should ask ts.sys for the working directory', () => {
-            xJet.spyOn(ts.sys, 'getCurrentDirectory').mockReturnValue(root);
-
-            expect(host.getCurrentDirectory()).toBe(root);
         });
     });
 });
